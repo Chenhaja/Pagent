@@ -76,7 +76,7 @@
 
 ## Phase 3：业务 nodes
 
-- [ ] 实现 `normalize_input` node。
+- [x] 实现 `normalize_input` node。
   - 验收标准：保留 `raw_input`，生成 `normalized_input`，不臆测技术内容。
   - 验证步骤：测试普通输入、多轮指代输入和空输入。
 - [ ] 实现 `intent_router` node。

@@ -109,7 +109,7 @@
 - [x] 实现 `workflow_service`。
   - 验收标准：封装权利要求生成 workflow，API 不直接调 node 或 tool。
   - 验证步骤：服务层单元测试覆盖成功和失败。
-- [ ] 实现 `translate_service`。
+- [x] 实现 `translate_service`。
   - 验收标准：封装翻译 adapter workflow。
   - 验证步骤：服务层测试 adapter 成功和失败。
 - [ ] 实现 claim revision service。

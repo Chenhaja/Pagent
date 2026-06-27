@@ -145,7 +145,7 @@
 - [x] 增加翻译 adapter E2E 测试。
   - 验收标准：fake external translation adapter 可完成闭环。
   - 验证步骤：运行翻译 API 集成测试。
-- [ ] 增加单条权利要求修改 E2E 测试。
+- [x] 增加单条权利要求修改 E2E 测试。
   - 验收标准：固定 claim set 可完成 patch、版本更新和重新校验。
   - 验证步骤：运行修改 API 集成测试。
 - [ ] 增加安全与合规测试。

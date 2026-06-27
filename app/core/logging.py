@@ -1,9 +1,28 @@
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import Settings
+
+
+MAX_LOG_MESSAGE_LENGTH = 205
+
+
+def sanitize_log_message(message: str) -> str:
+    """脱敏并截断日志消息。
+
+    Args:
+        message: 原始日志消息。
+
+    Returns:
+        隐去 API key 样式敏感值并限制长度后的消息。
+    """
+    sanitized = re.sub(r"sk-[A-Za-z0-9_-]+", "[REDACTED]", message)
+    if len(sanitized) > MAX_LOG_MESSAGE_LENGTH:
+        return f"{sanitized[:MAX_LOG_MESSAGE_LENGTH]}...[TRUNCATED]"
+    return sanitized
 
 
 class JsonLineFormatter(logging.Formatter):
@@ -38,7 +57,7 @@ class JsonLineFormatter(logging.Formatter):
             "environment": self.environment,
             "logger": record.name,
             "event": getattr(record, "event", "log_event"),
-            "message": record.getMessage(),
+            "message": sanitize_log_message(record.getMessage()),
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)

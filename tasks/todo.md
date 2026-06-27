@@ -22,7 +22,7 @@
 
 ## Phase 1：核心 schema 与 orchestrator 骨架
 
-- [ ] 定义 `WorkflowState`。
+- [x] 定义 `WorkflowState`。
   - 验收标准：包含 `raw_input`、`normalized_input`、`intent`、`technical_features`、`claim_plan`、`claims_draft`、`claim_versions`、`claim_patches`、`validation_report`、`trace` 等核心字段。
   - 验证步骤：运行 schema 单元测试。
 - [ ] 定义 `NodeResult`。

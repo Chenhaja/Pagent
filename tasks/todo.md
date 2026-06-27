@@ -76,7 +76,7 @@
 
 ## Phase 5：P1 改写、检索与 bounded ReAct
 
-- [ ] T5.1 normalize_input 支持基于对话历史的意图前改写
+- [x] T5.1 normalize_input 支持基于对话历史的意图前改写
   - 验收：结合 dialog_context 生成自包含 normalized_input；不覆盖 raw_input。
   - 验证：`pytest tests/test_normalize_input_node.py tests/test_agent_dispatch_service.py`
 

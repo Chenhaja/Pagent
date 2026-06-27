@@ -24,7 +24,7 @@ class NormalizeInputNode(Node):
         if not raw_input:
             return NodeResult.need_user_input(errors=["empty_raw_input"])
 
-        previous_input = state.dialog_context.get("last_user_input")
+        previous_input = state.dialog_context.get("last_user_input") or self._last_user_history_content(state)
         if previous_input:
             state.normalized_input = f"{' '.join(str(previous_input).split())} {raw_input}"
         else:
@@ -33,3 +33,11 @@ class NormalizeInputNode(Node):
             output={"normalized_input": state.normalized_input},
             trace_events=[{"event": "normalize_input_completed"}],
         )
+
+    def _last_user_history_content(self, state: WorkflowState) -> str | None:
+        """从对话历史中读取最近一条用户内容。"""
+        history = state.dialog_context.get("history", [])
+        for message in reversed(history):
+            if isinstance(message, dict) and message.get("role") == "user" and message.get("content"):
+                return str(message["content"])
+        return None

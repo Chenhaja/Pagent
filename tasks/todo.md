@@ -12,7 +12,7 @@
   - 验收：LLM 配置全部来自环境变量 / 默认值；脱敏默认开启；不泄露 API Key。
   - 验证：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
 
-- [ ] T1.2 实现 LLM Protocol、结构化错误和 Fake 兼容
+- [x] T1.2 实现 LLM Protocol、结构化错误和 Fake 兼容
   - 验收：Fake 与真实 client 调用形态一致；错误结构化；trace 不含敏感内容。
   - 验证：`pytest tests/test_llm_tool.py tests/test_security_compliance.py`
 

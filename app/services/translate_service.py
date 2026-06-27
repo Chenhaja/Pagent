@@ -5,7 +5,7 @@ from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.translate import TranslateNode
 from app.orchestrator.engine import Orchestrator
-from app.tools.translation_agent import FakeTranslationAgent
+from app.tools.translation_agent import FakeTranslationAgent, TranslationResult
 
 
 class TranslateService:
@@ -19,11 +19,12 @@ class TranslateService:
     """
 
     def __init__(self, agent: FakeTranslationAgent | None = None) -> None:
+        default_agent = FakeTranslationAgent(result=TranslationResult(translated_text="A control method."))
         self.orchestrator = Orchestrator(
             nodes={
                 "normalize_input": NormalizeInputNode(),
                 "intent_router": IntentRouterNode(),
-                "translate": TranslateNode(agent=agent),
+                "translate": TranslateNode(agent=agent or default_agent),
             }
         )
         self.workflow_def = ["normalize_input", "intent_router", "translate"]

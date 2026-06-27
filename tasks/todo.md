@@ -118,7 +118,7 @@
 - [x] 创建权利要求生成 API。
   - 验收标准：输入输出均有 Pydantic schema，返回初稿、校验报告、下一步建议。
   - 验证步骤：用 TestClient 跑成功、缺字段、校验失败。
-- [ ] 创建翻译 API。
+- [x] 创建翻译 API。
   - 验收标准：返回译文、术语表、trace；不要求真实翻译 agent。
   - 验证步骤：用 TestClient 跑 adapter 成功和失败。
 - [ ] 创建单条权利要求修改 API。

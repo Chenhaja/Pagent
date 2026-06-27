@@ -5,9 +5,9 @@ from app.nodes.claim_check import ClaimCheckNode
 from app.nodes.claim_generate import ClaimGenerateNode
 from app.nodes.claim_plan import ClaimPlanNode
 from app.nodes.feature_extract import FeatureExtractNode
-from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.orchestrator.engine import Orchestrator
+from app.orchestrator.workflow_defs import WorkflowRegistry
 from app.skills.claim_writing import ClaimWritingSkill
 from app.skills.feature_extraction import FeatureExtractionSkill
 
@@ -23,7 +23,6 @@ class WorkflowService:
         self.orchestrator = Orchestrator(
             nodes={
                 "normalize_input": NormalizeInputNode(),
-                "intent_router": IntentRouterNode(),
                 "feature_extract": FeatureExtractNode(
                     skill=FeatureExtractionSkill(fake_output={"required_features": ["采集传感器数据"]})
                 ),
@@ -43,14 +42,7 @@ class WorkflowService:
                 "claim_check": ClaimCheckNode(),
             }
         )
-        self.workflow_def = [
-            "normalize_input",
-            "intent_router",
-            "feature_extract",
-            "claim_plan",
-            "claim_generate",
-            "claim_check",
-        ]
+        self.workflow_def = WorkflowRegistry().get_workflow("claim_generation")
 
     def generate_claims(self, raw_input: str) -> dict[str, Any]:
         """生成权利要求草稿。

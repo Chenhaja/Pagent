@@ -4,6 +4,7 @@ from app.models.schemas import WorkflowState
 from app.nodes.claim_check import ClaimCheckNode
 from app.nodes.claim_revise import ClaimReviseNode
 from app.orchestrator.engine import Orchestrator
+from app.orchestrator.workflow_defs import WorkflowRegistry
 from app.skills.claim_writing import ClaimWritingSkill
 
 
@@ -32,7 +33,7 @@ class RevisionService:
                 "claim_check": ClaimCheckNode(),
             }
         )
-        self.workflow_def = ["claim_revise", "claim_check"]
+        self.workflow_def = WorkflowRegistry().get_workflow("claim_revision")
 
     def revise_claim(self, claims_draft: list[dict[str, Any]], user_feedback: str) -> dict[str, Any]:
         """修改单条权利要求。

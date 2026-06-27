@@ -130,7 +130,7 @@
 - [x] 补齐通用 dispatch / 统一 Agent 入口规格。
   - 验收标准：统一入口表达为 `normalize → intent_router → workflow selection → orchestrator → nodes`。
   - 验证步骤：检查 `SPEC.md` 与 `tasks/plan.md` 中统一 Agent 入口路径一致。
-- [ ] 明确显式业务 API 的 known intent 路径。
+- [x] 明确显式业务 API 的 known intent 路径。
   - 验收标准：显式业务 API 复用 concrete workflow，不承担全局意图识别职责。
   - 验证步骤：搜索“显式业务 API”和“known intent”，确认边界一致。
 - [ ] Phase 4 checkpoint。
@@ -183,9 +183,9 @@
 - [x] 定义最小 schema、`WorkflowState`、`NodeResult`、`SkillContext`。
 - [x] 实现 orchestrator 按 workflow_def 顺序执行 node。
 - [x] 实现 normalize 与 intent_router node。
-- [ ] 补齐 workflow registry / workflow_defs 集中注册规格和后续实现。
+- [x] 补齐 workflow registry / workflow_defs 集中注册规格和后续实现。
 - [x] 补齐统一 Agent 入口：`normalize → intent_router → workflow selection → orchestrator → nodes`。
-- [ ] 验证显式业务 API 与统一入口命中同一 concrete workflow。
+- [x] 验证显式业务 API 与统一入口命中同一 concrete workflow。
 
 ### Slice 2：权利要求生成完整路径
 
@@ -195,7 +195,7 @@
 - [x] 实现 claim generation service 和 API。
 - [x] 验证输入口语化技术方案后返回权利要求初稿、校验报告、下一步建议和 trace。
 - [x] 验证 fake LLM 输出缺字段时返回结构化错误。
-- [ ] 按修正后的 routing 架构验证显式 API 以 known intent 选择 `claim_generation` workflow。
+- [x] 按修正后的 routing 架构验证显式 API 以 known intent 选择 `claim_generation` workflow。
 
 ### Slice 3：翻译 adapter 完整路径
 
@@ -205,7 +205,7 @@
 - [x] 实现 translate service 和 API。
 - [x] 验证成功返回译文、术语表和 trace。
 - [x] 验证超时、空响应、字段缺失的错误边界。
-- [ ] 按修正后的 routing 架构验证显式 `/translate` 以 known intent 选择 `translation` workflow。
+- [x] 按修正后的 routing 架构验证显式 `/translate` 以 known intent 选择 `translation` workflow。
 
 ### Slice 4：单条权利要求修改完整路径
 

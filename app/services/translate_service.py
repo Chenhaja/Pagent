@@ -1,10 +1,10 @@
 from typing import Any
 
 from app.models.schemas import WorkflowState
-from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.translate import TranslateNode
 from app.orchestrator.engine import Orchestrator
+from app.orchestrator.workflow_defs import WorkflowRegistry
 from app.tools.translation_agent import FakeTranslationAgent, TranslationResult
 
 
@@ -23,11 +23,10 @@ class TranslateService:
         self.orchestrator = Orchestrator(
             nodes={
                 "normalize_input": NormalizeInputNode(),
-                "intent_router": IntentRouterNode(),
                 "translate": TranslateNode(agent=agent or default_agent),
             }
         )
-        self.workflow_def = ["normalize_input", "intent_router", "translate"]
+        self.workflow_def = WorkflowRegistry().get_workflow("translation")
 
     def translate(self, raw_input: str) -> dict[str, Any]:
         """执行专利文本翻译。

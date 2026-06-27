@@ -1,6 +1,87 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+class NodeResult(BaseModel):
+    """节点执行结果。
+
+    Args:
+        status: 节点执行状态。
+        output: 节点结构化输出。
+        errors: 错误列表。
+        next_node: 可选的下一节点名称。
+        requires_user_input: 是否需要用户补充输入。
+        trace_events: 节点产生的审计事件。
+
+    Returns:
+        可供 orchestrator 消费的节点执行结果。
+    """
+
+    status: Literal["success", "failed", "requires_user_input"]
+    output: dict[str, Any] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+    next_node: str | None = None
+    requires_user_input: bool = False
+    trace_events: list[dict[str, Any]] = Field(default_factory=list)
+
+    @classmethod
+    def success(
+        cls,
+        output: dict[str, Any] | None = None,
+        next_node: str | None = None,
+        trace_events: list[dict[str, Any]] | None = None,
+    ) -> "NodeResult":
+        """创建成功节点结果。
+
+        Args:
+            output: 节点结构化输出。
+            next_node: 可选的下一节点名称。
+            trace_events: 节点产生的审计事件。
+
+        Returns:
+            状态为 success 的节点结果。
+        """
+        return cls(
+            status="success",
+            output=output or {},
+            next_node=next_node,
+            trace_events=trace_events or [],
+        )
+
+    @classmethod
+    def failed(cls, errors: list[str]) -> "NodeResult":
+        """创建失败节点结果。
+
+        Args:
+            errors: 错误列表。
+
+        Returns:
+            状态为 failed 的节点结果。
+        """
+        return cls(status="failed", errors=errors)
+
+    @classmethod
+    def need_user_input(
+        cls,
+        output: dict[str, Any] | None = None,
+        errors: list[str] | None = None,
+    ) -> "NodeResult":
+        """创建需要用户补充输入的节点结果。
+
+        Args:
+            output: 面向用户的问题或补充信息说明。
+            errors: 当前缺失或无法继续的原因。
+
+        Returns:
+            状态为 requires_user_input 的节点结果。
+        """
+        return cls(
+            status="requires_user_input",
+            output=output or {},
+            errors=errors or [],
+            requires_user_input=True,
+        )
 
 
 class WorkflowState(BaseModel):

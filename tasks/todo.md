@@ -25,7 +25,7 @@
 - [x] 定义 `WorkflowState`。
   - 验收标准：包含 `raw_input`、`normalized_input`、`intent`、`technical_features`、`claim_plan`、`claims_draft`、`claim_versions`、`claim_patches`、`validation_report`、`trace` 等核心字段。
   - 验证步骤：运行 schema 单元测试。
-- [ ] 定义 `NodeResult`。
+- [x] 定义 `NodeResult`。
   - 验收标准：包含 `status`、`output`、`errors`、`next_node`、`requires_user_input`、`trace_events`。
   - 验证步骤：测试 success、failed、requires_user_input 三类结果。
 - [ ] 定义 `SkillContext`。

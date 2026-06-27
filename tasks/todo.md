@@ -37,7 +37,7 @@
 - [x] 实现 node 抽象协议。
   - 验收标准：所有 node 统一使用 `run(state) -> NodeResult` 或等价协议。
   - 验证步骤：用 fake node 验证接口一致。
-- [ ] 实现轻量 orchestrator。
+- [x] 实现轻量 orchestrator。
   - 验收标准：按 workflow_def 顺序执行 node，失败时中断或返回用户输入需求。
   - 验证步骤：用 fake node 测试顺序执行、失败中断、trace 写入。
 - [ ] Phase 1 checkpoint。

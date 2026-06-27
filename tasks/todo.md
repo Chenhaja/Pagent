@@ -64,7 +64,7 @@
 - [x] 创建 `feature_extraction` skill 占位。
   - 验收标准：输出结构化技术特征。
   - 验证步骤：用固定输入测试必要特征和附加特征字段。
-- [ ] 创建 `patent_translation` skill / adapter 上下文占位。
+- [x] 创建 `patent_translation` skill / adapter 上下文占位。
   - 验收标准：只组织术语上下文，不实现翻译推理。
   - 验证步骤：确认输出传给 external translation adapter。
 - [ ] 创建 `report_writing` skill 占位。

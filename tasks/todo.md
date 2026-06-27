@@ -30,13 +30,13 @@
   - 验收：`prompt_layers`、`safety_policy` 可用，旧测试兼容。
   - 验证：`pytest tests/test_skill_context.py`
 
-- [ ] T2.2 让 `feature_extraction` skill 构造 prompt 并调用 LLM 抽象
+- [x] T2.2 让 `feature_extraction` skill 构造 prompt 并调用 LLM 抽象
   - 验收：Fake LLM 返回结构化特征时写入 state；错误时结构化失败。
   - 验证：`pytest tests/test_feature_extraction_skill.py tests/test_feature_extract_node.py tests/test_llm_tool.py`
 
 ## Checkpoint 2
 
-- [ ] 至少一个 skill 完成 prompt + LLM 抽象 + schema 校验闭环。
+- [x] 至少一个 skill 完成 prompt + LLM 抽象 + schema 校验闭环。
 
 ## Phase 3：P0 编排闭环与统一入口
 

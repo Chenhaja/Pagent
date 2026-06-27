@@ -1,6 +1,7 @@
 from app.models.schemas import WorkflowState
 from app.nodes.feature_extract import FeatureExtractNode
 from app.skills.feature_extraction import FeatureExtractionSkill
+from app.tools.llm import FakeLLMClient
 
 
 def test_feature_extract_node_writes_technical_features() -> None:
@@ -26,6 +27,18 @@ def test_feature_extract_node_writes_technical_features() -> None:
 def test_feature_extract_node_returns_failed_when_skill_output_invalid() -> None:
     """技术特征提取 node 应捕获 fake skill 输出 schema 错误。"""
     skill = FeatureExtractionSkill(fake_output={"optional_features": ["过滤异常数据"]})
+    node = FeatureExtractNode(skill=skill)
+    state = WorkflowState(raw_input="", normalized_input="一种控制方法")
+
+    result = node.run(state)
+
+    assert result.status == "failed"
+    assert result.errors == ["feature_extract_failed"]
+
+
+def test_feature_extract_node_returns_failed_when_llm_returns_error() -> None:
+    """技术特征提取 node 应捕获 LLM 结构化错误。"""
+    skill = FeatureExtractionSkill(llm_client=FakeLLMClient(error="json_parse_failed"))
     node = FeatureExtractNode(skill=skill)
     state = WorkflowState(raw_input="", normalized_input="一种控制方法")
 

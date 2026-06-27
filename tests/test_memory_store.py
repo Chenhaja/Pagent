@@ -18,6 +18,34 @@ def test_local_memory_store_writes_and_reads_records_with_provenance() -> None:
     assert store.read("case") == [record]
 
 
+def test_local_memory_store_blocks_unconfirmed_model_output() -> None:
+    """未经校验与用户确认的模型输出不能写入长期记忆。"""
+    store = LocalMemoryStore()
+
+    record = store.write(
+        memory_type="case",
+        content={"summary": "模型推断的技术方案"},
+        provenance={"source": "model_output", "validated": "false", "user_confirmed": "false"},
+    )
+
+    assert record is None
+    assert store.read("case") == []
+
+
+def test_local_memory_store_allows_confirmed_model_output() -> None:
+    """已校验且用户确认的模型输出可以写入长期记忆。"""
+    store = LocalMemoryStore()
+
+    record = store.write(
+        memory_type="case",
+        content={"summary": "确认后的技术方案"},
+        provenance={"source": "model_output", "validated": "true", "user_confirmed": "true"},
+    )
+
+    assert record is not None
+    assert store.read("case") == [record]
+
+
 def test_local_memory_store_filters_by_memory_type() -> None:
     """本地 memory store 应按记忆类型过滤记录。"""
     store = LocalMemoryStore()

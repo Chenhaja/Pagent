@@ -35,7 +35,7 @@ class LocalMemoryStore:
     def __init__(self) -> None:
         self.records: list[MemoryRecord] = []
 
-    def write(self, memory_type: MemoryType, content: dict[str, Any], provenance: dict[str, str]) -> MemoryRecord:
+    def write(self, memory_type: MemoryType, content: dict[str, Any], provenance: dict[str, str]) -> MemoryRecord | None:
         """写入一条本地记忆。
 
         Args:
@@ -44,8 +44,10 @@ class LocalMemoryStore:
             provenance: 记忆来源和确认信息。
 
         Returns:
-            已写入的记忆记录。
+            通过 gating 时返回已写入记录;否则返回 None。
         """
+        if not self._can_write(provenance):
+            return None
         record = MemoryRecord(
             memory_id=str(uuid4()),
             memory_type=memory_type,
@@ -67,3 +69,9 @@ class LocalMemoryStore:
         if memory_type is None:
             return list(self.records)
         return [record for record in self.records if record.memory_type == memory_type]
+
+    def _can_write(self, provenance: dict[str, str]) -> bool:
+        """判断记忆写入是否通过安全 gating。"""
+        if provenance.get("source") != "model_output":
+            return True
+        return provenance.get("validated") == "true" and provenance.get("user_confirmed") == "true"

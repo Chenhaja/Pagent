@@ -98,13 +98,13 @@
   - 验收：会话、案件、用户画像、经验记忆可本地读写；写入带 provenance。
   - 验证：`pytest tests/test_memory_store.py`
 
-- [ ] T6.2 实现 memory gating
+- [x] T6.2 实现 memory gating
   - 验收：未经校验与用户确认的模型输出不能写入长期记忆。
   - 验证：`pytest tests/test_memory_store.py tests/test_security_compliance.py`
 
 ## Checkpoint 6
 
-- [ ] 记忆能力可用且只使用本地 store，不接外部 wiki。
+- [x] 记忆能力可用且只使用本地 store，不接外部 wiki。
 
 ## Phase 7：P2 安全、审计与目录对齐
 

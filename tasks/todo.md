@@ -84,13 +84,13 @@
   - 验收：本地检索可预测返回，结果带 provenance。
   - 验证：`pytest tests/test_retrieval_tool.py`
 
-- [ ] T5.3 QA 内 bounded ReAct 最小实现
+- [x] T5.3 QA 内 bounded ReAct 最小实现
   - 验收：限定 retrieval 工具、最大步数、token 预算、超时；输出 trace。
   - 验证：`pytest tests/test_qa_node.py tests/test_retrieval_tool.py`
 
 ## Checkpoint 5
 
-- [ ] P1 QA + 检索智能增强完成。
+- [x] P1 QA + 检索智能增强完成。
 
 ## Phase 6：P1 本地记忆与 provenance
 

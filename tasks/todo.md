@@ -82,7 +82,7 @@
 - [x] 实现 `intent_router` node。
   - 验收标准：路由到预定义 workflow，不动态拼装任意流程。
   - 验证步骤：测试权利要求生成、翻译、问答、未知意图。
-- [ ] 实现 `feature_extract` node。
+- [x] 实现 `feature_extract` node。
   - 验收标准：调用 feature skill，写入 `technical_features`。
   - 验证步骤：用 fake LLM 跑单元测试。
 - [ ] 实现 `claim_plan` node。

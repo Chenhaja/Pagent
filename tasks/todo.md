@@ -79,7 +79,7 @@
 - [x] 实现 `normalize_input` node。
   - 验收标准：保留 `raw_input`，生成 `normalized_input`，不臆测技术内容。
   - 验证步骤：测试普通输入、多轮指代输入和空输入。
-- [ ] 实现 `intent_router` node。
+- [x] 实现 `intent_router` node。
   - 验收标准：路由到预定义 workflow，不动态拼装任意流程。
   - 验证步骤：测试权利要求生成、翻译、问答、未知意图。
 - [ ] 实现 `feature_extract` node。

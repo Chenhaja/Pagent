@@ -36,5 +36,6 @@ def test_claim_generation_api_returns_structured_validation_failure() -> None:
     assert response.json()["detail"] == {
         "status": "requires_user_input",
         "errors": ["empty_raw_input"],
-        "message": "请补充技术方案内容。辅助初稿，不等同于专利代理师法律意见。",
+        "message": "请补充技术方案内容。",
+        "disclaimer": "辅助初稿，不等同于专利代理师法律意见。",
     }

@@ -41,9 +41,10 @@ class TranslateService:
         state = WorkflowState(raw_input=raw_input)
         result = self.orchestrator.run(state, self.workflow_def)
         if result.status != "success":
+            message = "请补充待翻译文本。" if "empty_raw_input" in result.errors else "翻译服务暂时不可用,请稍后重试。"
             return {
                 "status": result.status,
                 "errors": result.errors,
-                "message": "翻译服务暂时不可用,请稍后重试。",
+                "message": message,
             }
         return {"status": "success", **result.output, "workflow_trace": state.trace}

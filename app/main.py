@@ -8,6 +8,24 @@ from app.services.translate_service import TranslateService
 from app.services.workflow_service import WorkflowService
 
 app = FastAPI(title="Patent Agent")
+DISCLAIMER = "辅助初稿，不等同于专利代理师法律意见。"
+
+
+def build_error_detail(result: dict[str, Any]) -> dict[str, Any]:
+    """构造统一 API 错误响应。
+
+    Args:
+        result: 服务层返回的结构化错误结果。
+
+    Returns:
+        包含状态、错误列表、面向用户消息和免责声明的错误详情。
+    """
+    return {
+        "status": result["status"],
+        "errors": result.get("errors", []),
+        "message": result.get("message", "请求处理失败。"),
+        "disclaimer": DISCLAIMER,
+    }
 
 
 class ClaimGenerationRequest(BaseModel):
@@ -147,9 +165,8 @@ def generate_claims(request: ClaimGenerationRequest) -> dict[str, Any]:
     """
     result = WorkflowService().generate_claims(request.raw_input)
     if result["status"] != "success":
-        result["message"] = f"{result['message']}辅助初稿，不等同于专利代理师法律意见。"
-        raise HTTPException(status_code=400, detail=result)
-    result["disclaimer"] = "辅助初稿，不等同于专利代理师法律意见。"
+        raise HTTPException(status_code=400, detail=build_error_detail(result))
+    result["disclaimer"] = DISCLAIMER
     return result
 
 
@@ -168,19 +185,20 @@ def revise_claim(request: ClaimRevisionRequest) -> dict[str, Any]:
     """
     result = RevisionService().revise_claim(request.claims_draft, request.user_feedback)
     if result["status"] != "success":
-        result["message"] = f"{result['message']}辅助初稿，不等同于专利代理师法律意见。"
-        raise HTTPException(status_code=400, detail=result)
+        raise HTTPException(status_code=400, detail=build_error_detail(result))
     if result["validation_report"]["reference_errors"]:
         raise HTTPException(
             status_code=400,
-            detail={
-                "status": "failed",
-                "errors": result["validation_report"]["reference_errors"],
-                "message": "权利要求引用关系需要修正。辅助初稿，不等同于专利代理师法律意见。",
-            },
+            detail=build_error_detail(
+                {
+                    "status": "failed",
+                    "errors": result["validation_report"]["reference_errors"],
+                    "message": "权利要求引用关系需要修正。",
+                }
+            ),
         )
     result["diff"] = result.pop("patch")
-    result["disclaimer"] = "辅助初稿，不等同于专利代理师法律意见。"
+    result["disclaimer"] = DISCLAIMER
     return result
 
 
@@ -199,7 +217,6 @@ def translate(request: TranslateRequest) -> dict[str, Any]:
     """
     result = TranslateService().translate(request.raw_input)
     if result["status"] != "success":
-        result["message"] = f"{result['message']}辅助初稿，不等同于专利代理师法律意见。"
-        raise HTTPException(status_code=400, detail=result)
-    result["disclaimer"] = "辅助初稿，不等同于专利代理师法律意见。"
+        raise HTTPException(status_code=400, detail=build_error_detail(result))
+    result["disclaimer"] = DISCLAIMER
     return result

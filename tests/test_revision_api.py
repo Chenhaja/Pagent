@@ -39,7 +39,8 @@ def test_revision_api_returns_structured_error_when_target_missing() -> None:
     assert response.json()["detail"] == {
         "status": "failed",
         "errors": ["target_claim_not_found:2"],
-        "message": "未找到要修改的权利要求。辅助初稿，不等同于专利代理师法律意见。",
+        "message": "未找到要修改的权利要求。",
+        "disclaimer": "辅助初稿，不等同于专利代理师法律意见。",
     }
 
 
@@ -62,5 +63,6 @@ def test_revision_api_returns_structured_error_when_reference_invalid() -> None:
     assert response.json()["detail"] == {
         "status": "failed",
         "errors": ["claim_2_references_missing_claim_3"],
-        "message": "权利要求引用关系需要修正。辅助初稿，不等同于专利代理师法律意见。",
+        "message": "权利要求引用关系需要修正。",
+        "disclaimer": "辅助初稿，不等同于专利代理师法律意见。",
     }

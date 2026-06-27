@@ -49,7 +49,7 @@
 - [x] 创建 LLM tool adapter 接口和 fake implementation。
   - 验收标准：业务代码不直接依赖真实 LLM。
   - 验证步骤：测试 fake response 可被解析，错误 response 可被捕获。
-- [ ] 创建外部翻译 agent adapter 接口和 fake implementation。
+- [x] 创建外部翻译 agent adapter 接口和 fake implementation。
   - 验收标准：系统只定义 adapter，不实现翻译 agent 内部逻辑。
   - 验证步骤：测试成功、超时、字段缺失三类 adapter 结果。
 - [ ] 创建 terminology tool 占位接口。

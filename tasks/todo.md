@@ -91,7 +91,7 @@
 - [x] 实现 `claim_generate` node。
   - 验收标准：调用 `claim_writing` skill，输出 `claims_draft`。
   - 验证步骤：测试正常生成和 schema 校验失败。
-- [ ] 实现 `claim_check` node。
+- [x] 实现 `claim_check` node。
   - 验收标准：调用 validators，输出 `validation_report`。
   - 验证步骤：测试合法 claim set、非法引用、术语不一致。
 - [ ] 实现 `translate` node。

@@ -61,7 +61,7 @@
 - [x] 创建 `claim_writing` skill 占位。
   - 验收标准：生成和修改都能复用同一 skill，输出符合权利要求 schema。
   - 验证步骤：分别用 `claim_generate` 和 `claim_revise` 上下文调用 fake 输出。
-- [ ] 创建 `feature_extraction` skill 占位。
+- [x] 创建 `feature_extraction` skill 占位。
   - 验收标准：输出结构化技术特征。
   - 验证步骤：用固定输入测试必要特征和附加特征字段。
 - [ ] 创建 `patent_translation` skill / adapter 上下文占位。

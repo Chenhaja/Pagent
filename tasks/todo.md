@@ -112,7 +112,7 @@
 - [x] 实现 `translate_service`。
   - 验收标准：封装翻译 adapter workflow。
   - 验证步骤：服务层测试 adapter 成功和失败。
-- [ ] 实现 claim revision service。
+- [x] 实现 claim revision service。
   - 验收标准：封装单条权利要求修改 workflow 和版本链处理。
   - 验证步骤：测试 patch 应用和版本号更新。
 - [ ] 创建权利要求生成 API。

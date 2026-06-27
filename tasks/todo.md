@@ -67,7 +67,7 @@
 - [x] 创建 `patent_translation` skill / adapter 上下文占位。
   - 验收标准：只组织术语上下文，不实现翻译推理。
   - 验证步骤：确认输出传给 external translation adapter。
-- [ ] 创建 `report_writing` skill 占位。
+- [x] 创建 `report_writing` skill 占位。
   - 验收标准：声明复用 `technical_features`、`claims_draft`、`validation_report`。
   - 验证步骤：测试缺少关键输入时返回明确错误。
 - [ ] Phase 2 checkpoint。

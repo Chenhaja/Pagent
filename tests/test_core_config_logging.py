@@ -12,7 +12,47 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.service_name == "patent-agent"
     assert settings.environment == "local"
     assert settings.llm_api_key is None
+    assert settings.llm_base_url is None
+    assert settings.llm_model == ""
+    assert settings.llm_temperature == 0.2
+    assert settings.llm_max_tokens == 2048
+    assert settings.llm_timeout == 30.0
+    assert settings.llm_retry_count == 2
+    assert settings.llm_retry_backoff == 0.5
+    assert settings.allow_cloud_sensitive_content is False
+    assert settings.redaction_enabled is True
     assert settings.external_translation_agent_url is None
+
+
+def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
+    """LLM 配置应从环境变量读取。"""
+    monkeypatch.setenv("PAGENT_LLM_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setenv("PAGENT_LLM_MODEL", "test-model")
+    monkeypatch.setenv("PAGENT_LLM_API_KEY", "sk-test-secret")
+    monkeypatch.setenv("PAGENT_LLM_TEMPERATURE", "0.3")
+    monkeypatch.setenv("PAGENT_LLM_MAX_TOKENS", "1024")
+    monkeypatch.setenv("PAGENT_LLM_TIMEOUT", "12.5")
+    monkeypatch.setenv("PAGENT_LLM_RETRY_COUNT", "4")
+    monkeypatch.setenv("PAGENT_LLM_RETRY_BACKOFF", "0.75")
+    monkeypatch.setenv("PAGENT_LLM_CHEAP_MODEL", "cheap-model")
+    monkeypatch.setenv("PAGENT_LLM_STRONG_MODEL", "strong-model")
+    monkeypatch.setenv("PAGENT_ALLOW_CLOUD_SENSITIVE_CONTENT", "true")
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.llm_base_url == "https://llm.example.test/v1"
+    assert settings.llm_model == "test-model"
+    assert settings.llm_api_key == "sk-test-secret"
+    assert settings.llm_temperature == 0.3
+    assert settings.llm_max_tokens == 1024
+    assert settings.llm_timeout == 12.5
+    assert settings.llm_retry_count == 4
+    assert settings.llm_retry_backoff == 0.75
+    assert settings.llm_cheap_model == "cheap-model"
+    assert settings.llm_strong_model == "strong-model"
+    assert settings.allow_cloud_sensitive_content is True
+    get_settings.cache_clear()
 
 
 def test_settings_do_not_expose_secret_values() -> None:

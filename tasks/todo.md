@@ -8,7 +8,7 @@
 
 ## Phase 1：P0 LLM 调用闭环最小切片
 
-- [ ] T1.1 扩展 LLM 配置与安全默认值
+- [x] T1.1 扩展 LLM 配置与安全默认值
   - 验收：LLM 配置全部来自环境变量 / 默认值；脱敏默认开启；不泄露 API Key。
   - 验证：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
 

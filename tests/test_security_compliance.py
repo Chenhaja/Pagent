@@ -1,7 +1,9 @@
 import json
 import logging
 
+from app.core.config import Settings
 from app.core.logging import JsonLineFormatter
+from app.core.security import redact_sensitive_text, should_send_full_content
 from app.services.workflow_service import WorkflowService
 
 
@@ -50,3 +52,24 @@ def test_failed_workflow_does_not_write_persistent_memory() -> None:
     assert result["status"] == "requires_user_input"
     assert "memory" not in result
     assert "case_store" not in result
+
+
+def test_security_defaults_do_not_send_full_sensitive_content() -> None:
+    """默认安全策略不允许向云模型发送完整敏感材料。"""
+    settings = Settings()
+
+    assert should_send_full_content(settings, user_explicitly_allowed=False) is False
+    assert should_send_full_content(settings, user_explicitly_allowed=True) is False
+    assert should_send_full_content(Settings(allow_cloud_sensitive_content=True), user_explicitly_allowed=True) is True
+
+
+def test_redact_sensitive_text_masks_api_keys_and_truncates_long_text() -> None:
+    """脱敏工具应隐藏密钥并截断长文本。"""
+    text = "API Key: sk-test-secret " + "技术交底" * 200
+
+    redacted = redact_sensitive_text(text, max_length=80)
+
+    assert "sk-test-secret" not in redacted
+    assert "[REDACTED]" in redacted
+    assert redacted.endswith("...[TRUNCATED]")
+    assert len(redacted) <= 95

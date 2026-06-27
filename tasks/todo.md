@@ -142,7 +142,7 @@
 - [x] 增加权利要求生成 E2E 测试。
   - 验收标准：口语化技术方案可生成 claim draft、validation report 和 trace。
   - 验证步骤：运行对应集成测试。
-- [ ] 增加翻译 adapter E2E 测试。
+- [x] 增加翻译 adapter E2E 测试。
   - 验收标准：fake external translation adapter 可完成闭环。
   - 验证步骤：运行翻译 API 集成测试。
 - [ ] 增加单条权利要求修改 E2E 测试。

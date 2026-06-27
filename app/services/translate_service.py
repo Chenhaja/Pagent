@@ -19,7 +19,12 @@ class TranslateService:
     """
 
     def __init__(self, agent: FakeTranslationAgent | None = None) -> None:
-        default_agent = FakeTranslationAgent(result=TranslationResult(translated_text="A control method."))
+        default_agent = FakeTranslationAgent(
+            result=TranslationResult(
+                translated_text="A control method.",
+                trace=[{"event": "fake_translation_completed"}],
+            )
+        )
         self.orchestrator = Orchestrator(
             nodes={
                 "normalize_input": NormalizeInputNode(),

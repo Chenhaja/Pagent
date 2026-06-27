@@ -133,7 +133,7 @@
 - [x] 明确显式业务 API 的 known intent 路径。
   - 验收标准：显式业务 API 复用 concrete workflow，不承担全局意图识别职责。
   - 验证步骤：搜索“显式业务 API”和“known intent”，确认边界一致。
-- [ ] Phase 4 checkpoint。
+- [x] Phase 4 checkpoint。
   - 验收标准：显式业务 API 闭环状态清晰；通用 dispatch / Agent entry 规格清晰；routing 不下沉到 service/server。
   - 验证步骤：运行 API 集成测试，并检查文档中没有把 `intent_router` 放进具体业务 workflow 内部的主路径。
 

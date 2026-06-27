@@ -97,7 +97,7 @@
 - [x] 实现 `translate` node。
   - 验收标准：调用外部翻译 adapter，返回译文、术语表、trace。
   - 验证步骤：测试成功、超时、空响应、字段缺失。
-- [ ] 实现 `claim_revise` node。
+- [x] 实现 `claim_revise` node。
   - 验收标准：复用 `claim_writing` skill，默认只修改目标权利要求，输出结构化 patch。
   - 验证步骤：测试目标 claim 存在、不存在、需要联动修改三类情况。
 - [ ] Phase 3 checkpoint。

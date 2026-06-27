@@ -31,7 +31,7 @@
 - [x] 定义 `SkillContext`。
   - 验收标准：可表达 `task_type`、`state_snapshot`、`domain_rules`、`output_schema`、`examples`。
   - 验证步骤：测试 skill 调用上下文序列化。
-- [ ] 定义权利要求相关模型：`Claim`、`ClaimSet`、`ClaimPatch`、`ValidationReport`。
+- [x] 定义权利要求相关模型：`Claim`、`ClaimSet`、`ClaimPatch`、`ValidationReport`。
   - 验收标准：可表达生成、修改、版本链和校验报告。
   - 验证步骤：测试正常样例和字段缺失样例。
 - [ ] 实现 node 抽象协议。

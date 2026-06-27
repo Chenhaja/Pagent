@@ -1,6 +1,109 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class Claim(BaseModel):
+    """单条权利要求。
+
+    Args:
+        number: 权利要求编号,从 1 开始。
+        claim_type: 权利要求类型,如 independent 或 dependent。
+        text: 权利要求正文。
+        references: 引用的权利要求编号列表。
+        terms: 关键术语列表。
+        source_trace: 生成或修改来源 trace。
+
+    Returns:
+        单条权利要求模型。
+    """
+
+    number: int = Field(gt=0)
+    claim_type: Literal["independent", "dependent"]
+    text: str
+    references: list[int] = Field(default_factory=list)
+    terms: list[str] = Field(default_factory=list)
+    source_trace: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        """校验权利要求正文非空。
+
+        Args:
+            value: 权利要求正文。
+
+        Returns:
+            去除首尾空白后的正文。
+
+        Raises:
+            ValueError: 当正文为空时抛出。
+        """
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("claim text must not be empty")
+        return stripped
+
+
+class ClaimSet(BaseModel):
+    """权利要求集合。
+
+    Args:
+        version: 权利要求版本号。
+        claims: 权利要求列表。
+
+    Returns:
+        带版本号的权利要求集合。
+    """
+
+    version: str
+    claims: list[Claim] = Field(default_factory=list)
+
+
+class ClaimPatch(BaseModel):
+    """权利要求修改 patch。
+
+    Args:
+        target_claim_number: 目标权利要求编号。
+        operation: 修改操作类型。
+        before_text: 修改前文本。
+        after_text: 修改后文本。
+        impact_scope: 受影响的权利要求编号列表。
+        risk_notes: 修改风险说明。
+
+    Returns:
+        单次权利要求修改 patch。
+    """
+
+    target_claim_number: int = Field(gt=0)
+    operation: str
+    before_text: str
+    after_text: str
+    impact_scope: list[int] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+
+
+class ValidationReport(BaseModel):
+    """权利要求校验报告。
+
+    Args:
+        passed: 是否通过基础校验。
+        reference_errors: 引用关系错误列表。
+        terminology_errors: 术语一致性错误列表。
+        missing_required_features: 缺失必要技术特征列表。
+        clarity_warnings: 清楚性风险提示。
+        risk_notes: 综合风险提示。
+
+    Returns:
+        权利要求基础校验报告。
+    """
+
+    passed: bool = True
+    reference_errors: list[str] = Field(default_factory=list)
+    terminology_errors: list[str] = Field(default_factory=list)
+    missing_required_features: list[str] = Field(default_factory=list)
+    clarity_warnings: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
 
 
 class NodeResult(BaseModel):

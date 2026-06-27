@@ -55,7 +55,7 @@
 - [x] 创建 terminology tool 占位接口。
   - 验收标准：只做术语查询 / 规范化边界，不读写 workflow state。
   - 验证步骤：用固定术语表测试命中和未命中。
-- [ ] 创建 validators：引用关系、术语一致性、基础字段完整性。
+- [x] 创建 validators：引用关系、术语一致性、基础字段完整性。
   - 验收标准：validators 无状态，可独立调用。
   - 验证步骤：测试非法引用、术语不一致和缺字段。
 - [ ] 创建 `claim_writing` skill 占位。

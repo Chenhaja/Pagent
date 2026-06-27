@@ -28,7 +28,7 @@
 - [x] 定义 `NodeResult`。
   - 验收标准：包含 `status`、`output`、`errors`、`next_node`、`requires_user_input`、`trace_events`。
   - 验证步骤：测试 success、failed、requires_user_input 三类结果。
-- [ ] 定义 `SkillContext`。
+- [x] 定义 `SkillContext`。
   - 验收标准：可表达 `task_type`、`state_snapshot`、`domain_rules`、`output_schema`、`examples`。
   - 验证步骤：测试 skill 调用上下文序列化。
 - [ ] 定义权利要求相关模型：`Claim`、`ClaimSet`、`ClaimPatch`、`ValidationReport`。

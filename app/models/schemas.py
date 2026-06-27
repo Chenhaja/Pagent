@@ -84,6 +84,41 @@ class NodeResult(BaseModel):
         )
 
 
+class SkillContext(BaseModel):
+    """Skill 调用上下文。
+
+    Args:
+        task_type: skill 任务类型,如 claim_generate 或 claim_revise。
+        state_snapshot: 调用 skill 所需的状态快照。
+        domain_rules: 领域规则和约束。
+        output_schema: 期望输出 schema 描述。
+        examples: few-shot 示例列表。
+
+    Returns:
+        可传入 skill 的结构化上下文。
+    """
+
+    task_type: str
+    state_snapshot: dict[str, Any] = Field(default_factory=dict)
+    domain_rules: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+    examples: list[dict[str, Any]] = Field(default_factory=list)
+
+    def to_payload(self) -> dict[str, Any]:
+        """转换为 skill 调用载荷。
+
+        Returns:
+            包含任务类型、状态快照、领域规则、输出 schema 和示例的字典。
+        """
+        return {
+            "task_type": self.task_type,
+            "state_snapshot": self.state_snapshot,
+            "domain_rules": self.domain_rules,
+            "output_schema": self.output_schema,
+            "examples": self.examples,
+        }
+
+
 class WorkflowState(BaseModel):
     """工作流全局状态。
 

@@ -34,7 +34,7 @@
 - [x] 定义权利要求相关模型：`Claim`、`ClaimSet`、`ClaimPatch`、`ValidationReport`。
   - 验收标准：可表达生成、修改、版本链和校验报告。
   - 验证步骤：测试正常样例和字段缺失样例。
-- [ ] 实现 node 抽象协议。
+- [x] 实现 node 抽象协议。
   - 验收标准：所有 node 统一使用 `run(state) -> NodeResult` 或等价协议。
   - 验证步骤：用 fake node 验证接口一致。
 - [ ] 实现轻量 orchestrator。

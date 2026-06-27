@@ -94,7 +94,7 @@
 - [x] 实现 `claim_check` node。
   - 验收标准：调用 validators，输出 `validation_report`。
   - 验证步骤：测试合法 claim set、非法引用、术语不一致。
-- [ ] 实现 `translate` node。
+- [x] 实现 `translate` node。
   - 验收标准：调用外部翻译 adapter，返回译文、术语表、trace。
   - 验证步骤：测试成功、超时、空响应、字段缺失。
 - [ ] 实现 `claim_revise` node。

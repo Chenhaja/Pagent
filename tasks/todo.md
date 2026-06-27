@@ -40,7 +40,7 @@
 - [x] 实现轻量 orchestrator。
   - 验收标准：按 workflow_def 顺序执行 node，失败时中断或返回用户输入需求。
   - 验证步骤：用 fake node 测试顺序执行、失败中断、trace 写入。
-- [ ] Phase 1 checkpoint。
+- [x] Phase 1 checkpoint。
   - 验收标准：协议层可支撑后续所有 node。
   - 验证步骤：运行 schema 和 orchestrator 单元测试。
 

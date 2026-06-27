@@ -1,3 +1,25 @@
+from pydantic import BaseModel, Field
+
+
+class WorkflowDef(BaseModel):
+    """预定义 workflow 元数据。
+
+    Args:
+        intent: workflow 对应的标准意图。
+        nodes: 确定性节点顺序。
+        start_node: 起始节点名称。
+        max_loop_count: 最大局部回环次数。
+
+    Returns:
+        可供 orchestrator 执行的 workflow 定义。
+    """
+
+    intent: str
+    nodes: list[str]
+    start_node: str
+    max_loop_count: int = Field(default=0, ge=0)
+
+
 class WorkflowRegistry:
     """预定义 workflow 模板注册表。
 
@@ -7,13 +29,34 @@ class WorkflowRegistry:
 
     def __init__(self) -> None:
         self.workflow_defs = {
-            "claim_generation": ["normalize_input", "feature_extract", "claim_plan", "claim_generate", "claim_check"],
-            "translation": ["normalize_input", "translate"],
-            "claim_revision": ["claim_revise", "claim_check"],
+            "claim_generation": WorkflowDef(
+                intent="claim_generation",
+                nodes=["normalize_input", "completeness_gate", "feature_extract", "claim_plan", "claim_generate", "claim_check"],
+                start_node="normalize_input",
+                max_loop_count=2,
+            ),
+            "translation": WorkflowDef(
+                intent="translation",
+                nodes=["normalize_input", "translate"],
+                start_node="normalize_input",
+                max_loop_count=0,
+            ),
+            "claim_revision": WorkflowDef(
+                intent="claim_revision",
+                nodes=["claim_revise", "claim_check"],
+                start_node="claim_revise",
+                max_loop_count=1,
+            ),
+            "qa": WorkflowDef(
+                intent="qa",
+                nodes=["normalize_input", "qa"],
+                start_node="normalize_input",
+                max_loop_count=1,
+            ),
         }
 
     def get_workflow(self, intent: str) -> list[str]:
-        """按 intent 返回预定义 workflow。
+        """按 intent 返回预定义 workflow 节点序列。
 
         Args:
             intent: 已识别或显式 API 提供的 known intent。
@@ -21,4 +64,21 @@ class WorkflowRegistry:
         Returns:
             节点名称序列;未知 intent 返回空列表。
         """
-        return list(self.workflow_defs.get(intent, []))
+        workflow_def = self.workflow_defs.get(intent)
+        if workflow_def is None:
+            return []
+        return list(workflow_def.nodes)
+
+    def get_workflow_def(self, intent: str) -> WorkflowDef:
+        """按 intent 返回带元数据的 workflow 定义。
+
+        Args:
+            intent: 已识别或显式 API 提供的 known intent。
+
+        Returns:
+            workflow 元数据;未知 intent 返回空定义。
+        """
+        workflow_def = self.workflow_defs.get(intent)
+        if workflow_def is None:
+            return WorkflowDef(intent=intent, nodes=[], start_node="", max_loop_count=0)
+        return workflow_def.model_copy(deep=True)

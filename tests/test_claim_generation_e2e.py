@@ -22,6 +22,7 @@ def test_claim_generation_e2e_returns_draft_report_and_trace() -> None:
     assert payload["validation_report"]["passed"] is True
     assert [event["event"] for event in payload["trace"]] == [
         "normalize_input_completed",
+        "completeness_gate_completed",
         "feature_extract_completed",
         "claim_plan_completed",
         "claim_generate_completed",

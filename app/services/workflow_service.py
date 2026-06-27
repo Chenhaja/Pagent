@@ -4,6 +4,7 @@ from app.models.schemas import WorkflowState
 from app.nodes.claim_check import ClaimCheckNode
 from app.nodes.claim_generate import ClaimGenerateNode
 from app.nodes.claim_plan import ClaimPlanNode
+from app.nodes.completeness_gate import CompletenessGateNode
 from app.nodes.feature_extract import FeatureExtractNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.orchestrator.engine import Orchestrator
@@ -23,6 +24,7 @@ class WorkflowService:
         self.orchestrator = Orchestrator(
             nodes={
                 "normalize_input": NormalizeInputNode(),
+                "completeness_gate": CompletenessGateNode(),
                 "feature_extract": FeatureExtractNode(
                     skill=FeatureExtractionSkill(fake_output={"required_features": ["采集传感器数据"]})
                 ),

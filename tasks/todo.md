@@ -40,7 +40,7 @@
 
 ## Phase 3：P0 编排闭环与统一入口
 
-- [ ] T3.1 元数据化 WorkflowRegistry
+- [x] T3.1 元数据化 WorkflowRegistry
   - 验收：claim_generation / translation / claim_revision / qa 均可查询；claim_generation 包含 completeness_gate。
   - 验证：`pytest tests/test_workflow_registry.py tests/test_phase3_workflows.py`
 

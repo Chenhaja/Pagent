@@ -1,4 +1,4 @@
-from app.orchestrator.workflow_defs import WorkflowRegistry
+from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 
 
 def test_workflow_registry_returns_known_intent_workflow_defs() -> None:
@@ -7,6 +7,7 @@ def test_workflow_registry_returns_known_intent_workflow_defs() -> None:
 
     assert registry.get_workflow("claim_generation") == [
         "normalize_input",
+        "completeness_gate",
         "feature_extract",
         "claim_plan",
         "claim_generate",
@@ -21,3 +22,24 @@ def test_workflow_registry_returns_empty_for_unknown_intent() -> None:
     registry = WorkflowRegistry()
 
     assert registry.get_workflow("unknown") == []
+
+
+def test_workflow_registry_returns_metadata_definitions() -> None:
+    """workflow registry 应返回带元数据的 workflow 定义。"""
+    registry = WorkflowRegistry()
+
+    workflow_def = registry.get_workflow_def("claim_generation")
+
+    assert isinstance(workflow_def, WorkflowDef)
+    assert workflow_def.intent == "claim_generation"
+    assert workflow_def.start_node == "normalize_input"
+    assert workflow_def.max_loop_count == 2
+    assert "completeness_gate" in workflow_def.nodes
+
+
+def test_workflow_registry_registers_qa_workflow() -> None:
+    """QA intent 应注册为可执行 workflow。"""
+    registry = WorkflowRegistry()
+
+    assert registry.get_workflow("qa") == ["normalize_input", "qa"]
+    assert registry.get_workflow_def("qa").start_node == "normalize_input"

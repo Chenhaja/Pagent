@@ -80,7 +80,7 @@
   - 验收：结合 dialog_context 生成自包含 normalized_input；不覆盖 raw_input。
   - 验证：`pytest tests/test_normalize_input_node.py tests/test_agent_dispatch_service.py`
 
-- [ ] T5.2 增加 retrieval tool mock / 本地接口
+- [x] T5.2 增加 retrieval tool mock / 本地接口
   - 验收：本地检索可预测返回，结果带 provenance。
   - 验证：`pytest tests/test_retrieval_tool.py`
 

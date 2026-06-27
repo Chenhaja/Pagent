@@ -70,7 +70,7 @@
 - [x] 创建 `report_writing` skill 占位。
   - 验收标准：声明复用 `technical_features`、`claims_draft`、`validation_report`。
   - 验证步骤：测试缺少关键输入时返回明确错误。
-- [ ] Phase 2 checkpoint。
+- [x] Phase 2 checkpoint。
   - 验收标准：tool、skill、validator 边界清晰且可替换。
   - 验证步骤：运行工具层和 skill 层单元测试。
 

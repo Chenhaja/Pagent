@@ -35,7 +35,7 @@ def test_intent_router_routes_question_answering() -> None:
 
     assert result.status == "success"
     assert state.intent == "qa"
-    assert result.next_node == "report_write"
+    assert result.next_node == "qa"
 
 
 def test_intent_router_requires_user_input_for_unknown_intent() -> None:

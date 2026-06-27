@@ -42,4 +42,6 @@ def test_workflow_registry_registers_qa_workflow() -> None:
     registry = WorkflowRegistry()
 
     assert registry.get_workflow("qa") == ["normalize_input", "qa"]
-    assert registry.get_workflow_def("qa").start_node == "normalize_input"
+    workflow_def = registry.get_workflow_def("qa")
+    assert workflow_def.start_node == "normalize_input"
+    assert workflow_def.nodes[-1] == "qa"

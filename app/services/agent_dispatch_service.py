@@ -3,6 +3,8 @@ from typing import Any
 from app.models.schemas import WorkflowState
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
+from app.nodes.qa import QANode
+from app.orchestrator.engine import Orchestrator
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 from app.services.revision_service import RevisionService
 from app.services.translate_service import TranslateService
@@ -69,8 +71,26 @@ class AgentDispatchService:
                 workflow_def=remaining_nodes,
             )
             return {"intent": state.intent, "workflow": "claim_revision", **result}
+        if state.intent == "qa":
+            result = self._run_qa(state, remaining_nodes)
+            return {"intent": state.intent, "workflow": "qa", **result}
 
         return {"status": "requires_user_input", "errors": ["unknown_intent"], "message": "请补充要办理的专利任务类型。"}
+
+    def _run_qa(self, state: WorkflowState, workflow_def: list[str]) -> dict[str, Any]:
+        """执行 QA workflow 并转换为服务响应。
+
+        Args:
+            state: 已完成 normalize 和 intent_router 的 workflow 状态。
+            workflow_def: 从 QA 节点开始的节点序列。
+
+        Returns:
+            QA 成功输出或结构化失败结果。
+        """
+        result = Orchestrator(nodes={"qa": QANode()}).run(state, workflow_def)
+        if result.status != "success":
+            return {"status": result.status, "errors": result.errors, "message": "问答服务暂时不可用,请稍后重试。"}
+        return {"status": "success", **result.output, "trace": state.trace}
 
     def _remaining_nodes_after(self, workflow_def: WorkflowDef, next_node: str | None) -> list[str]:
         """根据 intent_router 的下一节点裁剪待执行节点序列。

@@ -24,7 +24,7 @@ class IntentRouterNode(Node):
         routes = [
             ("translation", "translate", ["翻译", "译文"]),
             ("claim_revision", "claim_revise", ["修改", "修订"]),
-            ("qa", "report_write", ["风险", "问题", "说明", "？", "?"]),
+            ("qa", "qa", ["风险", "问题", "说明", "？", "?"]),
             ("claim_generation", "completeness_gate", ["权利要求", "撰写", "生成"]),
         ]
         for intent, next_node, keywords in routes:

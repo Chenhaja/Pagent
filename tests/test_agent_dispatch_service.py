@@ -50,6 +50,19 @@ def test_agent_dispatch_routes_claim_revision_workflow() -> None:
     assert result["claim"]["text"] == "一种改进的控制方法。"
 
 
+def test_agent_dispatch_routes_qa_workflow() -> None:
+    """统一 Agent 入口应路由到 QA workflow。"""
+    service = AgentDispatchService()
+
+    result = service.dispatch("这个权利要求有什么风险？")
+
+    assert result["status"] == "success"
+    assert result["intent"] == "qa"
+    assert result["workflow"] == "qa"
+    assert result["qa_result"]["answer"] == "该问题需要结合权利要求文本和技术方案初步判断。"
+
+
+
 def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:
     """统一 Agent 入口遇到未知意图时应返回补充输入提示。"""
     service = AgentDispatchService()

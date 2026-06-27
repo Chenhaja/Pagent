@@ -106,6 +106,27 @@ class ValidationReport(BaseModel):
     risk_notes: list[str] = Field(default_factory=list)
 
 
+class PatentQAResult(BaseModel):
+    """专利问答结构化结果。
+
+    Args:
+        answer: 面向用户的初步答复。
+        basis: 生成答复所依据的输入要点。
+        risk_notes: 风险提示。
+        next_steps: 建议用户继续补充或确认的事项。
+        disclaimer_hint: 辅助问答免责声明提示。
+
+    Returns:
+        可由 QA workflow 返回的结构化问答结果。
+    """
+
+    answer: str
+    basis: list[str]
+    risk_notes: list[str]
+    next_steps: list[str]
+    disclaimer_hint: str
+
+
 class NodeResult(BaseModel):
     """节点执行结果。
 

@@ -62,7 +62,7 @@
 
 ## Phase 4：P0/P1 QA 落点
 
-- [ ] T4.1 增加 patent_qa skill、qa node 与 QA schema
+- [x] T4.1 增加 patent_qa skill、qa node 与 QA schema
   - 验收：`qa` 意图能跑完整 workflow，输出结构化答案。
   - 验证：`pytest tests/test_patent_qa_skill.py tests/test_qa_node.py tests/test_workflow_registry.py tests/test_agent_dispatch_service.py`
 

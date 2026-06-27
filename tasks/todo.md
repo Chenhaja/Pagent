@@ -16,7 +16,7 @@
 - [x] 创建 pytest 最小测试。
   - 验收标准：测试能证明工程可运行。
   - 验证步骤：运行 `pytest`。
-- [ ] Phase 0 checkpoint。
+- [x] Phase 0 checkpoint。
   - 验收标准：工程基线可运行。
   - 验证步骤：`pytest` 通过，健康检查可调用。
 

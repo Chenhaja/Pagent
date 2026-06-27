@@ -115,7 +115,7 @@
 - [x] 实现 claim revision service。
   - 验收标准：封装单条权利要求修改 workflow 和版本链处理。
   - 验证步骤：测试 patch 应用和版本号更新。
-- [ ] 创建权利要求生成 API。
+- [x] 创建权利要求生成 API。
   - 验收标准：输入输出均有 Pydantic schema，返回初稿、校验报告、下一步建议。
   - 验证步骤：用 TestClient 跑成功、缺字段、校验失败。
 - [ ] 创建翻译 API。

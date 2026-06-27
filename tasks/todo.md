@@ -16,13 +16,13 @@
   - 验收：Fake 与真实 client 调用形态一致；错误结构化；trace 不含敏感内容。
   - 验证：`pytest tests/test_llm_tool.py tests/test_security_compliance.py`
 
-- [ ] T1.3 实现 OpenAICompatibleClient 的最小真实调用路径
+- [x] T1.3 实现 OpenAICompatibleClient 的最小真实调用路径
   - 验收：默认测试不触网；显式开启后可真实调用兼容端点并解析 schema。
   - 验证：`pytest tests/test_llm_tool.py`
 
 ## Checkpoint 1
 
-- [ ] LLM 抽象、Fake、真实 client、配置、安全默认值全部完成。
+- [x] LLM 抽象、Fake、真实 client、配置、安全默认值全部完成。
 
 ## Phase 2：P0 Feature extraction 垂直真实 LLM 切片
 

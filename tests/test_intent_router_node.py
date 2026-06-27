@@ -11,7 +11,7 @@ def test_intent_router_routes_claim_generation() -> None:
 
     assert result.status == "success"
     assert state.intent == "claim_generation"
-    assert result.next_node == "feature_extract"
+    assert result.next_node == "completeness_gate"
 
 
 def test_intent_router_routes_translation() -> None:

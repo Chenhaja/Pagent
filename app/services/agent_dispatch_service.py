@@ -3,6 +3,7 @@ from typing import Any
 from app.models.schemas import WorkflowState
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
+from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 from app.services.revision_service import RevisionService
 from app.services.translate_service import TranslateService
 from app.services.workflow_service import WorkflowService
@@ -18,6 +19,7 @@ class AgentDispatchService:
     def __init__(self) -> None:
         self.normalize_node = NormalizeInputNode()
         self.intent_router_node = IntentRouterNode()
+        self.workflow_registry = WorkflowRegistry()
 
     def dispatch(self, raw_input: str, claims_draft: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """根据用户输入识别意图并分派到预定义 workflow。
@@ -42,14 +44,44 @@ class AgentDispatchService:
         if route_result.status != "success":
             return {"status": route_result.status, "errors": route_result.errors, "message": "请补充要办理的专利任务类型。"}
 
+        workflow_def = self.workflow_registry.get_workflow_def(state.intent or "")
+        remaining_nodes = self._remaining_nodes_after(workflow_def, route_result.next_node)
         if state.intent == "claim_generation":
-            result = WorkflowService().generate_claims(state.normalized_input or state.raw_input)
-            return {"intent": state.intent, "workflow": "claim_generation", **result, "trace": state.trace + result.get("trace", [])}
+            result = WorkflowService().generate_claims(
+                state.normalized_input or state.raw_input,
+                state=state,
+                workflow_def=remaining_nodes,
+            )
+            return {"intent": state.intent, "workflow": "claim_generation", **result}
         if state.intent == "translation":
-            result = TranslateService().translate(state.normalized_input or state.raw_input)
+            result = TranslateService().translate(
+                state.normalized_input or state.raw_input,
+                state=state,
+                workflow_def=remaining_nodes,
+            )
             return {"intent": state.intent, "workflow": "translation", **result}
         if state.intent == "claim_revision":
-            result = RevisionService().revise_claim(state.claims_draft, state.normalized_input or state.raw_input)
+            state.user_feedback = state.normalized_input or state.raw_input
+            result = RevisionService().revise_claim(
+                state.claims_draft,
+                state.user_feedback,
+                state=state,
+                workflow_def=remaining_nodes,
+            )
             return {"intent": state.intent, "workflow": "claim_revision", **result}
 
         return {"status": "requires_user_input", "errors": ["unknown_intent"], "message": "请补充要办理的专利任务类型。"}
+
+    def _remaining_nodes_after(self, workflow_def: WorkflowDef, next_node: str | None) -> list[str]:
+        """根据 intent_router 的下一节点裁剪待执行节点序列。
+
+        Args:
+            workflow_def: 已识别 intent 对应的 workflow 定义。
+            next_node: intent_router 返回的业务起始节点。
+
+        Returns:
+            从业务起始节点开始的节点序列;未命中时返回完整节点序列。
+        """
+        if next_node in workflow_def.nodes:
+            return workflow_def.nodes[workflow_def.nodes.index(next_node) :]
+        return list(workflow_def.nodes)

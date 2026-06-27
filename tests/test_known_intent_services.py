@@ -8,4 +8,5 @@ def test_explicit_services_use_known_intent_workflows_without_intent_router() ->
     services = [WorkflowService(), TranslateService(), RevisionService()]
 
     for service in services:
-        assert "intent_router" not in service.workflow_def
+        assert "intent_router" not in service.workflow_def.nodes
+        assert service.workflow_def.intent in {"claim_generation", "translation", "claim_revision"}

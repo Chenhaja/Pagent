@@ -31,19 +31,26 @@ class TranslateService:
                 "translate": TranslateNode(agent=agent or default_agent),
             }
         )
-        self.workflow_def = WorkflowRegistry().get_workflow("translation")
+        self.workflow_def = WorkflowRegistry().get_workflow_def("translation")
 
-    def translate(self, raw_input: str) -> dict[str, Any]:
+    def translate(
+        self,
+        raw_input: str,
+        state: WorkflowState | None = None,
+        workflow_def: list[str] | None = None,
+    ) -> dict[str, Any]:
         """执行专利文本翻译。
 
         Args:
             raw_input: 用户输入的待翻译文本。
+            state: 可选的既有 workflow 状态,用于统一入口避免重复 normalize。
+            workflow_def: 可选的节点序列,用于从已完成节点之后继续执行。
 
         Returns:
             成功时返回译文、术语表和 trace;失败时返回结构化错误。
         """
-        state = WorkflowState(raw_input=raw_input)
-        result = self.orchestrator.run(state, self.workflow_def)
+        state = state or WorkflowState(raw_input=raw_input)
+        result = self.orchestrator.run(state, workflow_def or self.workflow_def)
         if result.status != "success":
             message = "请补充待翻译文本。" if "empty_raw_input" in result.errors else "翻译服务暂时不可用,请稍后重试。"
             return {

@@ -44,19 +44,26 @@ class WorkflowService:
                 "claim_check": ClaimCheckNode(),
             }
         )
-        self.workflow_def = WorkflowRegistry().get_workflow("claim_generation")
+        self.workflow_def = WorkflowRegistry().get_workflow_def("claim_generation")
 
-    def generate_claims(self, raw_input: str) -> dict[str, Any]:
+    def generate_claims(
+        self,
+        raw_input: str,
+        state: WorkflowState | None = None,
+        workflow_def: list[str] | None = None,
+    ) -> dict[str, Any]:
         """生成权利要求草稿。
 
         Args:
             raw_input: 用户输入的口语化技术方案。
+            state: 可选的既有 workflow 状态,用于统一入口避免重复 normalize。
+            workflow_def: 可选的节点序列,用于从已完成节点之后继续执行。
 
         Returns:
             成功时返回草稿、校验报告和下一步建议;失败时返回结构化错误。
         """
-        state = WorkflowState(raw_input=raw_input)
-        result = self.orchestrator.run(state, self.workflow_def)
+        state = state or WorkflowState(raw_input=raw_input)
+        result = self.orchestrator.run(state, workflow_def or self.workflow_def)
         if result.status != "success":
             return {
                 "status": result.status,

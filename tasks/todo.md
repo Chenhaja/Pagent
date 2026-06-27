@@ -52,13 +52,13 @@
   - 验收：信息缺失时追问；信息充足时进入 feature_extract。
   - 验证：`pytest tests/test_claim_generation_e2e.py tests/test_completeness_gate_node.py`
 
-- [ ] T3.4 统一 AgentDispatchService 到 registry + orchestrator
+- [x] T3.4 统一 AgentDispatchService 到 registry + orchestrator
   - 验收：同一请求只 normalize 一次；显式 API 也通过 known intent workflow。
   - 验证：`pytest tests/test_agent_dispatch_service.py tests/test_known_intent_services.py tests/test_claim_generation_e2e.py tests/test_translate_e2e.py tests/test_revision_e2e.py`
 
 ## Checkpoint 3
 
-- [ ] 统一 orchestrator 成为唯一业务编排入口，QA workflow 已注册。
+- [x] 统一 orchestrator 成为唯一业务编排入口，QA workflow 已注册。
 
 ## Phase 4：P0/P1 QA 落点
 

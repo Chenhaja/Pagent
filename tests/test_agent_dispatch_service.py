@@ -11,10 +11,16 @@ def test_agent_dispatch_routes_claim_generation_workflow() -> None:
     assert result["intent"] == "claim_generation"
     assert result["workflow"] == "claim_generation"
     assert result["claims_draft"][0]["text"] == "一种控制方法。"
-    assert [event["event"] for event in result["trace"]][:2] == [
+    assert [event["event"] for event in result["trace"]] == [
         "normalize_input_completed",
         "intent_router_completed",
+        "completeness_gate_completed",
+        "feature_extract_completed",
+        "claim_plan_completed",
+        "claim_generate_completed",
+        "claim_check_completed",
     ]
+    assert [event["event"] for event in result["trace"]].count("normalize_input_completed") == 1
 
 
 def test_agent_dispatch_routes_translation_workflow() -> None:

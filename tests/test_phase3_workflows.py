@@ -3,6 +3,7 @@ from app.nodes.claim_check import ClaimCheckNode
 from app.nodes.claim_generate import ClaimGenerateNode
 from app.nodes.claim_plan import ClaimPlanNode
 from app.nodes.claim_revise import ClaimReviseNode
+from app.nodes.completeness_gate import CompletenessGateNode
 from app.nodes.feature_extract import FeatureExtractNode
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
@@ -20,6 +21,7 @@ def test_claim_generation_workflow_runs_through_orchestrator() -> None:
         nodes={
             "normalize_input": NormalizeInputNode(),
             "intent_router": IntentRouterNode(),
+            "completeness_gate": CompletenessGateNode(),
             "feature_extract": FeatureExtractNode(
                 skill=FeatureExtractionSkill(fake_output={"required_features": ["采集传感器数据"]})
             ),
@@ -40,7 +42,7 @@ def test_claim_generation_workflow_runs_through_orchestrator() -> None:
 
     result = orchestrator.run(
         state,
-        ["normalize_input", "intent_router", "feature_extract", "claim_plan", "claim_generate", "claim_check"],
+        ["normalize_input", "intent_router", "completeness_gate", "feature_extract", "claim_plan", "claim_generate", "claim_check"],
     )
 
     assert result.status == "success"

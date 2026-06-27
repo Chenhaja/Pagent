@@ -25,7 +25,7 @@ class IntentRouterNode(Node):
             ("translation", "translate", ["翻译", "译文"]),
             ("claim_revision", "claim_revise", ["修改", "修订"]),
             ("qa", "report_write", ["风险", "问题", "说明", "？", "?"]),
-            ("claim_generation", "feature_extract", ["权利要求", "撰写", "生成"]),
+            ("claim_generation", "completeness_gate", ["权利要求", "撰写", "生成"]),
         ]
         for intent, next_node, keywords in routes:
             if any(keyword in text for keyword in keywords):

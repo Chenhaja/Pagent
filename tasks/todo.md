@@ -100,7 +100,7 @@
 - [x] 实现 `claim_revise` node。
   - 验收标准：复用 `claim_writing` skill，默认只修改目标权利要求，输出结构化 patch。
   - 验证步骤：测试目标 claim 存在、不存在、需要联动修改三类情况。
-- [ ] Phase 3 checkpoint。
+- [x] Phase 3 checkpoint。
   - 验收标准：三条 node 链路都能通过 orchestrator 跑通。
   - 验证步骤：运行权利要求生成、翻译、单条修改链路测试。
 

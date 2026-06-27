@@ -57,10 +57,16 @@ uvicorn app.main:app --reload
 # 运行测试
 pytest
 
-# 运行格式检查（如引入 ruff）
+# 运行 API 相关测试
+pytest tests/test_claim_generation_api.py tests/test_translate_api.py tests/test_revision_api.py
+
+# 运行端到端测试
+pytest tests/test_claim_generation_e2e.py tests/test_translate_e2e.py tests/test_revision_e2e.py
+
+# 运行格式检查（当前未引入 ruff；引入后启用）
 ruff check .
 
-# 运行类型检查（如引入 mypy）
+# 运行类型检查（当前未引入 mypy；引入后启用）
 mypy app
 ```
 

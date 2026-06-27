@@ -40,6 +40,25 @@ class FailingNode(Node):
         return NodeResult.failed(errors=["boom"])
 
 
+class JumpNode(Node):
+    """固定跳转到指定节点的 fake node。"""
+
+    def __init__(self, name: str, next_node: str) -> None:
+        super().__init__(name=name)
+        self.target = next_node
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """返回带 next_node 的成功结果。
+
+        Args:
+            state: 工作流状态。
+
+        Returns:
+            带局部跳转目标的成功结果。
+        """
+        return NodeResult.success(next_node=self.target, trace_events=[{"event": f"{self.name}_completed"}])
+
+
 class UserInputNode(Node):
     """固定要求用户输入的 fake node。"""
 
@@ -106,3 +125,42 @@ def test_orchestrator_fails_on_unknown_node() -> None:
 
     assert result.status == "failed"
     assert result.errors == ["unknown_node:missing"]
+
+
+def test_orchestrator_honors_next_node_jump() -> None:
+    """节点返回 next_node 时 orchestrator 应跳转到 workflow 内合法节点。"""
+    state = WorkflowState(raw_input="一种方法")
+    orchestrator = Orchestrator(
+        nodes={
+            "first": JumpNode("first", "third"),
+            "second": RecordingNode("second", "second_done"),
+            "third": RecordingNode("third", "third_done"),
+        }
+    )
+
+    result = orchestrator.run(state, workflow_def=["first", "second", "third"])
+
+    assert result.status == "success"
+    assert [event["event"] for event in state.trace] == ["first_completed", "third_completed"]
+
+
+def test_orchestrator_rejects_illegal_next_node() -> None:
+    """next_node 不在 workflow 内时应结构化失败。"""
+    state = WorkflowState(raw_input="一种方法")
+    orchestrator = Orchestrator(nodes={"first": JumpNode("first", "missing")})
+
+    result = orchestrator.run(state, workflow_def=["first"])
+
+    assert result.status == "failed"
+    assert result.errors == ["illegal_next_node:missing"]
+
+
+def test_orchestrator_stops_when_loop_limit_exceeded() -> None:
+    """局部回环超过上限时应结构化失败。"""
+    state = WorkflowState(raw_input="一种方法")
+    orchestrator = Orchestrator(nodes={"first": JumpNode("first", "first")})
+
+    result = orchestrator.run(state, workflow_def=["first"], max_loop_count=1)
+
+    assert result.status == "failed"
+    assert result.errors == ["loop_limit_exceeded:first"]

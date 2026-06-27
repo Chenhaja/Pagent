@@ -44,7 +44,7 @@
   - 验收：claim_generation / translation / claim_revision / qa 均可查询；claim_generation 包含 completeness_gate。
   - 验证：`pytest tests/test_workflow_registry.py tests/test_phase3_workflows.py`
 
-- [ ] T3.2 Orchestrator 支持 `next_node` 与有界回环
+- [x] T3.2 Orchestrator 支持 `next_node` 与有界回环
   - 验收：合法跳转可执行；非法跳转和超限回环结构化失败。
   - 验证：`pytest tests/test_orchestrator_engine.py tests/test_node_result.py`
 

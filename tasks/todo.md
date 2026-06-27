@@ -52,7 +52,7 @@
 - [x] 创建外部翻译 agent adapter 接口和 fake implementation。
   - 验收标准：系统只定义 adapter，不实现翻译 agent 内部逻辑。
   - 验证步骤：测试成功、超时、字段缺失三类 adapter 结果。
-- [ ] 创建 terminology tool 占位接口。
+- [x] 创建 terminology tool 占位接口。
   - 验收标准：只做术语查询 / 规范化边界，不读写 workflow state。
   - 验证步骤：用固定术语表测试命中和未命中。
 - [ ] 创建 validators：引用关系、术语一致性、基础字段完整性。

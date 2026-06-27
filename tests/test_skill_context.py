@@ -9,6 +9,8 @@ def test_skill_context_contains_required_fields() -> None:
         domain_rules={"jurisdiction": "CN"},
         output_schema={"type": "ClaimSet"},
         examples=[{"input": "技术方案", "output": "权利要求"}],
+        prompt_layers={"system": "你是专利助手", "user_data": "技术方案"},
+        safety_policy={"separate_instruction_and_data": True},
     )
 
     assert context.task_type == "claim_generate"
@@ -16,6 +18,8 @@ def test_skill_context_contains_required_fields() -> None:
     assert context.domain_rules == {"jurisdiction": "CN"}
     assert context.output_schema == {"type": "ClaimSet"}
     assert context.examples == [{"input": "技术方案", "output": "权利要求"}]
+    assert context.prompt_layers == {"system": "你是专利助手", "user_data": "技术方案"}
+    assert context.safety_policy == {"separate_instruction_and_data": True}
 
 
 def test_skill_context_serializes_for_skill_call() -> None:
@@ -34,6 +38,8 @@ def test_skill_context_serializes_for_skill_call() -> None:
         "domain_rules": {},
         "output_schema": {"type": "ClaimPatch"},
         "examples": [],
+        "prompt_layers": {},
+        "safety_policy": {},
     }
 
 

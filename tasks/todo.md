@@ -26,7 +26,7 @@
 
 ## Phase 2：P0 Feature extraction 垂直真实 LLM 切片
 
-- [ ] T2.1 扩展 SkillContext 与 Prompt 分层结构
+- [x] T2.1 扩展 SkillContext 与 Prompt 分层结构
   - 验收：`prompt_layers`、`safety_policy` 可用，旧测试兼容。
   - 验证：`pytest tests/test_skill_context.py`
 

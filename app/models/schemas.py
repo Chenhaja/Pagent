@@ -196,6 +196,8 @@ class SkillContext(BaseModel):
         domain_rules: 领域规则和约束。
         output_schema: 期望输出 schema 描述。
         examples: few-shot 示例列表。
+        prompt_layers: 分层 prompt 片段。
+        safety_policy: 指令/数据分离等安全策略。
 
     Returns:
         可传入 skill 的结构化上下文。
@@ -206,6 +208,8 @@ class SkillContext(BaseModel):
     domain_rules: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     examples: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_layers: dict[str, Any] = Field(default_factory=dict)
+    safety_policy: dict[str, Any] = Field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         """转换为 skill 调用载荷。
@@ -219,6 +223,8 @@ class SkillContext(BaseModel):
             "domain_rules": self.domain_rules,
             "output_schema": self.output_schema,
             "examples": self.examples,
+            "prompt_layers": self.prompt_layers,
+            "safety_policy": self.safety_policy,
         }
 
 

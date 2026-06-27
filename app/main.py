@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.services.revision_service import RevisionService
 from app.services.translate_service import TranslateService
 from app.services.workflow_service import WorkflowService
 
@@ -58,6 +59,46 @@ class TranslateRequest(BaseModel):
     raw_input: str
 
 
+class ClaimRevisionRequest(BaseModel):
+    """单条权利要求修改请求。
+
+    Args:
+        claims_draft: 当前权利要求草稿。
+        user_feedback: 用户修改意见。
+
+    Returns:
+        单条权利要求修改 API 请求体。
+    """
+
+    claims_draft: list[dict[str, Any]]
+    user_feedback: str
+
+
+class ClaimRevisionResponse(BaseModel):
+    """单条权利要求修改响应。
+
+    Args:
+        status: 处理状态。
+        claim: 修改后的目标权利要求。
+        diff: 修改前后差异。
+        risk_notes: 风险提示。
+        version: 新版本号。
+        validation_report: 校验报告。
+        disclaimer: 法律意见免责声明。
+
+    Returns:
+        单条权利要求修改 API 响应体。
+    """
+
+    status: str
+    claim: dict[str, Any]
+    diff: dict[str, Any]
+    risk_notes: list[str]
+    version: str
+    validation_report: dict[str, Any]
+    disclaimer: str
+
+
 class TranslateResponse(BaseModel):
     """翻译响应。
 
@@ -108,6 +149,37 @@ def generate_claims(request: ClaimGenerationRequest) -> dict[str, Any]:
     if result["status"] != "success":
         result["message"] = f"{result['message']}辅助初稿，不等同于专利代理师法律意见。"
         raise HTTPException(status_code=400, detail=result)
+    result["disclaimer"] = "辅助初稿，不等同于专利代理师法律意见。"
+    return result
+
+
+@app.post("/claims/revise", response_model=ClaimRevisionResponse)
+def revise_claim(request: ClaimRevisionRequest) -> dict[str, Any]:
+    """修改单条权利要求。
+
+    Args:
+        request: 单条权利要求修改请求。
+
+    Returns:
+        修改后的权利要求、差异、风险提示、新版本号和校验报告。
+
+    Raises:
+        HTTPException: 当服务层返回非成功状态或校验失败时抛出。
+    """
+    result = RevisionService().revise_claim(request.claims_draft, request.user_feedback)
+    if result["status"] != "success":
+        result["message"] = f"{result['message']}辅助初稿，不等同于专利代理师法律意见。"
+        raise HTTPException(status_code=400, detail=result)
+    if result["validation_report"]["reference_errors"]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "status": "failed",
+                "errors": result["validation_report"]["reference_errors"],
+                "message": "权利要求引用关系需要修正。辅助初稿，不等同于专利代理师法律意见。",
+            },
+        )
+    result["diff"] = result.pop("patch")
     result["disclaimer"] = "辅助初稿，不等同于专利代理师法律意见。"
     return result
 

@@ -121,7 +121,7 @@
 - [x] 创建翻译 API。
   - 验收标准：返回译文、术语表、trace；不要求真实翻译 agent。
   - 验证步骤：用 TestClient 跑 adapter 成功和失败。
-- [ ] 创建单条权利要求修改 API。
+- [x] 创建单条权利要求修改 API。
   - 验收标准：返回修改后 claim、差异说明、风险提示、新版本号。
   - 验证步骤：用 TestClient 跑正常修改、目标不存在、引用非法。
 - [ ] 统一错误响应和用户提示。
@@ -213,6 +213,6 @@
 - [x] 实现 locate_claim_version、parse_revision_intent、claim_revise、apply_claim_patch、claim_check 链路。
 - [x] 复用 `claim_writing` skill、权利要求 schema 和 validators。
 - [x] 实现 revision service。
-- [ ] 实现 revision API。
-- [ ] 验证只修改目标 claim，返回差异说明、风险提示和新版本号。
-- [ ] 验证目标不存在、引用非法、术语不一致三类失败路径。
+- [x] 实现 revision API。
+- [x] 验证只修改目标 claim，返回差异说明、风险提示和新版本号。
+- [x] 验证目标不存在、引用非法、术语不一致三类失败路径。

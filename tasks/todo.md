@@ -48,7 +48,7 @@
   - 验收：合法跳转可执行；非法跳转和超限回环结构化失败。
   - 验证：`pytest tests/test_orchestrator_engine.py tests/test_node_result.py`
 
-- [ ] T3.3 增加信息完整性 gate
+- [x] T3.3 增加信息完整性 gate
   - 验收：信息缺失时追问；信息充足时进入 feature_extract。
   - 验证：`pytest tests/test_claim_generation_e2e.py tests/test_completeness_gate_node.py`
 

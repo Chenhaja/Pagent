@@ -66,13 +66,13 @@
   - 验收：`qa` 意图能跑完整 workflow，输出结构化答案。
   - 验证：`pytest tests/test_patent_qa_skill.py tests/test_qa_node.py tests/test_workflow_registry.py tests/test_agent_dispatch_service.py`
 
-- [ ] T4.2 增加统一 Agent API endpoint
+- [x] T4.2 增加统一 Agent API endpoint
   - 验收：POST `/agent` 支持 QA、权利要求生成、翻译、修改路径。
   - 验证：`pytest tests/test_agent_api.py tests/test_api_error_responses.py`
 
 ## Checkpoint 4
 
-- [ ] P0 完成：统一入口 + QA + LLM 抽象 + 编排闭环可端到端验证。
+- [x] P0 完成：统一入口 + QA + LLM 抽象 + 编排闭环可端到端验证。
 
 ## Phase 5：P1 改写、检索与 bounded ReAct
 

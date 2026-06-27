@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.services.agent_dispatch_service import AgentDispatchService
 from app.services.revision_service import RevisionService
 from app.services.translate_service import TranslateService
 from app.services.workflow_service import WorkflowService
@@ -92,6 +93,21 @@ class ClaimRevisionRequest(BaseModel):
     user_feedback: str
 
 
+class AgentRequest(BaseModel):
+    """统一 Agent 请求。
+
+    Args:
+        raw_input: 用户原始输入。
+        claims_draft: 可选的当前权利要求草稿,用于修改路径。
+
+    Returns:
+        统一 Agent API 请求体。
+    """
+
+    raw_input: str
+    claims_draft: list[dict[str, Any]] = []
+
+
 class ClaimRevisionResponse(BaseModel):
     """单条权利要求修改响应。
 
@@ -148,6 +164,28 @@ def health_check() -> dict[str, str]:
         固定健康状态,用于确认 API 服务已启动。
     """
     return {"status": "ok"}
+
+
+@app.post("/agent")
+def dispatch_agent(request: AgentRequest) -> dict[str, Any]:
+    """通过统一 Agent 入口处理专利任务。
+
+    Args:
+        request: 统一 Agent 请求。
+
+    Returns:
+        根据识别出的 workflow 返回对应结构化结果。
+
+    Raises:
+        HTTPException: 当分发服务返回非成功状态时抛出。
+    """
+    result = AgentDispatchService().dispatch(request.raw_input, claims_draft=request.claims_draft)
+    if result["status"] != "success":
+        raise HTTPException(status_code=400, detail=build_error_detail(result))
+    if "patch" in result:
+        result["diff"] = result.pop("patch")
+    result["disclaimer"] = DISCLAIMER
+    return result
 
 
 @app.post("/claims/generate", response_model=ClaimGenerationResponse)

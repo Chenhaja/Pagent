@@ -94,7 +94,7 @@
 
 ## Phase 6：P1 本地记忆与 provenance
 
-- [ ] T6.1 增加 memory 抽象与本地 store
+- [x] T6.1 增加 memory 抽象与本地 store
   - 验收：会话、案件、用户画像、经验记忆可本地读写；写入带 provenance。
   - 验证：`pytest tests/test_memory_store.py`
 

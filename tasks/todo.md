@@ -127,7 +127,7 @@
 - [x] 统一错误响应和用户提示。
   - 验收标准：面向普通发明人可理解，包含“辅助初稿，不等同于专利代理师法律意见”。
   - 验证步骤：检查三类 API 的错误和成功响应。
-- [ ] 补齐通用 dispatch / 统一 Agent 入口规格。
+- [x] 补齐通用 dispatch / 统一 Agent 入口规格。
   - 验收标准：统一入口表达为 `normalize → intent_router → workflow selection → orchestrator → nodes`。
   - 验证步骤：检查 `SPEC.md` 与 `tasks/plan.md` 中统一 Agent 入口路径一致。
 - [ ] 明确显式业务 API 的 known intent 路径。
@@ -184,7 +184,7 @@
 - [x] 实现 orchestrator 按 workflow_def 顺序执行 node。
 - [x] 实现 normalize 与 intent_router node。
 - [ ] 补齐 workflow registry / workflow_defs 集中注册规格和后续实现。
-- [ ] 补齐统一 Agent 入口：`normalize → intent_router → workflow selection → orchestrator → nodes`。
+- [x] 补齐统一 Agent 入口：`normalize → intent_router → workflow selection → orchestrator → nodes`。
 - [ ] 验证显式业务 API 与统一入口命中同一 concrete workflow。
 
 ### Slice 2：权利要求生成完整路径

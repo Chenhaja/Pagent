@@ -46,7 +46,7 @@
 
 ## Phase 2：工具层与 skill 层
 
-- [ ] 创建 LLM tool adapter 接口和 fake implementation。
+- [x] 创建 LLM tool adapter 接口和 fake implementation。
   - 验收标准：业务代码不直接依赖真实 LLM。
   - 验证步骤：测试 fake response 可被解析，错误 response 可被捕获。
 - [ ] 创建外部翻译 agent adapter 接口和 fake implementation。

@@ -88,7 +88,7 @@
 - [x] 实现 `claim_plan` node。
   - 验收标准：生成最小权利要求布局，供后续 claim generation 使用。
   - 验证步骤：测试独权 / 从权布局输出。
-- [ ] 实现 `claim_generate` node。
+- [x] 实现 `claim_generate` node。
   - 验收标准：调用 `claim_writing` skill，输出 `claims_draft`。
   - 验证步骤：测试正常生成和 schema 校验失败。
 - [ ] 实现 `claim_check` node。

@@ -104,7 +104,7 @@
   - 验收标准：三条 node 链路都能通过 orchestrator 跑通。
   - 验证步骤：运行权利要求生成、翻译、单条修改链路测试。
 
-## Phase 4：Service 与 API
+## Phase 4：Service、显式 API 与 routing 边界
 
 - [x] 实现 `workflow_service`。
   - 验收标准：封装权利要求生成 workflow，API 不直接调 node 或 tool。
@@ -127,9 +127,15 @@
 - [ ] 统一错误响应和用户提示。
   - 验收标准：面向普通发明人可理解，包含“辅助初稿，不等同于专利代理师法律意见”。
   - 验证步骤：检查三类 API 的错误和成功响应。
+- [ ] 补齐通用 dispatch / 统一 Agent 入口规格。
+  - 验收标准：统一入口表达为 `normalize → intent_router → workflow selection → orchestrator → nodes`。
+  - 验证步骤：检查 `SPEC.md` 与 `tasks/plan.md` 中统一 Agent 入口路径一致。
+- [ ] 明确显式业务 API 的 known intent 路径。
+  - 验收标准：显式业务 API 复用 concrete workflow，不承担全局意图识别职责。
+  - 验证步骤：搜索“显式业务 API”和“known intent”，确认边界一致。
 - [ ] Phase 4 checkpoint。
-  - 验收标准：三条 API 形成闭环。
-  - 验证步骤：运行 API 集成测试。
+  - 验收标准：显式业务 API 闭环状态清晰；通用 dispatch / Agent entry 规格清晰；routing 不下沉到 service/server。
+  - 验证步骤：运行 API 集成测试，并检查文档中没有把 `intent_router` 放进具体业务 workflow 内部的主路径。
 
 ## Phase 5：端到端验证与质量门禁
 
@@ -155,31 +161,58 @@
   - 验收标准：MVP 最小交付定义全部满足。
   - 验证步骤：运行完整测试和三条 API 手动检查。
 
-## 第一轮最小纵向闭环
+## 当前文档修正阶段：Workflow routing 架构修正
 
-### Slice 1：权利要求生成 API 闭环
+- [x] 修正 `SPEC.md` 架构分层。
+  - 验收标准：明确双入口、routing 层、workflow registry、orchestrator 和 nodes 的边界。
+  - 验证步骤：搜索 `intent_router`、`意图识别`、`路由`，确认上下文指向 workflow selection。
+- [x] 修正 `tasks/plan.md` workflow 路径和 vertical slices。
+  - 验收标准：计划中的 workflow 和 slice 都体现 normalize / known intent 或 recognized intent → routing → orchestrator → nodes。
+  - 验证步骤：逐个检查权利要求生成、翻译、局部修改三条路径。
+- [x] 修正 `tasks/todo.md` Phase 状态与 stale slice。
+  - 验收标准：文档修正任务与后续代码实现任务分开，不再出现 Phase 已完成但 Slice 全部未开始的冲突。
+  - 验证步骤：检查 Phase 4、Phase 5、纵向闭环状态汇总。
+- [x] 三文档术语一致性检查。
+  - 验收标准：三份文档对 routing 归属、service/API 边界、当前阶段范围保持一致。
+  - 验证步骤：搜索 `intent_router`、`workflow_def`、`orchestrator`、`service`、`显式业务 API`、`统一 Agent 入口`。
 
-- [ ] 定义该闭环所需最小 schema。
-- [ ] 实现 fake feature extraction 和 fake claim writing 输出。
-- [ ] 实现 normalize、intent_router、feature_extract、claim_plan、claim_generate、claim_check nodes。
-- [ ] 实现 service 和 API。
-- [ ] 验证输入口语化技术方案后返回权利要求初稿、校验报告、下一步建议和 trace。
-- [ ] 验证 fake LLM 输出缺字段时返回结构化错误。
+## 纵向闭环状态汇总
 
-### Slice 2：翻译 adapter API 闭环
+### Slice 1：共同编排骨架闭环
 
-- [ ] 定义翻译请求、翻译结果和 adapter 错误 schema。
-- [ ] 实现 fake external translation adapter。
-- [ ] 实现 terminology_normalize 和 translate node。
-- [ ] 实现 translate service 和 API。
-- [ ] 验证成功返回译文、术语表和 trace。
-- [ ] 验证超时、空响应、字段缺失的错误边界。
+- [x] 定义最小 schema、`WorkflowState`、`NodeResult`、`SkillContext`。
+- [x] 实现 orchestrator 按 workflow_def 顺序执行 node。
+- [x] 实现 normalize 与 intent_router node。
+- [ ] 补齐 workflow registry / workflow_defs 集中注册规格和后续实现。
+- [ ] 补齐统一 Agent 入口：`normalize → intent_router → workflow selection → orchestrator → nodes`。
+- [ ] 验证显式业务 API 与统一入口命中同一 concrete workflow。
 
-### Slice 3：单条权利要求修改 API 闭环
+### Slice 2：权利要求生成完整路径
 
-- [ ] 准备固定 claim set 测试数据。
-- [ ] 实现 locate_claim_version、parse_revision_intent、claim_revise、apply_claim_patch、claim_check 链路。
-- [ ] 复用 `claim_writing` skill、权利要求 schema 和 validators。
-- [ ] 实现 revision service 和 API。
+- [x] 定义权利要求生成所需 schema。
+- [x] 实现 fake feature extraction 和 fake claim writing 输出。
+- [x] 实现 feature_extract、claim_plan、claim_generate、claim_check nodes。
+- [x] 实现 claim generation service 和 API。
+- [x] 验证输入口语化技术方案后返回权利要求初稿、校验报告、下一步建议和 trace。
+- [x] 验证 fake LLM 输出缺字段时返回结构化错误。
+- [ ] 按修正后的 routing 架构验证显式 API 以 known intent 选择 `claim_generation` workflow。
+
+### Slice 3：翻译 adapter 完整路径
+
+- [x] 定义翻译请求、翻译结果和 adapter 错误 schema。
+- [x] 实现 fake external translation adapter。
+- [x] 实现 terminology_normalize / translate node 所需能力。
+- [x] 实现 translate service 和 API。
+- [x] 验证成功返回译文、术语表和 trace。
+- [x] 验证超时、空响应、字段缺失的错误边界。
+- [ ] 按修正后的 routing 架构验证显式 `/translate` 以 known intent 选择 `translation` workflow。
+
+### Slice 4：单条权利要求修改完整路径
+
+- [x] 准备固定 claim set 测试数据。
+- [x] 实现 locate_claim_version、parse_revision_intent、claim_revise、apply_claim_patch、claim_check 链路。
+- [x] 复用 `claim_writing` skill、权利要求 schema 和 validators。
+- [x] 实现 revision service。
+- [ ] 实现 revision API。
 - [ ] 验证只修改目标 claim，返回差异说明、风险提示和新版本号。
 - [ ] 验证目标不存在、引用非法、术语不一致三类失败路径。

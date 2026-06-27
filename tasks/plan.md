@@ -86,10 +86,29 @@ pagent/
 
 ## 3. 架构约束
 
-### 外层确定性编排
+### 双入口与外层确定性编排
 
-- workflow 由预定义 DAG / 状态机驱动。
-- 意图识别只负责路由到预定义 workflow，不临时拼装任意流程。
+```text
+统一 Agent 入口
+  → raw_input
+  → normalize_input
+  → intent_router
+  → workflow_registry / workflow selection
+  → orchestrator
+  → nodes
+
+显式业务 API
+  → raw_input / API schema
+  → normalize_input（如需要）
+  → known intent
+  → workflow_registry / workflow selection
+  → orchestrator
+  → nodes
+```
+
+- workflow 由 `workflow_defs.py` / workflow registry 中的预定义 DAG / 状态机驱动。
+- 意图识别归属编排前置的 routing / workflow selection stage，只负责路由到预定义 workflow，不临时拼装任意流程。
+- 显式业务 API 的 path 已表达业务意图，可用 known intent 直接选择 concrete workflow，但不拥有全局意图路由职责。
 - 编排层最小单位是 node，而不是 tool 或 skill。
 - 每个 node 必须有明确输入、输出、状态推进和失败边界。
 
@@ -100,7 +119,8 @@ pagent/
 | Tool | 原子能力，如 LLM 调用、术语查询、规则校验、外部翻译 adapter | 不读写 workflow state，不做业务流程判断 |
 | Skill | 方法包，包含 prompt 模板、few-shot、领域规则、输出 schema | 不持久化状态，不决定全局流程 |
 | Node | 一次业务状态推进，装载 skill 并调用 tool | 不把多个独立业务阶段揉成不可审计的大步骤 |
-| Orchestrator | 调度 node、维护 workflow 顺序、重试、回环、trace | 不让 LLM 自由决定全局步骤顺序 |
+| Workflow registry | 集中声明预定义 workflow 模板、入口 intent、节点顺序和可选回环 | 不散落在 service 中，不按请求临时拼装流程 |
+| Orchestrator | 按选中的 workflow_def 调度 node、维护 workflow 顺序、重试、回环、trace | 不让 LLM 自由决定全局步骤顺序 |
 
 ### 必须复用的能力
 
@@ -146,7 +166,7 @@ pagent/
 - `status`：`success` / `failed` / `requires_user_input`。
 - `output`：结构化输出。
 - `errors`：错误列表。
-- `next_node`：显式下一节点或由 orchestrator 根据 workflow_def 推导。
+- `next_node`：仅用于局部回环、澄清或异常分支；MVP 主路径由 orchestrator 根据 workflow_def 顺序执行，通用意图路由表达为 workflow selection。
 - `requires_user_input`：是否需要追问或人审。
 - `trace_events`：本节点产生的审计事件。
 
@@ -171,69 +191,117 @@ pagent/
 
 ### 权利要求生成 workflow
 
+统一 Agent 入口：
+
 ```text
 raw_input
   → normalize_input
-  → intent_router
-  → disclosure_check
-  → feature_extract
-  → claim_plan
-  → claim_generate
-  → claim_check
-  → response_format
+  → intent_router 选择 claim_generation workflow
+  → workflow_registry 返回 claim_generation workflow_def
+  → orchestrator 执行 claim_generation workflow:
+      disclosure_check / feature_extract
+      → claim_plan
+      → claim_generate
+      → claim_check
+      → response_format
+```
+
+显式权利要求生成 API：
+
+```text
+API schema
+  → normalize_input（如需要）
+  → known intent: claim_generation
+  → workflow_registry 返回 claim_generation workflow_def
+  → orchestrator 执行业务 nodes
 ```
 
 验收标准：
 
 - 保留 `raw_input` 与 `normalized_input`。
+- `intent_router` 只选择 `claim_generation` 预定义 workflow，不作为具体业务 workflow 内部普通节点。
 - 每个节点输出都通过 Pydantic schema 校验。
 - `claim_generate` 只消费结构化特征、布局和 `claim_writing` skill。
 - `claim_check` 输出可读的校验报告和修改建议。
 
 验证步骤：
 
-- 使用 fake LLM response 跑通完整链路。
+- 使用 fake LLM response 跑通统一入口与显式 API 两条路径。
 - 使用缺字段输入验证追问状态。
 - 使用非法引用关系样例验证 validator 能返回错误。
+- 检查 workflow_def 由 registry 集中提供，未散落在 service 中。
 
 ### 翻译 adapter workflow
 
+统一 Agent 入口：
+
 ```text
 text_input
-  → detect_language_and_text_type
-  → terminology_normalize
-  → translate_adapter_node
-  → receive_translation_result
-  → response_format
+  → normalize_input
+  → intent_router 选择 translation workflow
+  → workflow_registry 返回 translation workflow_def
+  → orchestrator 执行 translation workflow:
+      detect_language_and_text_type
+      → terminology_normalize
+      → translate_adapter_node
+      → receive_translation_result
+      → response_format
+```
+
+显式 `/translate` API：
+
+```text
+API schema
+  → known intent: translation
+  → workflow_registry 返回 translation workflow_def
+  → orchestrator 执行 translation workflow
 ```
 
 验收标准：
 
 - 翻译 tool 只调用外部 agent adapter 接口。
 - 本系统不实现翻译推理链。
+- 显式 `/translate` 可跳过通用意图识别，但必须通过 known intent 选择 translation workflow。
 - 返回结果包含译文、术语表、错误边界和 trace。
 
 验证步骤：
 
 - 使用 fake translation adapter 返回固定译文。
 - 模拟外部 adapter 超时、空响应、字段缺失。
+- 分别验证通用入口和显式 API 都复用同一 translation workflow_def。
 - 检查日志和 trace 不记录过长原文或敏感信息。
 
 ### 单条权利要求修改 workflow
 
+统一 Agent 入口：
+
 ```text
 user_feedback + claim_id
-  → locate_claim_version
-  → parse_revision_intent
-  → claim_revise
-  → apply_claim_patch
-  → claim_check
-  → response_format
+  → normalize_input
+  → intent_router 选择 claim_revision workflow
+  → workflow_registry 返回 claim_revision workflow_def
+  → orchestrator 执行 claim_revision workflow:
+      locate_claim_version
+      → parse_revision_intent
+      → claim_revise
+      → apply_claim_patch
+      → claim_check
+      → response_format
+```
+
+显式修改 API：
+
+```text
+API schema
+  → known intent: claim_revision
+  → workflow_registry 返回 claim_revision workflow_def
+  → orchestrator 执行 claim_revision workflow
 ```
 
 验收标准：
 
 - `claim_revise` 复用 `claim_writing` skill 和同一套权利要求 schema。
+- 通用入口通过 revision intent 进入；显式修改 API 以 known intent 进入。
 - 默认只修改目标权利要求。
 - 如必须联动修改其他权利要求，必须返回原因和影响范围。
 - 版本链保留修改前后文本和 patch。
@@ -243,6 +311,7 @@ user_feedback + claim_id
 - 使用固定 claim set 修改单条从属权利要求。
 - 验证引用关系、术语一致性和版本号更新。
 - 验证目标 claim 不存在时返回明确错误。
+- 检查 service 只触发 workflow selection / orchestrator，不承接全局意图路由。
 
 ## 6. 分阶段实施计划
 
@@ -345,15 +414,15 @@ user_feedback + claim_id
 - 分别运行每个 node 的单元测试。
 - 使用 orchestrator 跑通权利要求生成、翻译、单条修改三条最小链路。
 
-### Phase 4：Service 与 API 路由
+### Phase 4：Service、显式 API 与 workflow selection
 
-**目标**：把 workflow 能力封装为服务和 HTTP API，形成可手动调用的闭环。
+**目标**：把 workflow 能力封装为服务和 HTTP API，形成可手动调用的闭环；显式业务 API 使用 known intent 选择 concrete workflow，不承担全局意图识别。
 
 **任务**：
 
-1. 实现 `workflow_service`：触发权利要求生成 workflow。
-2. 实现 `translate_service`：触发翻译 adapter workflow。
-3. 实现 claim revision service：触发单条权利要求修改 workflow。
+1. 实现 `workflow_service`：通过 known intent 触发权利要求生成 workflow。
+2. 实现 `translate_service`：通过 known intent 触发翻译 adapter workflow。
+3. 实现 claim revision service：通过 known intent 触发单条权利要求修改 workflow。
 4. 创建 `/workflows/claims` API。
 5. 创建 `/translate` API。
 6. 创建 `/workflows/claims/{workflow_id}/revise` 或等价修改 API。
@@ -362,7 +431,8 @@ user_feedback + claim_id
 **验收标准**：
 
 - API 输入输出有 Pydantic schema。
-- API 不直接调用 tool，必须通过 service / orchestrator。
+- API 不直接调用 tool，必须通过 service / workflow selection / orchestrator。
+- 显式业务 API 复用 concrete workflow，不拥有全局意图路由职责。
 - 返回内容明确提示“辅助初稿，不等同于专利代理师法律意见”。
 - 不把完整敏感文本写入日志。
 
@@ -370,6 +440,29 @@ user_feedback + claim_id
 
 - 使用 TestClient 跑 API 集成测试。
 - 验证正常输入、缺字段输入、adapter 失败、校验失败。
+- 检查 service 中没有把 `intent_router` 放进具体业务 workflow 内部的主路径。
+
+### Phase 4.5：统一 Agent 入口与 workflow registry 规格
+
+**目标**：补齐 generic dispatch / unified Agent entry 的规格，使通用入口先 normalize / intent route，再选择 workflow，由 orchestrator 执行业务 nodes。
+
+**任务**：
+
+1. 规格化 `workflow_defs.py` / workflow registry 的职责、注册字段和 workflow_def 查找方式。
+2. 规格化统一 Agent 入口：`raw_input → normalize_input → intent_router → workflow selection → orchestrator → nodes`。
+3. 明确显式业务 API 与统一入口共享 workflow registry、orchestrator、workflow_defs 和业务 nodes。
+4. 增加 routing 层、workflow registry、显式 API 与统一入口一致性的验证用例计划。
+
+**验收标准**：
+
+- routing / workflow selection 明确位于 orchestrator 之前。
+- workflow registry 是编排层职责，未散落在 service 中。
+- 统一 Agent 入口和显式业务 API 的边界清晰。
+
+**验证步骤**：
+
+- 搜索 `intent_router`、`workflow_def`、`workflow_registry`、`显式业务 API`、`统一 Agent 入口`，确认语义一致。
+- 检查 Checkpoints 能验证 routing 层、workflow registry、显式 API 与统一入口的一致性。
 
 ### Phase 5：端到端主链路与质量门禁
 
@@ -402,23 +495,28 @@ user_feedback + claim_id
 ```text
 Phase 0 工程基线
   │
-  └── Phase 1 schema + orchestrator
+  └── Phase 1 schema + orchestrator + workflow_def 协议
+        │
+        ├── workflow registry / workflow selection
+        │       │
+        │       ├── 统一 Agent 入口：normalize → intent_router → workflow selection
+        │       └── 显式业务 API：known intent → workflow selection
         │
         ├── Phase 2 tools / skills / validators
         │       │
         │       ├── Phase 3A 权利要求生成 nodes
-        │       │       └── Phase 4A 权利要求生成 API
+        │       │       └── Phase 4A 权利要求生成 API / known intent
         │       │               └── Phase 5A 权利要求生成 E2E
         │       │
         │       ├── Phase 3B 翻译 adapter node
-        │       │       └── Phase 4B 翻译 API
+        │       │       └── Phase 4B 翻译 API / known intent
         │       │               └── Phase 5B 翻译 E2E
         │       │
         │       └── Phase 3C 单条修改 nodes
-        │               └── Phase 4C 修改 API
+        │               └── Phase 4C 修改 API / known intent
         │                       └── Phase 5C 修改 E2E
         │
-        └── 共享质量门禁：日志、安全、schema 校验、trace
+        └── 共享质量门禁：日志、安全、schema 校验、trace、routing 边界
 ```
 
 ## 8. Checkpoints
@@ -447,9 +545,12 @@ Phase 0 工程基线
 - [ ] 翻译 adapter node 链路跑通。
 - [ ] 单条权利要求修改 node 链路跑通。
 
-### Checkpoint 4：API 闭环完成
+### Checkpoint 4：API 闭环与 routing 边界完成
 
-- [ ] 三条 API 可通过 TestClient 调用。
+- [ ] 三条显式业务 API 可通过 TestClient 调用。
+- [ ] 显式业务 API 通过 known intent 选择 concrete workflow。
+- [ ] 统一 Agent 入口规格覆盖 normalize → intent routing → workflow selection → orchestrator。
+- [ ] workflow registry / workflow_defs 为集中注册，不散落在 service 中。
 - [ ] 错误响应结构统一。
 - [ ] 用户可见结果包含解释性提示和风险提示。
 
@@ -487,26 +588,45 @@ MVP 最小交付必须同时满足：
 
 ## 11. 优先纵向切片
 
-### Slice 1：权利要求生成 API 闭环
+### Slice 1：共同编排骨架闭环
 
-**路径**：API → service → orchestrator → normalize → intent_router → feature_extract → claim_plan → claim_generate → claim_check → response。
+**路径**：统一 Agent 入口 / 显式业务 API → normalize 或 known intent → workflow selection → orchestrator → response。
 
-**优先原因**：这是专利 Agent MVP 的主价值链，能验证 schema、skill、validator、orchestrator 和 API 边界。
+**优先原因**：先统一入口、routing、workflow registry、orchestrator 的边界，避免后续业务链路把意图路由下沉到 service。
+
+**验收标准**：
+
+- 统一入口通过 `intent_router` 选择预定义 workflow。
+- 显式业务 API 通过 known intent 选择同一套 concrete workflow。
+- workflow_def 集中注册，service 不临时拼装流程。
+- trace 能区分 routing stage 和业务 node execution。
+
+**验证步骤**：
+
+- 分别用统一入口和显式 API 跑同一 intent，确认命中同一 workflow_def。
+- 搜索 `workflow_def`，确认计划表达为集中注册。
+- 检查显式业务 API 不在 service / orchestrator 之后再执行通用 `intent_router`。
+
+### Slice 2：权利要求生成完整路径
+
+**路径**：统一 Agent 入口 / 显式权利要求 API → recognized intent 或 known intent: `claim_generation` → workflow selection → orchestrator → disclosure_check / feature_extract → claim_plan → claim_generate → claim_check → response。
+
+**优先原因**：这是专利 Agent MVP 的主价值链，能验证 schema、skill、validator、orchestrator、routing 和 API 边界。
 
 **验收标准**：
 
 - 输入口语化技术方案后返回结构化权利要求初稿。
 - 返回 `validation_report` 和下一步建议。
-- trace 能看到每个 node 的执行结果。
+- trace 能看到 workflow selection 与每个业务 node 的执行结果。
 
 **验证步骤**：
 
-- 使用 fake LLM 固定输出跑通集成测试。
+- 使用 fake LLM 固定输出跑通统一入口和显式 API 集成测试。
 - 修改 fake 输出为缺字段，验证校验失败路径。
 
-### Slice 2：翻译 adapter API 闭环
+### Slice 3：翻译 adapter 完整路径
 
-**路径**：API → service → terminology_normalize → translate node → external translation adapter → response。
+**路径**：统一 Agent 入口 / 显式 `/translate` API → recognized intent 或 known intent: `translation` → workflow selection → orchestrator → terminology_normalize → translate node → external translation adapter → response。
 
 **优先原因**：验证外部 agent adapter 边界，避免翻译能力侵入主系统。
 
@@ -515,15 +635,16 @@ MVP 最小交付必须同时满足：
 - 返回译文、术语表和 trace。
 - adapter 超时或失败时返回可读错误。
 - 不要求真实翻译 agent 在线。
+- 显式 `/translate` 不承担全局意图识别。
 
 **验证步骤**：
 
 - fake adapter 返回成功、超时、字段缺失三类结果。
-- 检查 API 响应结构一致。
+- 检查统一入口和显式 API 响应结构一致。
 
-### Slice 3：单条权利要求修改 API 闭环
+### Slice 4：单条权利要求修改完整路径
 
-**路径**：API → service → locate_claim_version → parse_revision_intent → claim_revise → apply_claim_patch → claim_check → response。
+**路径**：统一 Agent 入口 / 显式修改 API → recognized intent 或 known intent: `claim_revision` → workflow selection → orchestrator → locate_claim_version → parse_revision_intent → claim_revise → apply_claim_patch → claim_check → response。
 
 **优先原因**：验证 claim writing 能力复用、版本链、patch 和引用关系校验。
 
@@ -532,6 +653,7 @@ MVP 最小交付必须同时满足：
 - 只修改指定 claim，除非 validator 要求联动。
 - 返回修改前后差异、风险提示和新版本号。
 - 引用关系和术语一致性重新校验。
+- 通用入口通过 revision intent 进入，显式修改 API 以 known intent 进入。
 
 **验证步骤**：
 

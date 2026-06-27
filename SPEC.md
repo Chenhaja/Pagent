@@ -95,12 +95,12 @@ pagent/
       security.py              # API key、鉴权、脱敏等边界逻辑
     orchestrator/
       engine.py                # workflow 调度引擎
-      workflow_defs.py         # 预定义 workflow 模板
+      workflow_defs.py         # 预定义 workflow 模板 / workflow registry
       state.py                 # 全局 state / blackboard
       node_base.py             # node 抽象
     nodes/
       normalize_input.py       # 轻量改写 / 指代消解 / 上下文补全
-      intent_router.py         # 意图识别与 workflow 路由
+      intent_router.py         # 意图识别与 workflow selection 前置路由
       feature_extract.py       # 技术特征抽取
       claim_plan.py            # 权利要求布局规划
       claim_generate.py        # 权利要求生成
@@ -138,6 +138,34 @@ pagent/
   requirements.txt
 ```
 
+### 双入口与 workflow selection
+
+MVP 保留两类入口，但二者都必须进入同一套编排层能力：
+
+```text
+统一 Agent 入口
+  → raw_input
+  → normalize_input
+  → intent_router
+  → workflow_registry / workflow selection
+  → orchestrator
+  → nodes
+
+显式业务 API
+  → raw_input / API schema
+  → normalize_input（如需要）
+  → known intent
+  → workflow_registry / workflow selection
+  → orchestrator
+  → nodes
+```
+
+- 统一 Agent 入口负责承接开放式用户请求，先做意图无关的轻量改写，再由 `intent_router` 映射到预定义 workflow。
+- 显式业务 API 的 path 已表达业务意图，可跳过通用意图识别，但仍应以 known intent 选择 concrete workflow，不直接拥有全局路由职责。
+- `intent_router` 只负责 workflow selection：把请求映射到 `workflow_defs.py` 中声明的预定义 workflow 模板；不临时拼装任意流程，不让 LLM 决定全局步骤顺序，也不属于具体业务 workflow 的内部普通步骤。
+- `workflow_defs.py` / workflow registry 集中声明预定义 workflow 模板、节点顺序、可选回环和入口参数约束，orchestrator 根据选中的 workflow_def 调度业务 nodes。
+- server / service 只做接入、schema 校验、权限、服务封装和响应格式化，不承接全局意图识别与路由职责。
+
 ### 核心数据结构
 
 MVP 至少需要定义：
@@ -161,7 +189,7 @@ MVP 至少需要定义：
   - `status`
   - `output`
   - `errors`
-  - `next_node`
+  - `next_node`（仅用于局部回环、澄清或异常分支；MVP 主路径由 orchestrator 按 workflow_def 顺序执行，通用意图路由表达为 workflow selection，而不是普通下一节点跳转）
   - `requires_user_input`
   - `trace_events`
 
@@ -301,54 +329,107 @@ MVP 至少需要定义：
 
 ### A. 专利问答
 
+统一 Agent 入口：
+
 ```text
 用户问题
   → 轻量改写
-  → 意图识别：patent_qa
-  → QA Node
-  → 可选 RAG / bounded ReAct 检索
-  → 结构化回答 + 风险提示 + 后续建议
+  → 意图识别 & 路由：patent_qa workflow
+  → orchestrator 执行 patent_qa workflow
+      → QA Node
+      → 可选 RAG / bounded ReAct 检索
+      → 结构化回答 + 风险提示 + 后续建议
+```
+
+显式问答 API：
+
+```text
+用户问题
+  → known intent: patent_qa
+  → workflow selection: patent_qa workflow
+  → orchestrator 执行 QA Node
 ```
 
 ### B. 专利翻译
 
+统一 Agent 入口：
+
 ```text
 用户文本
-  → 语言 / 文本类型识别
-  → 术语规范化
-  → 翻译接口适配 Node
-  → 调用外部翻译 agent
-  → 接收译文 / 错误 / 术语结果
-  → 返回译文 + 关键术语表
+  → 轻量改写
+  → 意图识别 & 路由：translation workflow
+  → orchestrator 执行 translation workflow
+      → 语言 / 文本类型识别
+      → 术语规范化
+      → 翻译接口适配 Node
+      → 调用外部翻译 agent
+      → 接收译文 / 错误 / 术语结果
+      → 返回译文 + 关键术语表
+```
+
+显式 `/translate` API：
+
+```text
+用户文本
+  → known intent: translation
+  → workflow selection: translation workflow
+  → orchestrator 执行 translation workflow
 ```
 
 MVP 不重复实现翻译 agent，只定义可接入接口、上下文传递、错误处理和 trace 记录。
 
 ### C. 权利要求生成
 
+统一 Agent 入口：
+
 ```text
 技术方案输入
   → 轻量改写
-  → 信息完整性检查
-  → 必要时向用户追问
-  → 技术特征抽取
-  → 权利要求布局规划
-  → 独立权利要求生成
-  → 从属权利要求生成
-  → 基础合规校验
-  → 返回初稿 + 校验报告 + 修改建议
+  → 意图识别 & 路由：claim_generation workflow
+  → orchestrator 执行 claim_generation workflow
+      → 信息完整性检查
+      → 必要时向用户追问
+      → 技术特征抽取
+      → 权利要求布局规划
+      → 独立权利要求生成
+      → 从属权利要求生成
+      → 基础合规校验
+      → 返回初稿 + 校验报告 + 修改建议
+```
+
+显式权利要求生成 API：
+
+```text
+技术方案输入
+  → known intent: claim_generation
+  → workflow selection: claim_generation workflow
+  → orchestrator 执行业务 nodes
 ```
 
 ### D. 单条 / 局部权利要求修改
 
+统一 Agent 入口：
+
 ```text
 用户修改意见 + 目标权利要求编号
-  → 定位当前权利要求版本
-  → 解析修改意图
-  → 生成结构化 patch
-  → 应用 patch 得到新版本
-  → 检查引用关系 / 术语一致性 / 保护范围影响
-  → 返回修改后的权利要求 + 差异说明 + 风险提示
+  → 轻量改写
+  → 意图识别 & 路由：claim_revision workflow
+  → orchestrator 执行 claim_revision workflow
+      → 定位当前权利要求版本
+      → 解析修改意图
+      → 生成结构化 patch
+      → 应用 patch 得到新版本
+      → 检查引用关系 / 术语一致性 / 保护范围影响
+      → 返回修改后的权利要求 + 差异说明 + 风险提示
+```
+
+显式修改 API：
+
+```text
+用户修改意见 + 目标权利要求编号
+  → known intent: claim_revision
+  → workflow selection: claim_revision workflow
+  → orchestrator 执行业务 nodes
 ```
 
 局部修改优先只改目标权利要求；只有当引用关系、术语一致性或保护范围联动要求必须调整其它权利要求时，才生成关联 patch，并在返回结果中解释原因。

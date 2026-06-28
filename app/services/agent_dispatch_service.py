@@ -1,5 +1,7 @@
 from typing import Any
 
+from app.core.config import get_settings
+from app.memory.session_store import SessionMemoryStore, build_session_store
 from app.models.schemas import WorkflowState
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
@@ -19,26 +21,38 @@ class AgentDispatchService:
         先执行 normalize 和 intent_router,再按预定义 workflow 分派到具体业务服务的入口服务。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, session_store: SessionMemoryStore | None = None) -> None:
         self.normalize_node = NormalizeInputNode()
         self.query_rewrite_node = QueryRewriteNode()
         self.intent_router_node = IntentRouterNode()
         self.workflow_registry = WorkflowRegistry()
+        self.session_store = session_store or build_session_store(get_settings())
 
-    def dispatch(self, raw_input: str, claims_draft: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def dispatch(
+        self,
+        raw_input: str,
+        claims_draft: list[dict[str, Any]] | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         """根据用户输入识别意图并分派到预定义 workflow。
 
         Args:
             raw_input: 用户原始输入。
             claims_draft: 修改权利要求时传入的当前权利要求草稿。
+            session_id: 可选会话标识,用于读取和写入会话记忆。
 
         Returns:
             具体 workflow 的结构化结果,或需要用户补充输入的错误结果。
         """
         state = WorkflowState(raw_input=raw_input, claims_draft=claims_draft or [])
+        self._inject_session_context(state, session_id)
         normalize_result = self.normalize_node.run(state)
         if normalize_result.status != "success":
-            return {"status": normalize_result.status, "errors": normalize_result.errors, "message": "请补充要办理的专利任务类型。"}
+            return self._finalize_result(
+                state,
+                session_id,
+                {"status": normalize_result.status, "errors": normalize_result.errors, "message": "请补充要办理的专利任务类型。"},
+            )
         for trace_event in normalize_result.trace_events:
             state.add_trace_event(event=str(trace_event.get("event", "node_event")), data=trace_event.get("data", {}))
 
@@ -46,14 +60,22 @@ class AgentDispatchService:
         for trace_event in rewrite_result.trace_events:
             state.add_trace_event(event=str(trace_event.get("event", "node_event")), data=trace_event.get("data", {}))
         if rewrite_result.status != "success":
-            return {"status": rewrite_result.status, "errors": rewrite_result.errors, "message": "请补充要办理的专利任务类型。"}
+            return self._finalize_result(
+                state,
+                session_id,
+                {"status": rewrite_result.status, "errors": rewrite_result.errors, "message": "请补充要办理的专利任务类型。"},
+            )
 
         route_result = self.intent_router_node.run(state)
         for trace_event in route_result.trace_events:
             state.add_trace_event(event=str(trace_event.get("event", "node_event")), data=trace_event.get("data", {}))
         if route_result.status != "success":
             message = route_result.output.get("message") or "请补充要办理的专利任务类型。"
-            return {"status": route_result.status, "errors": route_result.errors, "message": message, **route_result.output}
+            return self._finalize_result(
+                state,
+                session_id,
+                {"status": route_result.status, "errors": route_result.errors, "message": message, **route_result.output},
+            )
 
         workflow_def = self.workflow_registry.get_workflow_def(state.intent or "")
         remaining_nodes = self._remaining_nodes_after(workflow_def, route_result.next_node)
@@ -63,14 +85,14 @@ class AgentDispatchService:
                 state=state,
                 workflow_def=remaining_nodes,
             )
-            return {"intent": state.intent, "workflow": "claim_generation", **result}
+            return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "claim_generation", **result})
         if state.intent == "translation":
             result = TranslateService().translate(
                 state.normalized_input or state.raw_input,
                 state=state,
                 workflow_def=remaining_nodes,
             )
-            return {"intent": state.intent, "workflow": "translation", **result}
+            return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "translation", **result})
         if state.intent == "claim_revision":
             state.user_feedback = state.normalized_input or state.raw_input
             result = RevisionService().revise_claim(
@@ -79,12 +101,103 @@ class AgentDispatchService:
                 state=state,
                 workflow_def=remaining_nodes,
             )
-            return {"intent": state.intent, "workflow": "claim_revision", **result}
+            return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "claim_revision", **result})
         if state.intent == "qa":
             result = self._run_qa(state, remaining_nodes)
-            return {"intent": state.intent, "workflow": "qa", **result}
+            return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "qa", **result})
 
-        return {"status": "requires_user_input", "errors": ["unknown_intent"], "message": "请补充要办理的专利任务类型。"}
+        return self._finalize_result(
+            state,
+            session_id,
+            {"status": "requires_user_input", "errors": ["unknown_intent"], "message": "请补充要办理的专利任务类型。"},
+        )
+
+    def _inject_session_context(self, state: WorkflowState, session_id: str | None) -> None:
+        """在 query_rewrite 前注入会话上下文。
+
+        Args:
+            state: 当前 workflow 状态。
+            session_id: 可选会话标识。
+
+        Returns:
+            无返回值;失败时只写降级 trace。
+        """
+        if not session_id:
+            state.add_trace_event(event="session_memory_skipped", data={"reason": "no_session"})
+            return
+        try:
+            context = self.session_store.build_context(session_id)
+        except Exception as exc:
+            state.add_trace_event(event="session_memory_unavailable", data={"reason": exc.__class__.__name__})
+            return
+        history = context.get("history") or []
+        state.dialog_context["history"] = history
+        state.dialog_context["session_summary"] = context.get("session_summary")
+        state.add_trace_event(
+            event="session_memory_loaded",
+            data={"history_count": len(history), "has_summary": bool(context.get("session_summary"))},
+        )
+
+    def _finalize_result(self, state: WorkflowState, session_id: str | None, result: dict[str, Any]) -> dict[str, Any]:
+        """请求结束后写入会话 turn 并触发摘要。
+
+        Args:
+            state: 当前 workflow 状态。
+            session_id: 可选会话标识。
+            result: 即将返回给调用方的结果。
+
+        Returns:
+            带最新 trace 的服务结果。
+        """
+        if not session_id:
+            return result
+        turn_count = 0
+        try:
+            self.session_store.append_turn(session_id, "user", state.raw_input)
+            turn_count += 1
+            assistant_text = self._extract_assistant_text(result)
+            if assistant_text:
+                self.session_store.append_turn(session_id, "assistant", assistant_text)
+                turn_count += 1
+            state.add_trace_event(event="session_memory_appended", data={"turn_count": turn_count})
+            if hasattr(self.session_store, "summarize_if_needed"):
+                summary_result = self.session_store.summarize_if_needed(session_id)
+                if summary_result.success:
+                    state.add_trace_event(
+                        event="memory_summary_completed",
+                        data={
+                            "covered_turn_index": summary_result.covered_turn_index,
+                            "history_window": getattr(self.session_store, "history_window", None),
+                        },
+                    )
+                elif summary_result.reason not in {"no_summary_needed", "summarizer_unavailable"}:
+                    state.add_trace_event(event="memory_summary_failed_fallback", data={"reason": summary_result.reason})
+        except Exception as exc:
+            state.add_trace_event(event="session_memory_unavailable", data={"reason": exc.__class__.__name__})
+        if "trace" in result:
+            result["trace"] = state.trace
+        return result
+
+    def _extract_assistant_text(self, result: dict[str, Any]) -> str:
+        """从服务结果中提取可落库的 assistant 文本。
+
+        Args:
+            result: 服务层结构化结果。
+
+        Returns:
+            可保存的简短 assistant 文本;无可用内容时返回空字符串。
+        """
+        if result.get("message"):
+            return str(result["message"])
+        if result.get("claims_draft"):
+            return "\n".join(str(claim.get("text", "")) for claim in result["claims_draft"] if isinstance(claim, dict)).strip()
+        if result.get("translated_text"):
+            return str(result["translated_text"])
+        if result.get("claim") and isinstance(result["claim"], dict):
+            return str(result["claim"].get("text", ""))
+        if result.get("answer"):
+            return str(result["answer"])
+        return ""
 
     def _run_qa(self, state: WorkflowState, workflow_def: list[str]) -> dict[str, Any]:
         """执行 QA workflow 并转换为服务响应。

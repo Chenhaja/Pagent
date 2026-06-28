@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.api import routes
 from app.main import app
 
 DISCLAIMER = "辅助初稿，不等同于专利代理师法律意见。"
@@ -81,3 +82,27 @@ def test_agent_api_returns_common_error_for_unknown_intent() -> None:
         "message": "您希望我处理哪类专利任务？可以选择撰写权利要求、修改权利要求、翻译专利文本，或咨询专利问答。",
         "disclaimer": DISCLAIMER,
     }
+
+
+def test_agent_api_accepts_and_forwards_session_id(monkeypatch) -> None:
+    """统一 Agent API 应接收并透传可选 session_id。"""
+    captured = {}
+
+    class StubAgentDispatchService:
+        """测试用 dispatch 服务。"""
+
+        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+            """记录请求参数并返回成功响应。"""
+            captured["raw_input"] = raw_input
+            captured["claims_draft"] = claims_draft
+            captured["session_id"] = session_id
+            return {"status": "success", "intent": "claim_generation", "workflow": "claim_generation", "trace": []}
+
+    monkeypatch.setattr(routes, "AgentDispatchService", StubAgentDispatchService)
+    client = TestClient(app)
+
+    response = client.post("/agent", json={"raw_input": "继续", "session_id": "s1"})
+
+    assert response.status_code == 200
+    assert captured["session_id"] == "s1"
+    assert captured["raw_input"] == "继续"

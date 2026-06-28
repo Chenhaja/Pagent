@@ -97,27 +97,27 @@
 
 ## Phase 5: dispatch 会话闭环
 
-- [ ] 为 dispatch 增加 `session_id` 和 store 注入
+- [x] 为 dispatch 增加 `session_id` 和 store 注入
   - 文件范围：`app/services/agent_dispatch_service.py`、`tests/test_agent_dispatch_service.py`
   - 验收：`dispatch(raw_input, claims_draft=None, session_id=None)` 可用；服务可注入测试 store；默认通过配置构造 store。
   - 验证：`pytest tests/test_agent_dispatch_service.py`
   - 阻塞：Phase 4。
-- [ ] query_rewrite 前注入历史
+- [x] query_rewrite 前注入历史
   - 文件范围：`app/services/agent_dispatch_service.py`、`tests/test_agent_dispatch_service.py`
   - 验收：有 `session_id` 且已有历史时，在 `normalize_input` / `query_rewrite` 前写入 `state.dialog_context["history"]` 和 `state.dialog_context["session_summary"]`；第二轮指代输入走 `query_rewrite_completed`。
   - 验证：`pytest tests/test_agent_dispatch_service.py`
   - 阻塞：dispatch session_id。
-- [ ] 无 session 与读取失败降级 trace
+- [x] 无 session 与读取失败降级 trace
   - 文件范围：`app/services/agent_dispatch_service.py`、`tests/test_agent_dispatch_service.py`
   - 验收：无 `session_id` 时行为兼容并 trace `session_memory_skipped(reason=no_session)`；store 读取失败时 trace `session_memory_unavailable` 且主流程继续。
   - 验证：`pytest tests/test_agent_dispatch_service.py`
   - 阻塞：query_rewrite 前注入历史。
-- [ ] 请求结束后追加 user / assistant turn
+- [x] 请求结束后追加 user / assistant turn
   - 文件范围：`app/services/agent_dispatch_service.py`、`tests/test_agent_dispatch_service.py`
   - 验收：请求完成后追加 `user` raw_input 脱敏副本和可用 assistant 文本；failed / requires_user_input 路径仍尽量写入 user turn；`raw_input` 始终不被覆盖。
   - 验证：`pytest tests/test_agent_dispatch_service.py`
   - 阻塞：降级 trace。
-- [ ] dispatch 摘要触发与 trace
+- [x] dispatch 摘要触发与 trace
   - 文件范围：`app/services/agent_dispatch_service.py`、`tests/test_agent_dispatch_service.py`
   - 验收：响应后触发摘要；成功 trace `memory_summary_completed`；失败 trace `memory_summary_failed_fallback`；trace 不含完整历史正文。
   - 验证：`pytest tests/test_agent_dispatch_service.py`
@@ -125,12 +125,12 @@
 
 ## Phase 6: API 接入 session_id
 
-- [ ] `AgentRequest` 增加可选 `session_id`
+- [x] `AgentRequest` 增加可选 `session_id`
   - 文件范围：`app/api/schemas.py`、`tests/test_agent_api.py`
   - 验收：请求体可带 `session_id`；不带时兼容旧请求体。
   - 验证：`pytest tests/test_agent_api.py`
   - 阻塞：Phase 5。
-- [ ] `/agent` 路由透传 `session_id`
+- [x] `/agent` 路由透传 `session_id`
   - 文件范围：`app/api/routes.py`、`tests/test_agent_api.py`
   - 验收：路由调用服务层时传递 `session_id=request.session_id`；测试能断言服务层收到该值。
   - 验证：`pytest tests/test_agent_api.py`

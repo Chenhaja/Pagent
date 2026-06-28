@@ -60,7 +60,7 @@ def dispatch_agent(request: AgentRequest) -> dict[str, Any]:
     Raises:
         HTTPException: 当分发服务返回非成功状态时抛出。
     """
-    result = AgentDispatchService().dispatch(request.raw_input, claims_draft=request.claims_draft)
+    result = AgentDispatchService().dispatch(request.raw_input, claims_draft=request.claims_draft, session_id=request.session_id)
     if result["status"] != "success":
         raise HTTPException(status_code=400, detail=build_error_detail(result))
     if "patch" in result:

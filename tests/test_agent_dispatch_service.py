@@ -1,3 +1,5 @@
+from typing import Any
+
 from app.models.schemas import NodeResult, WorkflowState
 from app.services.agent_dispatch_service import AgentDispatchService
 
@@ -25,6 +27,73 @@ class FallbackRewriteNode:
         )
 
 
+class InspectingRewriteNode:
+    """测试用改写节点,记录运行时收到的历史。"""
+
+    def __init__(self) -> None:
+        self.seen_history: list[dict[str, str]] = []
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """记录 history 并模拟有历史时完成改写。"""
+        self.seen_history = list(state.dialog_context.get("history", []))
+        if self.seen_history:
+            state.normalized_input = "请根据技术方案生成权利要求"
+            return NodeResult.success(
+                output={"normalized_input": state.normalized_input},
+                trace_events=[{"event": "query_rewrite_completed", "data": {"confidence": 0.9, "uncertain": False}}],
+            )
+        return NodeResult.success(
+            output={"normalized_input": state.normalized_input},
+            trace_events=[{"event": "query_rewrite_skipped", "data": {"reason": "no_history"}}],
+        )
+
+
+class RecordingSessionStore:
+    """测试用会话 store,记录读写调用。"""
+
+    def __init__(self, context: dict[str, Any] | None = None, should_fail_load: bool = False) -> None:
+        self.context = context or {"history": [], "session_summary": None}
+        self.should_fail_load = should_fail_load
+        self.appended: list[tuple[str, str, str]] = []
+        self.summary_called = False
+
+    def load_history(self, session_id: str, max_turns: int) -> list[dict[str, str]]:
+        """返回测试历史。"""
+        return list(self.context.get("history", []))
+
+    def append_turn(self, session_id: str, role: str, content: str) -> None:
+        """记录追加 turn。"""
+        self.appended.append((session_id, role, content))
+
+    def load_summary(self, session_id: str) -> str | None:
+        """返回测试摘要。"""
+        return self.context.get("session_summary")
+
+    def upsert_summary(self, session_id: str, summary: str, covered_turn_index: int) -> None:
+        """忽略摘要写入。"""
+        return None
+
+    def build_context(self, session_id: str) -> dict[str, Any]:
+        """返回或抛出测试上下文。"""
+        if self.should_fail_load:
+            raise RuntimeError("db unavailable")
+        return self.context
+
+    def summarize_if_needed(self, session_id: str):
+        """记录摘要触发并返回无需摘要。"""
+        self.summary_called = True
+        return SimpleSummaryResult(success=False, reason="no_summary_needed")
+
+
+class SimpleSummaryResult:
+    """测试用摘要结果。"""
+
+    def __init__(self, success: bool, reason: str | None = None, covered_turn_index: int | None = None) -> None:
+        self.success = success
+        self.reason = reason
+        self.covered_turn_index = covered_turn_index
+
+
 def test_agent_dispatch_routes_claim_generation_workflow() -> None:
     """统一 Agent 入口应路由到权利要求生成 workflow。"""
     service = AgentDispatchService()
@@ -36,6 +105,7 @@ def test_agent_dispatch_routes_claim_generation_workflow() -> None:
     assert result["workflow"] == "claim_generation"
     assert result["claims_draft"][0]["text"] == "一种控制方法。"
     assert [event["event"] for event in result["trace"]] == [
+        "session_memory_skipped",
         "normalize_input_completed",
         "query_rewrite_skipped",
         "intent_router_completed",
@@ -97,7 +167,8 @@ def test_agent_dispatch_uses_rewritten_input_for_intent_router() -> None:
 
     assert result["status"] == "success"
     assert result["intent"] == "claim_generation"
-    assert [event["event"] for event in result["trace"]][:3] == [
+    assert [event["event"] for event in result["trace"]][:4] == [
+        "session_memory_skipped",
         "normalize_input_completed",
         "query_rewrite_completed",
         "intent_router_completed",
@@ -113,7 +184,8 @@ def test_agent_dispatch_continues_after_query_rewrite_fallback() -> None:
 
     assert result["status"] == "success"
     assert result["intent"] == "claim_generation"
-    assert [event["event"] for event in result["trace"]][:3] == [
+    assert [event["event"] for event in result["trace"]][:4] == [
+        "session_memory_skipped",
         "normalize_input_completed",
         "query_rewrite_failed_fallback",
         "intent_router_completed",
@@ -144,3 +216,64 @@ def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:
     assert result["errors"] == ["unknown_intent"]
     assert "您希望我处理哪类专利任务" in result["message"]
     assert "supported_intents" in result
+
+
+def test_agent_dispatch_injects_session_history_before_query_rewrite() -> None:
+    """有 session_id 时 dispatch 应在 query_rewrite 前注入会话历史。"""
+    store = RecordingSessionStore(
+        context={
+            "history": [{"role": "user", "content": "我有一个夹爪方案"}],
+            "session_summary": "用户讨论夹爪方案。",
+        }
+    )
+    rewrite_node = InspectingRewriteNode()
+    service = AgentDispatchService(session_store=store)
+    service.query_rewrite_node = rewrite_node
+
+    result = service.dispatch("把它写成权利要求", session_id="s1")
+
+    assert result["status"] == "success"
+    assert rewrite_node.seen_history == [{"role": "user", "content": "我有一个夹爪方案"}]
+    assert result["trace"][0]["event"] == "session_memory_loaded"
+    assert "query_rewrite_completed" in [event["event"] for event in result["trace"]]
+
+
+def test_agent_dispatch_without_session_id_keeps_old_no_history_behavior() -> None:
+    """无 session_id 时应跳过会话记忆并保持旧 no_history 行为。"""
+    rewrite_node = InspectingRewriteNode()
+    service = AgentDispatchService(session_store=RecordingSessionStore())
+    service.query_rewrite_node = rewrite_node
+
+    result = service.dispatch("请根据技术方案生成权利要求")
+
+    events = [event["event"] for event in result["trace"]]
+    assert "session_memory_skipped" in events
+    assert "query_rewrite_skipped" in events
+    assert rewrite_node.seen_history == []
+
+
+def test_agent_dispatch_appends_user_and_assistant_turns_after_success() -> None:
+    """请求成功后应追加 user 与 assistant turn,且保留 raw_input。"""
+    store = RecordingSessionStore()
+    service = AgentDispatchService(session_store=store)
+
+    result = service.dispatch("请根据技术方案生成权利要求", session_id="s1")
+
+    assert result["status"] == "success"
+    assert store.appended[0] == ("s1", "user", "请根据技术方案生成权利要求")
+    assert store.appended[1][0] == "s1"
+    assert store.appended[1][1] == "assistant"
+    assert "一种控制方法" in store.appended[1][2]
+    assert store.summary_called is True
+
+
+def test_agent_dispatch_continues_when_session_store_load_fails() -> None:
+    """会话 store 读取失败时主流程应继续并记录降级 trace。"""
+    store = RecordingSessionStore(should_fail_load=True)
+    service = AgentDispatchService(session_store=store)
+
+    result = service.dispatch("请根据技术方案生成权利要求", session_id="s1")
+
+    assert result["status"] == "success"
+    events = [event["event"] for event in result["trace"]]
+    assert "session_memory_unavailable" in events

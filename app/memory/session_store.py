@@ -6,6 +6,7 @@ from typing import Any, Literal, Protocol
 from app.core.config import Settings
 from app.core.security import redact_sensitive_text
 from app.memory.summarizer import SessionSummarizer, SummaryResult
+from app.tools.llm import build_llm_client
 
 SessionRole = Literal["user", "assistant"]
 
@@ -361,6 +362,10 @@ def build_session_store(settings: Settings) -> SessionMemoryStore:
             history_window=settings.memory_history_window,
             token_budget=settings.memory_token_budget,
             redaction_enabled=settings.redaction_enabled,
+            summarizer=SessionSummarizer(
+                llm_client=build_llm_client(settings),
+                model=settings.memory_summary_model or settings.llm_cheap_model or settings.llm_model or None,
+            ),
         )
     except sqlite3.Error:
         return NullSessionStore()

@@ -138,22 +138,22 @@
 
 ## Phase 7: 回归验收
 
-- [ ] 运行 R6.1 目标测试
+- [x] 运行 R6.1 目标测试
   - 文件范围：R6.1 修改涉及的源码与测试。
   - 验收：session store、dispatch、配置、API 目标测试全部通过；默认不触发真实 LLM / 网络。
   - 验证：`pytest tests/test_session_store.py tests/test_agent_dispatch_service.py tests/test_core_config_logging.py tests/test_agent_api.py`
   - 阻塞：Phase 6。
-- [ ] 运行全量测试
+- [x] 运行全量测试
   - 文件范围：全项目。
   - 验收：全量 pytest 通过。
   - 验证：`pytest`
   - 阻塞：R6.1 目标测试。
-- [ ] 运行编译检查
+- [x] 运行编译检查
   - 文件范围：`app`、`tests`。
   - 验收：Python 编译检查通过。
   - 验证：`python -m compileall app tests`
   - 阻塞：全量测试。
-- [ ] 执行最终验收命令
+- [x] 执行最终验收命令
   - 文件范围：全项目。
   - 验收：`pytest && python -m compileall app tests` 通过；SQLite DB、`.env`、`.env.*` 不被提交；trace 不记录敏感正文。
   - 验证：`pytest && python -m compileall app tests`

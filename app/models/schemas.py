@@ -106,6 +106,21 @@ class ValidationReport(BaseModel):
     risk_notes: list[str] = Field(default_factory=list)
 
 
+class IntentClassification(BaseModel):
+    """意图识别结构化结果。
+
+    Args:
+        intent: 识别出的任务意图。
+        confidence: 分类置信度,范围为 0 到 1。
+
+    Returns:
+        可由 intent router 消费的结构化分类结果。
+    """
+
+    intent: Literal["claim_generation", "claim_revision", "translation", "qa", "unknown"]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class PatentQAResult(BaseModel):
     """专利问答结构化结果。
 

@@ -15,7 +15,7 @@
 
 ## Phase 1: 安全前置
 
-- [ ] 核查 LLM 默认配置安全性
+- [x] 核查 LLM 默认配置安全性
   - 文件范围：`app/core/config.py`、`app/tools/llm.py`、`tests/test_core_config_logging.py`、`tests/test_llm_tool.py`
   - 验收：默认配置不包含真实 API Key / endpoint / 模型凭据；无有效配置时 `build_llm_client()` 返回 `FakeLLMClient`；`to_public_dict()` 不暴露密钥。
   - 验证：`pytest tests/test_core_config_logging.py tests/test_llm_tool.py`
@@ -23,22 +23,22 @@
 
 ## Phase 2: 意图识别最小闭环
 
-- [ ] 新增 `IntentClassification`
+- [x] 新增 `IntentClassification`
   - 文件范围：`app/models/schemas.py`
   - 验收：intent 枚举为 `claim_generation | claim_revision | translation | qa | unknown`，confidence 限制在 `0.0~1.0`。
   - 验证：`pytest tests/test_intent_router_node.py`
   - 阻塞：Phase 1。
-- [ ] 新增 intent_router prompt
+- [x] 新增 intent_router prompt
   - 文件范围：`app/prompts/intent_router.py`
   - 验收：导出 system prompt、output schema、user prompt builder；满足六要素、数据隔离、仅输出 JSON。
   - 验证：`pytest tests/test_intent_router_node.py`
   - 阻塞：Phase 1。
-- [ ] 修复关键词优先级 bug
+- [x] 修复关键词优先级 bug
   - 文件范围：`app/nodes/intent_router.py`
   - 验收：权利要求相关语义优先于 `qa` 宽泛词；关键词命中不调用 LLM；trace 含 `intent`、`source: keyword`、`confidence`。
   - 验证：`pytest tests/test_intent_router_node.py`
   - 阻塞：新增 schema 与 prompt。
-- [ ] 补关键词快路测试
+- [x] 补关键词快路测试
   - 文件范围：`tests/test_intent_router_node.py`
   - 验收：“我的权利要求有什么问题”不路由到 QA；各关键词命中不调用 LLM。
   - 验证：`pytest tests/test_intent_router_node.py`

@@ -1,44 +1,46 @@
-# R6.1 会话记忆最小片执行计划
+# R4.1 检索最小片执行计划
 
 ## Context
 
-R6.1 要补齐“会话历史持久化 → query_rewrite 前注入 → 响应后落库 → 超窗口摘要”的最小闭环。当前 `QueryRewriteNode` 已读取 `state.dialog_context["history"]`，但 `AgentDispatchService.dispatch()` 每次新建 `WorkflowState`，没有任何跨请求历史，因此带指代的第二轮请求会继续 `query_rewrite_skipped(reason=no_history)`。
+R4.1 要补齐 QA 的“可替换检索接口 → 向量召回 → 本地知识入库 → evidence provenance 回链”最小闭环。当前 `QANode` 在 `app/nodes/qa.py` 中硬编码 `LocalRetrievalTool()`，而 `LocalRetrievalTool.documents` 默认空，导致 QA 默认没有任何支撑知识；`RetrievalResult` 也只有 `content`、`provenance`、`score`，缺少向量相似度和更细 provenance。
 
-本计划只实现按 `session_id` 的 SQLite 会话记忆薄片，不改 `query_rewrite` 核心算法，不接长期记忆、Notion、向量库或 Redis。默认测试使用 tmp SQLite 和 fake / stub LLM，不触发真实网络。
+本计划只实现单轮检索最小片：保留 `LocalRetrievalTool` 作为测试 / 降级后端，新增 `Retriever` 协议、OpenAI 兼容 embedding、`QdrantRetriever`、`build_retriever(settings)`、QA evidence 透传和本地入库脚本。不接付费专利源，不实现 R4.2 多步 ReAct，不让测试依赖真实网络或真实 Qdrant。
 
 ## 依赖图
 
 ```text
 任务 0 计划文档落地
   ↓
-任务 1 配置与安全默认值：PAGENT_MEMORY_* + .gitignore
+任务 1 配置入口：PAGENT_RETRIEVAL_* / QDRANT_* / EMBEDDING_*
   ↓
-任务 2 SQLite SessionMemoryStore 最小持久化：建表 + append/load + 降级工厂
+任务 2 检索契约薄片：RetrievalResult 扩展 + Retriever 协议 + Local 兼容
   ↓
-任务 3 会话上下文组装：summary 头部 + 最近窗口 history + 脱敏
+任务 3 Embedding 客户端：Fake + OpenAI 兼容接口 + 脱敏边界
   ↓
-任务 4 滚动摘要薄片：prompt + summarizer + 失败降级
+任务 4 Qdrant 单轮检索：fake client 驱动的 QdrantRetriever
   ↓
-任务 5 dispatch 会话闭环：query_rewrite 前注入 + 响应后追加 turns + trace
+任务 5 Retriever 工厂与降级：local/qdrant/未知 backend
   ↓
-任务 6 API 接入：AgentRequest.session_id + /agent 透传
+任务 6 QA 垂直接线：默认工厂注入 + evidence provenance 回链
   ↓
-任务 7 回归与最终验收：目标测试 + 全量测试 + compileall
+任务 7 本地知识入库：knowledge/* 切分 + point_id 幂等 + fake upsert
+  ↓
+任务 8 回归与最终验收：目标测试 + 全量测试 + compileall
 ```
 
 ## 关键复用点
 
-- `app/services/agent_dispatch_service.py`：保持 `normalize_input → query_rewrite → intent_router → workflow/orchestrator` 顺序，只在 query_rewrite 前注入历史，并在请求结束后追加 turn。
-- `app/models/schemas.py`：复用 `WorkflowState`、`NodeResult`、现有 trace 结构，不新增顶层状态字段。
-- `app/tools/llm.py`：摘要器复用 `LLMClient`、`LLMMessage`、`build_llm_client()`，测试中注入 stub。
-- `app/core/security.py`：复用现有脱敏能力；入库和摘要 prompt 前均脱敏。
-- `app/memory/store.py`：保留 `LocalMemoryStore` 和长期记忆 gating，不复用其 `_can_write()` 阻断会话 turn。
-- `app/prompts/query_rewrite.py`：`history` 继续兼容 `{role, content}`，摘要以合成 assistant 消息放在头部。
-- `app/api/schemas.py` / `app/api/routes.py`：只加可选 `session_id` 并透传，旧请求体继续兼容。
+- `app/tools/retrieval.py`：保留 `LocalRetrievalTool` 类名和关键词行为，扩展为实现 `Retriever` 协议；新增 `QdrantRetriever` 和 `build_retriever()`。
+- `app/nodes/qa.py`：复用 `_retrieve()` 的 bounded guard 与 try/except；只改默认检索器来源和 `_build_evidence()` 透传字段。
+- `app/core/config.py`：沿用 `Settings`、`.env` 加载、`to_public_dict()` 敏感字段排除模式。
+- `app/core/security.py`：复用 `redact_sensitive_text()`；在线 query embedding 前可先脱敏，日志 / trace 不写完整正文。
+- `app/tools/llm.py`：Embedding 客户端可复用 OpenAI 兼容 HTTP 调用风格，但不耦合 Chat Completions。
+- `app/prompts/patent_qa.py`：已有 `<data>` 数据隔离和禁止臆造约束；必要时只补强 locator 引用，不重写 prompt 架构。
+- `tests/test_retrieval_tool.py` / `tests/test_qa_node.py`：优先扩展现有测试，保持旧断言兼容。
 
-## 可执行任务
+## 垂直任务
 
-### 任务 0：落地 R6.1 计划文件
+### 任务 0：落地 R4.1 计划文件
 
 **修改文件**
 - `tasks/plan.md`
@@ -49,42 +51,43 @@ R6.1 要补齐“会话历史持久化 → query_rewrite 前注入 → 响应后
 - 将任务拆成可勾选清单写入 `tasks/todo.md`，包含文件范围、验收标准、验证命令和阻塞关系。
 
 **验收标准**
-- 两个文件存在且内容与 R6.1 `SPEC.md` 对齐。
-- 任务按可验证垂直切片组织，不只按 schema / prompt / service 横向分层。
+- 两个文件存在且内容与 R4.1 `SPEC.md` 对齐。
+- 任务按可验证垂直切片组织，每个阶段都能独立跑局部测试。
 
 **验证**
 - 人工检查 `tasks/plan.md`、`tasks/todo.md`。
 
 **检查点 CP0**
-- R6.1 后续实现范围、依赖和验收命令明确。
+- R4.1 后续实现范围、依赖和验收命令明确。
 
 ---
 
-### 任务 1：配置与安全默认值
+### 任务 1：配置入口最小闭环
 
 **修改文件**
 - `app/core/config.py`
-- `.gitignore`
 - `tests/test_core_config_logging.py`
 
 **实施内容**
 - 在 `Settings` 增加：
-  - `memory_enabled: bool = True`
-  - `memory_db_path: str = "./pagent_memory.db"`
-  - `memory_history_window: int = 6`
-  - `memory_token_budget: int = 1500`
-  - `memory_summary_model: str | None = None`
-- 在 `get_settings()` 读取对应 `PAGENT_MEMORY_*` 环境变量。
-- `Settings.to_public_dict()` 展示非敏感 memory 配置，不暴露密钥。
-- `.gitignore` 增加 SQLite 会话库文件忽略规则，例如 `pagent_memory.db`、`*.sqlite`、`*.sqlite3`。
-- 增加配置默认值、环境变量读取、公开配置不暴露敏感字段的测试。
+  - `retrieval_backend: str = "local"`
+  - `retrieval_top_k: int = 3`
+  - `qdrant_url: str | None = None`
+  - `qdrant_api_key: str | None = Field(default=None, exclude=True)`
+  - `qdrant_collection: str = "patent_kb"`
+  - `embedding_base_url: str | None = None`
+  - `embedding_model: str = ""`
+  - `embedding_api_key: str | None = Field(default=None, exclude=True)`
+- 在 `get_settings()` 读取对应 `PAGENT_*` 环境变量。
+- 明确 embedding 回退口径：调用侧使用 `embedding_base_url or llm_base_url`、`embedding_api_key or llm_api_key`。
+- `Settings.to_public_dict()` 展示非敏感 retrieval / qdrant / embedding 配置，不暴露任何 key。
+- 增加默认值、环境变量读取、公开配置不暴露敏感字段的测试。
 
 **验收标准**
-- 默认配置与 SPEC 表格一致。
-- 环境变量可覆盖 memory 配置。
-- `.env` 机制不被破坏。
-- SQLite 数据库文件不会被误提交。
-- 默认测试不触网。
+- 默认 backend 为 `local`，不改变现有运行行为。
+- `PAGENT_RETRIEVAL_TOP_K` 默认 3，可被环境变量覆盖。
+- qdrant / embedding API key 不出现在 `to_public_dict()`。
+- 测试不触网。
 
 **验证**
 ```bash
@@ -92,225 +95,240 @@ pytest tests/test_core_config_logging.py
 ```
 
 **检查点 CP1**
-- memory 配置入口稳定，后续 store / dispatch 不需要硬编码参数。
+- 后续 retriever / embedding / ingest 不需要硬编码配置。
 
 ---
 
-### 任务 2：SQLite SessionMemoryStore 最小持久化
+### 任务 2：检索契约与 Local 兼容
 
 **修改文件**
-- `app/memory/session_store.py`（新增）
-- `tests/test_session_store.py`（新增）
+- `app/tools/retrieval.py`
+- `tests/test_retrieval_tool.py`
 
 **实施内容**
-- 新增 `SessionMemoryStore` 协议，包含 `load_history()`、`append_turn()`、`load_summary()`、`upsert_summary()`、`build_context()`。
-- 新增 `SqliteSessionStore`：
-  - 初始化自动建 `sessions`、`turns`、`summaries` 表。
-  - 使用参数化 SQL。
-  - `append_turn()` 自动维护 `sessions.updated_at` 和递增 `turn_index`。
-  - `role` 只允许 `user` / `assistant`。
-  - `load_history()` 按 `(session_id, turn_index)` 升序返回最近 N 条 `{role, content}`。
-  - `load_summary()` / `upsert_summary()` 可读写摘要和 `covered_turn_index`。
-- 新增降级 store 或 factory：`build_session_store(settings)` 在 memory disabled 或 DB 不可用时返回安全空实现，不阻断主流程。
-- 入库前对 `content` 脱敏。
+- 新增 `Retriever` 协议：`search(query: str, top_k: int = 3) -> list[RetrievalResult]`。
+- 扩展 `RetrievalResult`：新增 `similarity: float = 0.0`。
+- 更新 `RetrievalResult` docstring，说明 `provenance` 可含 `source`、`document_id`、`doc_type`、`locator`。
+- 保持旧构造方式可用，现有 `RetrievalResult(content=..., provenance=..., score=...)` 不变。
+- `LocalRetrievalTool` 继续关键词计分；当 document 中存在 `doc_type` / `locator` 时透传到 provenance。
+- 增加 Local 兼容测试和新增字段默认值测试。
 
 **验收标准**
-- SQLite 初始化后自动建表。
-- 新建 store 实例能读取旧实例写入的历史，证明跨请求 / 跨实例持久化。
-- `append_turn()` / `load_history()` / summary CRUD 可用。
-- DB 路径不可用时工厂不抛出到主流程，可退化为空实现。
-- API Key / 明显密钥字符串不会以原文保存。
+- 旧 `tests/test_retrieval_tool.py` 仍通过。
+- `RetrievalResult.similarity` 默认 `0.0`。
+- Local 后端可透传 `doc_type` / `locator`，无字段时保持旧 provenance。
+- 不引入外部依赖，不触网。
 
 **验证**
 ```bash
-pytest tests/test_session_store.py
+pytest tests/test_retrieval_tool.py
 ```
 
 **检查点 CP2**
-- 不接 dispatch 也能独立证明 SQLite 会话历史可持久化、可降级、可脱敏。
+- QA 仍可使用 Local 后端，且 retrieval 契约已稳定。
 
 ---
 
-### 任务 3：会话上下文组装
+### 任务 3：Embedding 客户端薄片
 
 **修改文件**
-- `app/memory/session_store.py`
-- `tests/test_session_store.py`
+- `app/tools/embeddings.py`（新增）
+- `tests/test_retrieval_tool.py` 或新增 embedding 相关测试放入该文件
 
 **实施内容**
-- 实现 `build_context(session_id)`：
-  - 返回 `{"history": [...], "session_summary": "..."}`。
-  - 保留最近 `memory_history_window` 条 turn 原文。
-  - 已有 summary 时，把 `{"role": "assistant", "content": "[早期对话摘要] ..."}` 放入 `history` 头部。
-  - `session_summary` 同步返回摘要字符串。
-- 确保 `history` 元素严格兼容 `build_query_rewrite_user_prompt(base_query, history)` 当前期望。
-- trace 所需的 `history_count`、`has_summary` 可由调用侧从 context 计算，不在 context 中塞正文以外的调试字段。
+- 新增 `EmbeddingClient` 协议：`embed(text: str) -> list[float]`。
+- 新增 `FakeEmbedding`：返回 deterministic vector，记录调用文本，供测试断言。
+- 新增 OpenAI 兼容 embedding 客户端：
+  - 使用 `settings.embedding_base_url or settings.llm_base_url`。
+  - 使用 `settings.embedding_api_key or settings.llm_api_key`。
+  - 使用 `settings.embedding_model`。
+  - HTTP payload 走 `/embeddings` 风格或由 base URL 直接拼接最小实现；缺配置时返回结构化错误或抛内部异常供上层降级。
+- 在线 embed 前使用 `redact_sensitive_text()` 做基础脱敏；trace 不写完整正文。
+- 测试只用 fake urlopen / fake embedding，不触网。
 
 **验收标准**
-- `build_context()` 返回最近窗口 history。
-- 已存在 summary 时，summary 合成 assistant 消息位于 history 头部。
-- history 长度不超过窗口 + 摘要头。
-- 无 summary 时只返回窗口原文。
+- `FakeEmbedding.embed()` 可预测且无网络。
+- OpenAI 兼容客户端能用 fake HTTP 响应解析 vector。
+- 缺配置或 HTTP 失败不会泄漏 key 到异常消息 / trace。
+- 有中文 docstring。
 
 **验证**
 ```bash
-pytest tests/test_session_store.py
+pytest tests/test_retrieval_tool.py
 ```
 
 **检查点 CP3**
-- query_rewrite 可直接消费 store 输出，无需修改 query_rewrite 算法。
+- QdrantRetriever 可依赖统一 embedding 协议实现向量召回。
 
 ---
 
-### 任务 4：滚动摘要薄片
+### 任务 4：Qdrant 单轮检索闭环
 
 **修改文件**
-- `app/prompts/session_summary.py`（新增）
-- `app/memory/summarizer.py`（新增）
-- `app/memory/session_store.py`
-- `tests/test_session_store.py`
+- `app/tools/retrieval.py`
+- `tests/test_retrieval_tool.py`
 
 **实施内容**
-- 新增 `app/prompts/session_summary.py`：
-  - prompt 集中维护，含六要素。
-  - 历史 turn 包裹在 `<data>...</data>`，声明数据区不是指令。
-  - 明确忽略数据区内改变规则、角色、输出格式的指令。
-  - 仅输出 JSON，schema 至少含 `summary`、`confidence`、`uncertain`。
-  - 专利域约束：不臆造法条、专利号、检索结果或技术事实。
-- 新增 `SessionSummarizer`：
-  - 可注入 `LLMClient`，默认用 `build_llm_client()`。
-  - 新摘要基于“旧摘要 + 新增待压缩 turn”增量生成。
-  - 输出经 Pydantic 或显式校验。
-  - LLM 异常、空响应、非法 schema 均返回失败结果，不抛出阻断主流程。
-- 在 store 或协调函数中实现触发策略：
-  - turns 超过 `memory_history_window` 或字符预算超过 `memory_token_budget` 时压缩窗口外早期 turn。
-  - `summaries.covered_turn_index` 表示摘要覆盖到的最大 turn index。
-  - `allow_cloud_sensitive_content=False` 时不发送完整敏感长文本到云模型；可跳过摘要并保留窗口历史。
+- 新增 `QdrantRetriever`：
+  - 构造参数支持 `collection_name`、`embedding_client`、`qdrant_client`。
+  - `search(query, top_k)` 调用 embedding，再调用 qdrant fake / real client 的 search/query 方法。
+  - 将 Qdrant hit payload 映射为 `RetrievalResult`。
+  - `hit.score` 或等价字段映射到 `similarity`。
+  - payload 缺失时使用 `local://unknown` / `unknown` 等安全默认值，但不得伪造具体法条。
+- 支持 fake client 的最小接口，避免测试依赖真实 `qdrant-client`。
+- 捕获 embedding / qdrant 异常，返回 `[]`。
 
 **验收标准**
-- 超过窗口时可触发摘要，保存 summary 与 `covered_turn_index`。
-- 摘要失败不抛出，保留最近窗口原文。
-- prompt 满足项目 prompt 规范：六要素、数据隔离、仅 JSON、禁止臆造、不确定标注。
-- 默认测试使用 stub / fake，不调用真实 LLM 或网络。
+- fake Qdrant hit 可返回 content、source、document_id、doc_type、locator、similarity。
+- top_k 会传给 fake client。
+- embedding 或 Qdrant 抛错时 `search()` 返回 `[]`。
+- 不要求安装真实 Qdrant 依赖即可通过测试。
 
 **验证**
 ```bash
-pytest tests/test_session_store.py
+pytest tests/test_retrieval_tool.py
 ```
 
 **检查点 CP4**
-- 历史压缩能力独立可测；失败路径已验证不会影响主流程。
+- 单轮向量召回路径可在 fake 环境下端到端验证。
 
 ---
 
-### 任务 5：dispatch 会话闭环
+### 任务 5：Retriever 工厂与降级
 
 **修改文件**
-- `app/services/agent_dispatch_service.py`
-- `tests/test_agent_dispatch_service.py`
+- `app/tools/retrieval.py`
+- `tests/test_retrieval_tool.py`
 
 **实施内容**
-- `AgentDispatchService` 支持注入 `session_store` / summarizer 协调依赖，默认通过 `build_session_store(get_settings())` 构造。
-- `dispatch()` 增加 `session_id: str | None = None` 参数。
-- 创建 `WorkflowState(raw_input=raw_input, claims_draft=...)` 后、`normalize_input` 前：
-  - 无 `session_id`：跳过记忆，trace `session_memory_skipped(reason=no_session)`。
-  - memory disabled：跳过记忆，trace `session_memory_skipped(reason=disabled)`。
-  - 有 `session_id`：调用 `store.build_context(session_id)`，注入 `state.dialog_context["history"]` 和 `state.dialog_context["session_summary"]`。
-  - 读取失败：trace `session_memory_unavailable(reason=...)`，继续主流程。
-- 请求结束后尽量追加：
-  - `append_turn(session_id, "user", raw_input)`，始终保留原始输入的脱敏副本。
-  - 提取可用 assistant 文本并 `append_turn(session_id, "assistant", answer)`。
-  - workflow failed 或 requires_user_input 时仍尽量写入 user turn，并写入可用 assistant 消息 / 错误提示摘要。
-  - 触发摘要并记录 `memory_summary_completed` 或 `memory_summary_failed_fallback`。
-- 所有 memory trace 只记录事件名、计数、窗口大小、是否有摘要、降级原因，不记录完整正文。
+- 新增 `build_retriever(settings)`：
+  - `backend=local` 返回 `LocalRetrievalTool()`。
+  - `backend=qdrant` 且配置完整时返回 `QdrantRetriever`。
+  - qdrant 配置缺失、初始化失败或未知 backend 时回退 `LocalRetrievalTool()`。
+- 为测试提供可注入参数或 monkeypatch 点，避免真实初始化网络客户端。
+- 不把 API key 写入日志或异常文本。
 
 **验收标准**
-- 无 `session_id` 时旧行为兼容，query rewrite 可继续 `no_history` skip。
-- 有 `session_id` 且已有历史时，dispatch 在 query_rewrite 前注入 `dialog_context["history"]`。
-- 第二轮带指代输入时，trace 出现 `query_rewrite_completed` 而不是 `query_rewrite_skipped(reason=no_history)`。
-- `raw_input` 不被覆盖。
-- 请求完成后写入 `user` 和 `assistant` turn。
-- store 读取 / 写入 / 摘要失败均不导致 dispatch failed。
+- local / qdrant / unknown backend 三类分支均有测试。
+- qdrant 缺配置回退 Local。
+- 工厂不抛裸异常影响 QA 初始化。
 
 **验证**
 ```bash
-pytest tests/test_agent_dispatch_service.py
+pytest tests/test_retrieval_tool.py
 ```
 
 **检查点 CP5**
-- R6.1 核心用户路径闭环完成：同一 `session_id` 的第二轮请求能拿到历史。
+- 在线 QA 可以只依赖工厂，不关心底层后端选择。
 
 ---
 
-### 任务 6：API 接入 session_id
+### 任务 6：QA 垂直接线与 provenance 回链
 
 **修改文件**
-- `app/api/schemas.py`
-- `app/api/routes.py`
-- `tests/test_agent_api.py`
+- `app/nodes/qa.py`
+- `app/prompts/patent_qa.py`（仅必要时小幅补强）
+- `tests/test_qa_node.py`
 
 **实施内容**
-- `AgentRequest` 增加 `session_id: str | None = None`。
-- `/agent` 路由调用 `AgentDispatchService().dispatch(..., session_id=request.session_id)`。
-- 保持不传 `session_id` 的旧请求体兼容。
-- 增加 API 测试覆盖：
-  - `/agent` 接收可选 `session_id`。
-  - 不传 `session_id` 时兼容旧请求体。
-  - 传 `session_id` 时服务层收到该值。
+- 将 `QANode.__init__()` 的 `retrieval_tool` 类型改为 `Retriever | None`，默认 `build_retriever(get_settings())`。
+- `_retrieve()` 使用 `settings.retrieval_top_k` 或构造参数决定 top_k，保留 bounded guard 和异常降级。
+- `_build_evidence()` 透传：
+  - `provenance.source`
+  - `provenance.document_id`
+  - `provenance.doc_type`
+  - `provenance.locator`
+  - `score`
+  - `similarity`
+- 更新测试 fake skill，使有 locator 时 basis 可引用 locator。
+- 无 evidence 时仍通过现有 skill / fake skill 输出依据不足，不编造来源。
 
 **验收标准**
-- API schema 可解析带 / 不带 `session_id` 的请求。
-- 路由透传 `session_id` 到服务层。
-- 既有 API 行为和错误结构不被无关改变。
+- 未显式传入 retrieval_tool 时，测试可 monkeypatch 工厂并证明被调用。
+- evidence 包含新增 provenance 字段和 similarity。
+- 旧 Local 结果仍兼容。
+- retrieval 抛错时 QA `status == success`，`result_count == 0`。
+- `qa_completed.has_retrieval` 与结果数量一致。
 
 **验证**
 ```bash
-pytest tests/test_agent_api.py
+pytest tests/test_qa_node.py
 ```
 
 **检查点 CP6**
-- 外部调用方可开始传递 session_id，且旧客户端不受影响。
+- 用户 QA 路径已具备“检索 evidence → skill → basis 回链”的最小闭环。
 
 ---
 
-### 任务 7：回归与最终验收
+### 任务 7：本地知识入库脚本
 
 **修改文件**
-- 必要时小范围调整 R6.1 涉及测试和实现文件。
+- `scripts/ingest_knowledge.py`（新增）
+- `tests/test_ingest_knowledge.py`（新增）
+- `knowledge/law/.gitkeep`、`knowledge/template/.gitkeep`、`knowledge/term/.gitkeep`（如目录不存在）
 
 **实施内容**
-- 运行 R6.1 目标测试。
-- 运行配置与安全相关测试。
-- 运行全量测试和编译检查。
-- 确认默认测试不触发真实 LLM、真实网络或外部数据库。
-- 确认 trace 不记录完整历史正文、密钥、API Key、隐私数据。
+- 新增 CLI：`python -m scripts.ingest_knowledge --path knowledge/`。
+- 实现读取 `knowledge/law`、`knowledge/template`、`knowledge/term` 下文本文件。
+- 按目录推断 `doc_type`。
+- 实现最小切分：
+  - law：优先识别 `第X条`，失败按段落。
+  - template：优先按权利要求项 / 段落。
+  - term：优先按术语卡片 / 段落。
+- 生成稳定 `point_id = hash(document_id + chunk_index)`。
+- payload 包含 `content`、`source`、`document_id`、`doc_type`、`locator`、`chunk_index`。
+- 使用可注入 fake embedding 和 fake qdrant upsert；真实客户端构建走配置但测试不触发。
+- 空目录安全退出。
 
 **验收标准**
-- R6.1 acceptance checklist 全部满足或明确记录未做项。
-- `pytest && python -m compileall app tests` 通过。
-- SQLite 数据库、`.env`、`.env.*` 不会被提交。
+- 三类 doc_type 推断均有测试。
+- 重复运行相同输入得到相同 point_id。
+- fake upsert 收到 vector + payload。
+- 不提交真实法规全文或敏感模板，只保留目录占位或测试临时文件。
 
 **验证**
 ```bash
-pytest tests/test_session_store.py tests/test_agent_dispatch_service.py tests/test_core_config_logging.py tests/test_agent_api.py
-pytest
-python -m compileall app tests
-```
-
-**最终验收**
-```bash
-pytest && python -m compileall app tests
+pytest tests/test_ingest_knowledge.py
+python -m compileall scripts
 ```
 
 **检查点 CP7**
-- R6.1 可交付，具备持久化、注入、摘要、降级、安全与 API 兼容证据。
+- 离线语料入库路径可验证，且不依赖真实 Qdrant / embedding。
 
-## 风险与约束
+---
 
-- **SQLite 并发风险**：本片只做原型级本地持久化，避免复杂连接池；高并发留给后续 Redis / Postgres adapter。
-- **摘要调用真实 LLM 风险**：默认测试必须注入 fake / stub；无真实配置时不能触网。
-- **敏感信息风险**：入库与入 prompt 前均脱敏；`allow_cloud_sensitive_content=False` 时跳过可能泄露完整敏感长文本的云摘要。
-- **trace 泄露风险**：trace 只记录计数、原因和布尔字段，不记录完整 history / raw_input / assistant answer。
-- **长期记忆混淆风险**：会话 turn 可按代码固定时机写入，但不能升级为长期案件记忆、用户画像或经验记忆；不要复用 `LocalMemoryStore._can_write()` 作为会话写入 gating。
-- **行为兼容风险**：不传 `session_id` 时必须保持旧行为，不应强制引入会话状态。
-- **过度设计风险**：不引入 tokenizer、向量召回、Notion、Redis、复杂抽象或 feature flag；只实现当前 SPEC 所需最小闭环。
+### 任务 8：回归与最终验收
+
+**修改文件**
+- R4.1 涉及的源码与测试
+
+**实施内容**
+- 运行 R4.1 目标测试。
+- 运行全量测试。
+- 运行编译检查。
+- 检查未提交 `.env`、API Key、真实法规全文、Qdrant 凭证或本地数据库。
+
+**验收标准**
+- R4.1 目标测试通过。
+- 全量 pytest 通过。
+- `python -m compileall app tests scripts` 通过。
+- 默认配置仍为 `local`，不要求外部服务。
+
+**验证**
+```bash
+pytest tests/test_retrieval_tool.py tests/test_qa_node.py tests/test_core_config_logging.py tests/test_ingest_knowledge.py
+pytest
+python -m compileall app tests scripts
+pytest && python -m compileall app tests scripts
+```
+
+**检查点 CP8**
+- R4.1 可作为可回归的最小检索能力交付。
+
+## 风险与控制
+
+- **新增依赖风险**：真实 `qdrant-client` 是否加入 `requirements.txt` 需先确认；默认计划通过可注入 fake client 避免 CI 硬依赖。
+- **外发敏感内容风险**：默认 `allow_cloud_sensitive_content=False`；在线 query embedding 前脱敏；不把完整交底书发给云 embedding。
+- **来源臆造风险**：缺 locator 时只写 `unknown`，不得补造法条号；prompt 继续要求 basis 只能来自输入。
+- **测试触网风险**：所有新增测试使用 fake embedding / fake qdrant / fake HTTP。
+- **过度抽象风险**：只引入 `Retriever` 和 `EmbeddingClient` 两个协议，不新增多层 repository / adapter。

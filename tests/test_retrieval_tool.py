@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import LocalRetrievalTool, QdrantRetriever, RetrievalResult, Retriever
+from app.tools.retrieval import LocalRetrievalTool, QdrantRetriever, RetrievalResult, Retriever, build_retriever
 
 
 class FakeQdrantHit:
@@ -152,6 +152,30 @@ def test_qdrant_retriever_returns_empty_when_dependencies_fail() -> None:
     """Qdrant 检索器依赖失败时应返回空列表。"""
     assert QdrantRetriever("patent_kb", RaisingEmbedding(), FakeQdrantClient()).search("问题") == []
     assert QdrantRetriever("patent_kb", FakeEmbedding([0.1]), FakeQdrantClient(should_raise=True)).search("问题") == []
+
+
+def test_build_retriever_returns_local_backend_by_default() -> None:
+    """检索工厂默认应返回本地后端。"""
+    retriever = build_retriever(Settings())
+
+    assert isinstance(retriever, LocalRetrievalTool)
+
+
+def test_build_retriever_returns_qdrant_backend_with_injected_dependencies() -> None:
+    """检索工厂应能用注入依赖构建 Qdrant 后端。"""
+    retriever = build_retriever(
+        Settings(retrieval_backend="qdrant", qdrant_url="http://qdrant.example.test", embedding_model="embedding-model"),
+        embedding_client=FakeEmbedding([0.1]),
+        qdrant_client=FakeQdrantClient(),
+    )
+
+    assert isinstance(retriever, QdrantRetriever)
+
+
+def test_build_retriever_falls_back_to_local_when_backend_unavailable() -> None:
+    """检索工厂配置缺失或未知后端时应回退本地后端。"""
+    assert isinstance(build_retriever(Settings(retrieval_backend="unknown")), LocalRetrievalTool)
+    assert isinstance(build_retriever(Settings(retrieval_backend="qdrant")), LocalRetrievalTool)
 
 
 def test_local_retrieval_tool_returns_predictable_results_with_provenance() -> None:

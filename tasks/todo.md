@@ -87,17 +87,17 @@
 
 ## Phase 5: Retriever 工厂与降级
 
-- [ ] 新增 `build_retriever(settings)` local 分支
+- [x] 新增 `build_retriever(settings)` local 分支
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：`retrieval_backend=local` 返回 `LocalRetrievalTool`；默认配置不触发外部服务。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：Phase 4。
-- [ ] 新增 qdrant 分支与 fake 注入测试点
+- [x] 新增 qdrant 分支与 fake 注入测试点
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：`retrieval_backend=qdrant` 且配置完整时可构建 `QdrantRetriever`；测试可 fake 初始化，不触网。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：local 分支。
-- [ ] 实现未知 backend / 配置缺失回退
+- [x] 实现未知 backend / 配置缺失回退
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：未知 backend、qdrant 配置缺失或初始化失败时回退 `LocalRetrievalTool`；不泄漏 key。
   - 验证：`pytest tests/test_retrieval_tool.py`

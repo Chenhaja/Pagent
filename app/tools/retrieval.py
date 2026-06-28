@@ -1,8 +1,11 @@
+import json
 from typing import Any, Protocol
+from urllib import request
 
 from pydantic import BaseModel, Field
 
-from app.tools.embeddings import EmbeddingClient
+from app.core.config import Settings, get_settings
+from app.tools.embeddings import EmbeddingClient, OpenAICompatibleEmbeddingClient
 
 
 class RetrievalResult(BaseModel):
@@ -42,6 +45,66 @@ class Retriever(Protocol):
             检索结果列表。
         """
         ...
+
+
+class _QdrantHTTPHit:
+    """Qdrant HTTP 命中结果。
+
+    Args:
+        payload: Qdrant payload。
+        score: 相似度分数。
+
+    Returns:
+        兼容 QdrantRetriever 的命中对象。
+    """
+
+    def __init__(self, payload: dict[str, Any], score: float) -> None:
+        self.payload = payload
+        self.score = score
+
+
+class _QdrantHTTPClient:
+    """最小 Qdrant HTTP 客户端。
+
+    Args:
+        url: Qdrant 服务地址。
+        api_key: 可选 API Key。
+
+    Returns:
+        支持 search 方法的 Qdrant 客户端。
+    """
+
+    def __init__(self, url: str, api_key: str | None = None) -> None:
+        self.url = url.rstrip("/")
+        self.api_key = api_key
+
+    def search(self, collection_name: str, query_vector: list[float], limit: int) -> list[_QdrantHTTPHit]:
+        """调用 Qdrant points search 接口。
+
+        Args:
+            collection_name: 集合名称。
+            query_vector: 查询向量。
+            limit: 最多返回数量。
+
+        Returns:
+            Qdrant 命中列表。
+        """
+        payload = {"vector": query_vector, "limit": limit, "with_payload": True}
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["api-key"] = self.api_key
+        http_request = request.Request(
+            url=f"{self.url}/collections/{collection_name}/points/search",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with request.urlopen(http_request) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+        return [
+            _QdrantHTTPHit(payload=item.get("payload") or {}, score=float(item.get("score") or 0.0))
+            for item in response_payload.get("result", [])
+        ]
 
 
 class QdrantRetriever:
@@ -147,3 +210,38 @@ class LocalRetrievalTool:
                 )
             )
         return sorted(results, key=lambda result: result.score, reverse=True)[:top_k]
+
+
+def build_retriever(
+    settings: Settings | None = None,
+    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: Any | None = None,
+) -> Retriever:
+    """根据配置构建检索器。
+
+    Args:
+        settings: 应用配置,未传入时读取全局配置。
+        embedding_client: 可选 embedding 客户端,测试可注入 fake。
+        qdrant_client: 可选 Qdrant 客户端,测试可注入 fake。
+
+    Returns:
+        配置可用时返回对应后端;不可用时回退本地检索器。
+    """
+    resolved_settings = settings or get_settings()
+    backend = resolved_settings.retrieval_backend.strip().lower()
+    if backend != "qdrant":
+        return LocalRetrievalTool()
+    if not resolved_settings.qdrant_url and qdrant_client is None:
+        return LocalRetrievalTool()
+    if not resolved_settings.embedding_model and embedding_client is None:
+        return LocalRetrievalTool()
+    try:
+        resolved_embedding = embedding_client or OpenAICompatibleEmbeddingClient(settings=resolved_settings)
+        resolved_qdrant = qdrant_client or _QdrantHTTPClient(resolved_settings.qdrant_url or "", resolved_settings.qdrant_api_key)
+        return QdrantRetriever(
+            collection_name=resolved_settings.qdrant_collection,
+            embedding_client=resolved_embedding,
+            qdrant_client=resolved_qdrant,
+        )
+    except Exception:
+        return LocalRetrievalTool()

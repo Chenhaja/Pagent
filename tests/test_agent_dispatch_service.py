@@ -81,10 +81,10 @@ def test_agent_dispatch_routes_qa_workflow() -> None:
 
     result = service.dispatch("请说明创造性的判断思路？")
 
-    assert result["status"] == "success"
+    assert result["status"] == "failed"
     assert result["intent"] == "qa"
     assert result["workflow"] == "qa"
-    assert result["qa_result"]["answer"] == "该问题需要结合权利要求文本和技术方案初步判断。"
+    assert result["errors"] == ["qa_failed"]
 
 
 

@@ -1,4 +1,5 @@
 from app.models.schemas import PatentQAResult, WorkflowState
+import app.nodes.qa as qa_module
 from app.nodes.qa import QANode
 from app.skills.patent_qa import PatentQASkill
 from app.tools.llm import FakeLLMClient
@@ -17,7 +18,8 @@ class RecordingQASkill:
         self.contexts.append(context)
         retrieval_results = context.state_snapshot.get("retrieval_results") or []
         if retrieval_results:
-            basis = [retrieval_results[0]["provenance"]["source"]]
+            provenance = retrieval_results[0]["provenance"]
+            basis = [provenance.get("locator") or provenance["source"]]
         else:
             basis = ["依据不足: 未检索到可引用材料"]
         return PatentQAResult(
@@ -45,6 +47,23 @@ class CountingRetrievalTool:
         return self.results[:top_k]
 
 
+def test_qa_node_uses_retriever_factory_by_default(monkeypatch) -> None:
+    """QA node 未显式注入检索器时应通过工厂构建。"""
+    retrieval_tool = CountingRetrievalTool()
+    calls = []
+
+    def fake_build_retriever(settings):
+        calls.append(settings.retrieval_backend)
+        return retrieval_tool
+
+    monkeypatch.setattr(qa_module, "build_retriever", fake_build_retriever)
+
+    node = QANode(skill=RecordingQASkill(), max_steps=1)
+
+    assert node.retrieval_tool is retrieval_tool
+    assert calls == ["local"]
+
+
 def test_qa_node_writes_structured_answer_to_state() -> None:
     """QA node 应写入结构化答案并返回可审计 trace。"""
     node = QANode(skill=RecordingQASkill(), max_steps=0)
@@ -70,7 +89,15 @@ def test_qa_node_passes_provenance_evidence_to_skill() -> None:
     node = QANode(
         skill=skill,
         retrieval_tool=LocalRetrievalTool(
-            documents=[{"id": "doc-1", "text": "传感器数据采集与设备控制方案", "source": "local://case/doc-1"}]
+            documents=[
+                {
+                    "id": "doc-1",
+                    "text": "传感器数据采集与设备控制方案",
+                    "source": "local://case/doc-1",
+                    "doc_type": "template",
+                    "locator": "权利要求1",
+                }
+            ]
         ),
         max_steps=1,
         token_budget=200,
@@ -84,10 +111,11 @@ def test_qa_node_passes_provenance_evidence_to_skill() -> None:
     evidence = skill.contexts[0].state_snapshot["retrieval_results"][0]
     assert evidence == {
         "content": "传感器数据采集与设备控制方案",
-        "provenance": {"source": "local://case/doc-1", "document_id": "doc-1"},
+        "provenance": {"source": "local://case/doc-1", "document_id": "doc-1", "doc_type": "template", "locator": "权利要求1"},
         "score": 2,
+        "similarity": 0.0,
     }
-    assert result.output["qa_result"]["basis"] == ["local://case/doc-1"]
+    assert result.output["qa_result"]["basis"] == ["权利要求1"]
     assert result.trace_events == [
         {
             "event": "qa_retrieval_completed",

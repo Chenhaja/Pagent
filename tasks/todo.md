@@ -105,22 +105,22 @@
 
 ## Phase 6: QA 垂直接线与 provenance 回链
 
-- [ ] `QANode` 默认经工厂构建 retriever
+- [x] `QANode` 默认经工厂构建 retriever
   - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
   - 验收：未显式传入 `retrieval_tool` 时调用 `build_retriever(get_settings())`；测试可 monkeypatch 工厂；旧显式注入用法仍可用。
   - 验证：`pytest tests/test_qa_node.py`
   - 阻塞：Phase 5。
-- [ ] `_retrieve()` 使用配置 top_k 并保留 bounded guard
+- [x] `_retrieve()` 使用配置 top_k 并保留 bounded guard
   - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
   - 验收：top_k 默认 3 或来自配置 / 构造参数；`max_steps <= 0`、`token_budget <= 0`、`timeout_seconds <= 0` 时不调用 retriever。
   - 验证：`pytest tests/test_qa_node.py`
   - 阻塞：工厂构建 retriever。
-- [ ] `_build_evidence()` 透传扩展 provenance
+- [x] `_build_evidence()` 透传扩展 provenance
   - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
   - 验收：evidence 包含 `source`、`document_id`、`doc_type`、`locator`、`score`、`similarity`；缺字段时安全默认，不伪造具体法条。
   - 验证：`pytest tests/test_qa_node.py`
   - 阻塞：`_retrieve()` top_k。
-- [ ] 更新 QA 回链与降级测试
+- [x] 更新 QA 回链与降级测试
   - 文件范围：`tests/test_qa_node.py`、必要时 `app/prompts/patent_qa.py`
   - 验收：fake skill 可用 locator 写入 basis；无命中时依据不足；检索异常时 QA `status == success` 且 `result_count == 0`；旧 Local evidence 结构兼容。
   - 验证：`pytest tests/test_qa_node.py`

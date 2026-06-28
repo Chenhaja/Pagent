@@ -2,10 +2,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.core.config import get_settings
 from app.models.schemas import NodeResult, SkillContext, WorkflowState
 from app.orchestrator.node_base import Node
 from app.skills.patent_qa import PatentQASkill
-from app.tools.retrieval import LocalRetrievalTool, RetrievalResult
+from app.tools.retrieval import Retriever, RetrievalResult, build_retriever
 
 
 class QANode(Node):
@@ -23,17 +24,20 @@ class QANode(Node):
     def __init__(
         self,
         skill: PatentQASkill | None = None,
-        retrieval_tool: LocalRetrievalTool | None = None,
+        retrieval_tool: Retriever | None = None,
         max_steps: int = 1,
         token_budget: int = 1000,
         timeout_seconds: int = 10,
+        top_k: int | None = None,
     ) -> None:
         super().__init__(name=self.name)
+        settings = get_settings()
         self.skill = skill or PatentQASkill()
-        self.retrieval_tool = retrieval_tool or LocalRetrievalTool()
+        self.retrieval_tool = retrieval_tool or build_retriever(settings)
         self.max_steps = max_steps
         self.token_budget = token_budget
         self.timeout_seconds = timeout_seconds
+        self.top_k = top_k or settings.retrieval_top_k
 
     def run(self, state: WorkflowState) -> NodeResult:
         """生成专利问答结果。
@@ -88,7 +92,7 @@ class QANode(Node):
         if self.max_steps <= 0 or self.token_budget <= 0 or self.timeout_seconds <= 0:
             return []
         try:
-            return self.retrieval_tool.search(question, top_k=3)[:3]
+            return self.retrieval_tool.search(question, top_k=self.top_k)[: self.top_k]
         except Exception:
             return []
 
@@ -96,14 +100,19 @@ class QANode(Node):
         """将检索结果转换为传给 skill 的受限 evidence。"""
         evidence = []
         for result in retrieval_results[:3]:
+            provenance = {
+                "source": result.provenance.get("source", "local://unknown"),
+                "document_id": result.provenance.get("document_id", "unknown"),
+            }
+            for key in ("doc_type", "locator"):
+                if result.provenance.get(key):
+                    provenance[key] = result.provenance[key]
             evidence.append(
                 {
                     "content": result.content[:1000],
-                    "provenance": {
-                        "source": result.provenance.get("source", "local://unknown"),
-                        "document_id": result.provenance.get("document_id", "unknown"),
-                    },
+                    "provenance": provenance,
                     "score": result.score,
+                    "similarity": result.similarity,
                 }
             )
         return evidence

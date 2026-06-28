@@ -1,9 +1,11 @@
+from typing import Any
+
 from pydantic import ValidationError
 
 from app.models.schemas import NodeResult, SkillContext, WorkflowState
 from app.orchestrator.node_base import Node
 from app.skills.patent_qa import PatentQASkill
-from app.tools.retrieval import LocalRetrievalTool
+from app.tools.retrieval import LocalRetrievalTool, RetrievalResult
 
 
 class QANode(Node):
@@ -44,14 +46,15 @@ class QANode(Node):
         """
         question = state.normalized_input or state.raw_input
         retrieval_results = self._retrieve(question)
-        state.dialog_context["qa_retrieval_results"] = [result.model_dump() for result in retrieval_results]
+        evidence = self._build_evidence(retrieval_results)
+        state.dialog_context["qa_retrieval_results"] = evidence
         context = SkillContext(
             task_type="patent_qa",
             state_snapshot={
                 "question": question,
                 "claims_draft": state.claims_draft,
                 "validation_report": state.validation_report,
-                "retrieval_results": state.dialog_context["qa_retrieval_results"],
+                "retrieval_results": evidence,
             },
         )
         try:
@@ -73,12 +76,34 @@ class QANode(Node):
                         "timeout_seconds": self.timeout_seconds,
                     },
                 },
-                {"event": "qa_completed"},
+                {
+                    "event": "qa_completed",
+                    "data": {"basis_count": len(qa_result.basis), "has_retrieval": bool(retrieval_results)},
+                },
             ],
         )
 
-    def _retrieve(self, question: str) -> list:
+    def _retrieve(self, question: str) -> list[RetrievalResult]:
         """在步数预算内执行本地检索。"""
         if self.max_steps <= 0 or self.token_budget <= 0 or self.timeout_seconds <= 0:
             return []
-        return self.retrieval_tool.search(question, top_k=3)
+        try:
+            return self.retrieval_tool.search(question, top_k=3)[:3]
+        except Exception:
+            return []
+
+    def _build_evidence(self, retrieval_results: list[RetrievalResult]) -> list[dict[str, Any]]:
+        """将检索结果转换为传给 skill 的受限 evidence。"""
+        evidence = []
+        for result in retrieval_results[:3]:
+            evidence.append(
+                {
+                    "content": result.content[:1000],
+                    "provenance": {
+                        "source": result.provenance.get("source", "local://unknown"),
+                        "document_id": result.provenance.get("document_id", "unknown"),
+                    },
+                    "score": result.score,
+                }
+            )
+        return evidence

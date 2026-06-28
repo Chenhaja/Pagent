@@ -82,17 +82,17 @@
 
 ## Phase 5: QA node
 
-- [ ] 注入 provenance evidence
+- [x] 注入 provenance evidence
   - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
   - 验收：检索结果传给 skill 时包含 `content`、`provenance.source`、`provenance.document_id` 或已有 id、`score`；`qa_result.basis` 含真实 provenance 来源。
   - 验证：`pytest tests/test_qa_node.py tests/test_patent_qa_skill.py`
   - 阻塞：Phase 4。
-- [ ] 增加无依据路径
+- [x] 增加无依据路径
   - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
   - 验收：无检索命中时回答说明依据不足，不编造来源。
   - 验证：`pytest tests/test_qa_node.py`
   - 阻塞：provenance evidence。
-- [ ] 增加护栏与 trace 测试
+- [x] 增加护栏与 trace 测试
   - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
   - 验收：bounded 参数无效时不调用 retrieval tool；检索异常不导致 node failed；trace 含 `steps_used`、`result_count`、`token_budget`、`timeout_seconds`、`basis_count`、`has_retrieval`，且不记录完整正文。
   - 验证：`pytest tests/test_qa_node.py tests/test_patent_qa_skill.py`

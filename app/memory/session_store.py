@@ -5,6 +5,7 @@ from typing import Any, Literal, Protocol
 
 from app.core.config import Settings
 from app.core.security import redact_sensitive_text
+from app.memory.summarizer import SessionSummarizer, SummaryResult
 
 SessionRole = Literal["user", "assistant"]
 
@@ -121,6 +122,7 @@ class SqliteSessionStore:
         history_window: 最近原文 turn 窗口大小。
         token_budget: 摘要触发字符预算。
         redaction_enabled: 是否在入库前脱敏。
+        summarizer: 可选滚动摘要器。
 
     Returns:
         可跨请求持久化会话 turn 和摘要的存储实例。
@@ -132,11 +134,13 @@ class SqliteSessionStore:
         history_window: int,
         token_budget: int,
         redaction_enabled: bool = True,
+        summarizer: SessionSummarizer | None = None,
     ) -> None:
         self.db_path = db_path
         self.history_window = history_window
         self.token_budget = token_budget
         self.redaction_enabled = redaction_enabled
+        self.summarizer = summarizer
         self._initialize_schema()
 
     def load_history(self, session_id: str, max_turns: int) -> list[dict[str, str]]:
@@ -263,7 +267,45 @@ class SqliteSessionStore:
         Returns:
             包含 history 与 session_summary 的上下文字典。
         """
-        return {"history": self.load_history(session_id, self.history_window), "session_summary": self.load_summary(session_id)}
+        summary = self.load_summary(session_id)
+        history = self.load_history(session_id, self.history_window)
+        if summary:
+            history = [{"role": "assistant", "content": f"[早期对话摘要] {summary}"}, *history]
+        return {"history": history, "session_summary": summary}
+
+    def summarize_if_needed(self, session_id: str) -> SummaryResult:
+        """在超过窗口或预算时压缩早期会话 turn。
+
+        Args:
+            session_id: 会话标识。
+
+        Returns:
+            摘要执行结果;无需摘要时返回失败原因 no_summary_needed。
+        """
+        if self.summarizer is None:
+            return SummaryResult(success=False, reason="summarizer_unavailable")
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT turn_index, role, content FROM turns WHERE session_id = ? ORDER BY turn_index ASC",
+                (session_id,),
+            ).fetchall()
+        if len(rows) <= self.history_window and sum(len(row[2]) for row in rows) <= self.token_budget:
+            return SummaryResult(success=False, reason="no_summary_needed")
+        rows_to_summarize = rows[: max(len(rows) - self.history_window, 0)]
+        if not rows_to_summarize:
+            rows_to_summarize = rows
+        turns = [{"role": row[1], "content": row[2]} for row in rows_to_summarize]
+        covered_turn_index = rows_to_summarize[-1][0]
+        result = self.summarizer.summarize(
+            session_id=session_id,
+            previous_summary=self.load_summary(session_id),
+            turns=turns,
+            covered_turn_index=covered_turn_index,
+        )
+        if result.success and result.summary:
+            self.upsert_summary(session_id, result.summary, covered_turn_index)
+            result.covered_turn_index = covered_turn_index
+        return result
 
     def _initialize_schema(self) -> None:
         """初始化 SQLite 表结构。"""

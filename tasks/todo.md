@@ -56,17 +56,17 @@
 
 ## Phase 3: 会话上下文组装
 
-- [ ] 实现 `build_context()` 窗口历史
+- [x] 实现 `build_context()` 窗口历史
   - 文件范围：`app/memory/session_store.py`、`tests/test_session_store.py`
   - 验收：`build_context(session_id)` 返回最近 `memory_history_window` 条 `{role, content}`，格式兼容 query_rewrite。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：summary CRUD。
-- [ ] 实现 summary 头部注入格式
+- [x] 实现 summary 头部注入格式
   - 文件范围：`app/memory/session_store.py`、`tests/test_session_store.py`
   - 验收：已有 summary 时，history 头部包含 `{"role": "assistant", "content": "[早期对话摘要] ..."}`；同时返回 `session_summary`。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：`build_context()` 窗口历史。
-- [ ] 锁定 history 长度和兼容性
+- [x] 锁定 history 长度和兼容性
   - 文件范围：`tests/test_session_store.py`
   - 验收：history 不超过窗口 + 摘要头；无 summary 时不添加合成消息。
   - 验证：`pytest tests/test_session_store.py`
@@ -74,22 +74,22 @@
 
 ## Phase 4: 滚动摘要薄片
 
-- [ ] 新增 session summary prompt
+- [x] 新增 session summary prompt
   - 文件范围：`app/prompts/session_summary.py`
   - 验收：prompt 满足六要素、`<data>` 数据隔离、仅输出 JSON、包含 `summary` / `confidence` / `uncertain` schema、专利域禁止臆造约束。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：Phase 3。
-- [ ] 新增 `SessionSummarizer`
+- [x] 新增 `SessionSummarizer`
   - 文件范围：`app/memory/summarizer.py`、`tests/test_session_store.py`
   - 验收：可注入 `LLMClient`；默认可使用 `build_llm_client()`；对合法 JSON 输出返回 summary；对异常、空响应、非法 schema 返回失败结果而不抛出阻断主流程。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：session summary prompt。
-- [ ] 实现超窗口 / 超预算摘要触发
+- [x] 实现超窗口 / 超预算摘要触发
   - 文件范围：`app/memory/session_store.py` 或 `app/memory/summarizer.py`、`tests/test_session_store.py`
   - 验收：超过窗口或字符预算时压缩窗口外早期 turn；保存 summary 与 `covered_turn_index`；最近窗口原文仍保留。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：`SessionSummarizer`。
-- [ ] 实现摘要安全降级
+- [x] 实现摘要安全降级
   - 文件范围：`app/memory/summarizer.py`、`tests/test_session_store.py`
   - 验收：摘要 LLM 抛错或返回非法 schema 时不抛出；`allow_cloud_sensitive_content=False` 时不发送完整敏感长文本到云模型，可跳过摘要。
   - 验证：`pytest tests/test_session_store.py`

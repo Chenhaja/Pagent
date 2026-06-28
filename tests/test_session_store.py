@@ -2,6 +2,8 @@ import sqlite3
 
 from app.core.config import Settings
 from app.memory.session_store import NullSessionStore, SqliteSessionStore, build_session_store
+from app.memory.summarizer import SessionSummarizer
+from app.tools.llm import LLMResponse
 
 
 def test_sqlite_store_initializes_tables(tmp_path) -> None:
@@ -80,3 +82,133 @@ def test_append_turn_redacts_sensitive_content(tmp_path) -> None:
     history = store.load_history("s1", max_turns=6)
     assert "sk-secret123" not in history[0]["content"]
     assert "[REDACTED]" in history[0]["content"]
+
+
+def test_build_context_returns_window_history(tmp_path) -> None:
+    """build_context 应只返回最近窗口内的原文历史。"""
+    store = SqliteSessionStore(str(tmp_path / "memory.sqlite3"), history_window=2, token_budget=1500)
+    store.append_turn("s1", "user", "第一问")
+    store.append_turn("s1", "assistant", "第一答")
+    store.append_turn("s1", "user", "第二问")
+
+    context = store.build_context("s1")
+
+    assert context == {
+        "history": [
+            {"role": "assistant", "content": "第一答"},
+            {"role": "user", "content": "第二问"},
+        ],
+        "session_summary": None,
+    }
+
+
+def test_build_context_prepends_summary_header(tmp_path) -> None:
+    """已有摘要时 build_context 应把摘要作为 assistant 合成消息放在头部。"""
+    store = SqliteSessionStore(str(tmp_path / "memory.sqlite3"), history_window=2, token_budget=1500)
+    store.append_turn("s1", "user", "第一问")
+    store.append_turn("s1", "assistant", "第一答")
+    store.append_turn("s1", "user", "第二问")
+    store.upsert_summary("s1", "用户讨论了机械臂夹爪。", covered_turn_index=1)
+
+    context = store.build_context("s1")
+
+    assert context["session_summary"] == "用户讨论了机械臂夹爪。"
+    assert context["history"] == [
+        {"role": "assistant", "content": "[早期对话摘要] 用户讨论了机械臂夹爪。"},
+        {"role": "assistant", "content": "第一答"},
+        {"role": "user", "content": "第二问"},
+    ]
+
+
+def test_session_summarizer_returns_valid_summary() -> None:
+    """SessionSummarizer 应解析合法 JSON 摘要响应。"""
+    llm = RecordingLLMClient({"summary": "用户讨论夹爪方案。", "confidence": 0.9, "uncertain": False})
+    summarizer = SessionSummarizer(llm_client=llm, model="summary-model")
+
+    result = summarizer.summarize(
+        session_id="s1",
+        previous_summary=None,
+        turns=[{"role": "user", "content": "夹爪能夹瓶子"}],
+    )
+
+    assert result.success is True
+    assert result.summary == "用户讨论夹爪方案。"
+    assert llm.calls[0]["model"] == "summary-model"
+    assert "<data>" in llm.calls[0]["messages"][1].content
+
+
+def test_session_summarizer_fails_safely_on_invalid_response() -> None:
+    """摘要响应非法时 summarizer 应返回失败结果而不是抛出。"""
+    summarizer = SessionSummarizer(llm_client=RecordingLLMClient({"summary": ""}))
+
+    result = summarizer.summarize(
+        session_id="s1",
+        previous_summary=None,
+        turns=[{"role": "user", "content": "夹爪能夹瓶子"}],
+    )
+
+    assert result.success is False
+    assert result.summary is None
+    assert result.reason == "invalid_summary_response"
+
+
+def test_summarize_if_needed_compacts_old_turns(tmp_path) -> None:
+    """超过窗口时应压缩窗口外 turn 并保留最近窗口原文。"""
+    llm = RecordingLLMClient({"summary": "早期讨论了夹爪结构。", "confidence": 0.8, "uncertain": False})
+    summarizer = SessionSummarizer(llm_client=llm)
+    store = SqliteSessionStore(
+        str(tmp_path / "memory.sqlite3"),
+        history_window=2,
+        token_budget=1500,
+        summarizer=summarizer,
+    )
+    store.append_turn("s1", "user", "第一问")
+    store.append_turn("s1", "assistant", "第一答")
+    store.append_turn("s1", "user", "第二问")
+
+    result = store.summarize_if_needed("s1")
+
+    assert result.success is True
+    assert store.load_summary("s1") == "早期讨论了夹爪结构。"
+    context = store.build_context("s1")
+    assert len(context["history"]) == 3
+    assert context["history"][0]["content"] == "[早期对话摘要] 早期讨论了夹爪结构。"
+
+
+def test_summarize_if_needed_keeps_window_when_llm_fails(tmp_path) -> None:
+    """摘要失败时应保留窗口原文并返回失败结果。"""
+    summarizer = SessionSummarizer(llm_client=RecordingLLMClient({}, should_raise=True))
+    store = SqliteSessionStore(
+        str(tmp_path / "memory.sqlite3"),
+        history_window=2,
+        token_budget=1500,
+        summarizer=summarizer,
+    )
+    store.append_turn("s1", "user", "第一问")
+    store.append_turn("s1", "assistant", "第一答")
+    store.append_turn("s1", "user", "第二问")
+
+    result = store.summarize_if_needed("s1")
+
+    assert result.success is False
+    assert store.load_summary("s1") is None
+    assert store.build_context("s1")["history"] == [
+        {"role": "assistant", "content": "第一答"},
+        {"role": "user", "content": "第二问"},
+    ]
+
+
+class RecordingLLMClient:
+    """测试用 LLM client,记录调用并返回固定响应。"""
+
+    def __init__(self, content: dict, should_raise: bool = False) -> None:
+        self.content = content
+        self.should_raise = should_raise
+        self.calls = []
+
+    def generate(self, **kwargs):
+        """记录调用并返回固定 LLM 响应。"""
+        self.calls.append(kwargs)
+        if self.should_raise:
+            raise RuntimeError("llm failed")
+        return LLMResponse(content=self.content)

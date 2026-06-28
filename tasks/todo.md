@@ -64,17 +64,17 @@
 
 ## Phase 4: QA skill
 
-- [ ] 新增 patent_qa prompt
+- [x] 新增 patent_qa prompt
   - 文件范围：`app/prompts/patent_qa.py`
   - 验收：导出 system prompt、output schema、few-shot、user prompt builder；外部数据隔离；仅输出 JSON；禁止编造来源。
   - 验证：`pytest tests/test_patent_qa_skill.py`
   - 阻塞：Phase 3。
-- [ ] PatentQASkill 默认使用 build_llm_client
+- [x] PatentQASkill 默认使用 build_llm_client
   - 文件范围：`app/skills/patent_qa.py`
   - 验收：默认构造经 `build_llm_client()`；保留 `PatentQAResult` schema 校验；测试显式 fake/stub 不触网。
   - 验证：`pytest tests/test_patent_qa_skill.py`
   - 阻塞：新增 prompt。
-- [ ] 更新 skill 测试
+- [x] 更新 skill 测试
   - 文件范围：`tests/test_patent_qa_skill.py`
   - 验收：messages 分层清晰，合法 fake 可解析，非法响应仍按既有策略抛错。
   - 验证：`pytest tests/test_patent_qa_skill.py`

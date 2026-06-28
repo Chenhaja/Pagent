@@ -116,7 +116,7 @@
   - 验收：现有 endpoints 不变，新增 `/agent` endpoint，路由结构清晰。
   - 验证：`pytest tests/test_health.py tests/test_claim_generation_api.py tests/test_translate_api.py tests/test_revision_api.py tests/test_agent_api.py`
 
-- [ ] T7.3 质量工具评估
+- [x] T7.3 质量工具评估
   - 验收：如引入 ruff / mypy，配置最小化，不做大规模格式重排。
   - 验证：`ruff check .`、`mypy app`、`pytest`
 

@@ -21,7 +21,7 @@ class ClaimCheckNode(Node):
         Returns:
             包含 validation_report 的成功结果。
         """
-        claim_set = ClaimSet(version="current", claims=state.claims_draft)
+        claim_set = ClaimSet.model_validate({"version": "current", "claims": state.claims_draft})
         reference_errors = validate_claim_references(claim_set)
         terminology_errors = validate_terminology_consistency(self._extract_terms_by_claim(claim_set))
         report = ValidationReport(

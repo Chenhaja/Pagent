@@ -318,7 +318,8 @@ class OpenAICompatibleClient:
         Returns:
             OpenAI 兼容 chat completions URL。
         """
-        return f"{self.settings.llm_base_url.rstrip('/')}/chat/completions"
+        base_url = self.settings.llm_base_url or ""
+        return f"{base_url.rstrip('/')}/chat/completions"
 
     def _build_trace(
         self,

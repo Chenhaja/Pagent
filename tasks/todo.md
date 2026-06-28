@@ -15,17 +15,17 @@
 
 ## Phase 1: 配置与安全默认值
 
-- [ ] 增加 `PAGENT_MEMORY_*` 配置
+- [x] 增加 `PAGENT_MEMORY_*` 配置
   - 文件范围：`app/core/config.py`、`tests/test_core_config_logging.py`
   - 验收：`Settings` 含 `memory_enabled`、`memory_db_path`、`memory_history_window`、`memory_token_budget`、`memory_summary_model`；默认值与 SPEC 一致；环境变量可覆盖。
   - 验证：`pytest tests/test_core_config_logging.py`
   - 阻塞：Phase 0。
-- [ ] 更新公开配置输出
+- [x] 更新公开配置输出
   - 文件范围：`app/core/config.py`、`tests/test_core_config_logging.py`
   - 验收：`to_public_dict()` 展示非敏感 memory 配置，不暴露 `llm_api_key` 或密钥值。
   - 验证：`pytest tests/test_core_config_logging.py`
   - 阻塞：增加 memory 配置。
-- [ ] 忽略 SQLite 会话库文件
+- [x] 忽略 SQLite 会话库文件
   - 文件范围：`.gitignore`
   - 验收：`pagent_memory.db`、`*.sqlite`、`*.sqlite3` 等本地数据库文件不会被 git 跟踪。
   - 验证：人工检查 `.gitignore`。

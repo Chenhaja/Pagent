@@ -25,6 +25,11 @@ class Settings(BaseModel):
         allow_cloud_sensitive_content: 是否允许向云模型发送完整敏感内容。
         redaction_enabled: 是否启用默认脱敏。
         external_translation_agent_url: 可选外部翻译 agent 地址,默认不配置。
+        memory_enabled: 是否启用会话记忆。
+        memory_db_path: 会话记忆 SQLite 数据库路径。
+        memory_history_window: 会话记忆保留的最近原文 turn 数。
+        memory_token_budget: 触发摘要的字符预算。
+        memory_summary_model: 可选摘要模型名称。
 
     Returns:
         应用配置对象。
@@ -46,6 +51,11 @@ class Settings(BaseModel):
     allow_cloud_sensitive_content: bool = False
     redaction_enabled: bool = True
     external_translation_agent_url: str | None = None
+    memory_enabled: bool = True
+    memory_db_path: str = "./pagent_memory.db"
+    memory_history_window: int = 6
+    memory_token_budget: int = 1500
+    memory_summary_model: str | None = None
 
     def to_public_dict(self) -> dict[str, str | None]:
         """返回不包含敏感字段的公开配置。
@@ -69,6 +79,11 @@ class Settings(BaseModel):
             "allow_cloud_sensitive_content": str(self.allow_cloud_sensitive_content),
             "redaction_enabled": str(self.redaction_enabled),
             "external_translation_agent_url": self.external_translation_agent_url,
+            "memory_enabled": str(self.memory_enabled),
+            "memory_db_path": self.memory_db_path,
+            "memory_history_window": str(self.memory_history_window),
+            "memory_token_budget": str(self.memory_token_budget),
+            "memory_summary_model": self.memory_summary_model,
         }
 
 
@@ -136,4 +151,9 @@ def get_settings() -> Settings:
         allow_cloud_sensitive_content=_get_bool_env("PAGENT_ALLOW_CLOUD_SENSITIVE_CONTENT", False),
         redaction_enabled=_get_bool_env("PAGENT_REDACTION_ENABLED", True),
         external_translation_agent_url=os.getenv("PAGENT_EXTERNAL_TRANSLATION_AGENT_URL"),
+        memory_enabled=_get_bool_env("PAGENT_MEMORY_ENABLED", True),
+        memory_db_path=os.getenv("PAGENT_MEMORY_DB_PATH", "./pagent_memory.db"),
+        memory_history_window=int(os.getenv("PAGENT_MEMORY_HISTORY_WINDOW", "6")),
+        memory_token_budget=int(os.getenv("PAGENT_MEMORY_TOKEN_BUDGET", "1500")),
+        memory_summary_model=os.getenv("PAGENT_MEMORY_SUMMARY_MODEL"),
     )

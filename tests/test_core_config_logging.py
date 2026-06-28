@@ -22,6 +22,11 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.allow_cloud_sensitive_content is False
     assert settings.redaction_enabled is True
     assert settings.external_translation_agent_url is None
+    assert settings.memory_enabled is True
+    assert settings.memory_db_path == "./pagent_memory.db"
+    assert settings.memory_history_window == 6
+    assert settings.memory_token_budget == 1500
+    assert settings.memory_summary_model is None
 
 
 def test_settings_read_llm_values_from_dotenv_when_not_testing(monkeypatch, tmp_path) -> None:
@@ -61,6 +66,11 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_LLM_CHEAP_MODEL", "cheap-model")
     monkeypatch.setenv("PAGENT_LLM_STRONG_MODEL", "strong-model")
     monkeypatch.setenv("PAGENT_ALLOW_CLOUD_SENSITIVE_CONTENT", "true")
+    monkeypatch.setenv("PAGENT_MEMORY_ENABLED", "false")
+    monkeypatch.setenv("PAGENT_MEMORY_DB_PATH", "./custom_memory.sqlite3")
+    monkeypatch.setenv("PAGENT_MEMORY_HISTORY_WINDOW", "8")
+    monkeypatch.setenv("PAGENT_MEMORY_TOKEN_BUDGET", "2000")
+    monkeypatch.setenv("PAGENT_MEMORY_SUMMARY_MODEL", "summary-model")
     get_settings.cache_clear()
 
     settings = get_settings()
@@ -76,6 +86,11 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.llm_cheap_model == "cheap-model"
     assert settings.llm_strong_model == "strong-model"
     assert settings.allow_cloud_sensitive_content is True
+    assert settings.memory_enabled is False
+    assert settings.memory_db_path == "./custom_memory.sqlite3"
+    assert settings.memory_history_window == 8
+    assert settings.memory_token_budget == 2000
+    assert settings.memory_summary_model == "summary-model"
     get_settings.cache_clear()
 
 
@@ -87,6 +102,11 @@ def test_settings_do_not_expose_secret_values() -> None:
 
     assert "llm_api_key" not in public_values
     assert "secret-value" not in str(public_values)
+    assert public_values["memory_enabled"] == "True"
+    assert public_values["memory_db_path"] == "./pagent_memory.db"
+    assert public_values["memory_history_window"] == "6"
+    assert public_values["memory_token_budget"] == "1500"
+    assert public_values["memory_summary_model"] is None
 
 
 def test_json_line_formatter_outputs_required_fields() -> None:

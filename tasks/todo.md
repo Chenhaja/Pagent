@@ -128,22 +128,22 @@
 
 ## Phase 7: 本地知识入库脚本
 
-- [ ] 新增 `knowledge/` 目录结构占位
+- [x] 新增 `knowledge/` 目录结构占位
   - 文件范围：`knowledge/law/.gitkeep`、`knowledge/template/.gitkeep`、`knowledge/term/.gitkeep`
   - 验收：目录存在；不提交真实法规全文、敏感模板或案件材料。
   - 验证：人工检查。
   - 阻塞：Phase 6。
-- [ ] 新增入库脚本 CLI
+- [x] 新增入库脚本 CLI
   - 文件范围：`scripts/ingest_knowledge.py`、`tests/test_ingest_knowledge.py`
   - 验收：支持 `python -m scripts.ingest_knowledge --path knowledge/`；空目录安全退出。
   - 验证：`pytest tests/test_ingest_knowledge.py`
   - 阻塞：目录结构占位。
-- [ ] 实现 law / template / term 切分和 metadata
+- [x] 实现 law / template / term 切分和 metadata
   - 文件范围：`scripts/ingest_knowledge.py`、`tests/test_ingest_knowledge.py`
   - 验收：按目录推断 `doc_type`；law 优先法条 locator；template 优先权利要求项；term 优先术语名；payload 包含全部 provenance 字段。
   - 验证：`pytest tests/test_ingest_knowledge.py`
   - 阻塞：入库脚本 CLI。
-- [ ] 实现稳定 point_id 与 fake upsert
+- [x] 实现稳定 point_id 与 fake upsert
   - 文件范围：`scripts/ingest_knowledge.py`、`tests/test_ingest_knowledge.py`
   - 验收：`point_id = hash(document_id + chunk_index)` 稳定；重复运行相同输入得到相同 id；fake embedding 和 fake qdrant upsert 收到 vector + payload。
   - 验证：`pytest tests/test_ingest_knowledge.py && python -m compileall scripts`

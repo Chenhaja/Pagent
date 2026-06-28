@@ -33,22 +33,22 @@
 
 ## Phase 2: SQLite SessionMemoryStore 最小持久化
 
-- [ ] 新增 `SessionMemoryStore` 协议和空降级实现
+- [x] 新增 `SessionMemoryStore` 协议和空降级实现
   - 文件范围：`app/memory/session_store.py`、`tests/test_session_store.py`
   - 验收：协议包含 `load_history`、`append_turn`、`load_summary`、`upsert_summary`、`build_context`；空实现用于 memory disabled / DB 不可用降级。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：Phase 1。
-- [ ] 实现 SQLite 自动建表
+- [x] 实现 SQLite 自动建表
   - 文件范围：`app/memory/session_store.py`、`tests/test_session_store.py`
   - 验收：初始化 `SqliteSessionStore` 后自动建 `sessions`、`turns`、`summaries` 表；使用参数化 SQL。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：SessionMemoryStore 协议。
-- [ ] 实现 append/load 历史持久化
+- [x] 实现 append/load 历史持久化
   - 文件范围：`app/memory/session_store.py`、`tests/test_session_store.py`
   - 验收：`append_turn()` 写入脱敏后的 user / assistant turn；`load_history()` 按 turn_index 升序返回最近 N 条；新 store 实例可读取旧实例数据。
   - 验证：`pytest tests/test_session_store.py`
   - 阻塞：SQLite 自动建表。
-- [ ] 实现 summary CRUD 和工厂降级
+- [x] 实现 summary CRUD 和工厂降级
   - 文件范围：`app/memory/session_store.py`、`tests/test_session_store.py`
   - 验收：`load_summary()` / `upsert_summary()` 可读写 summary 与 `covered_turn_index`；`build_session_store(settings)` 在 DB 不可用或 disabled 时安全降级。
   - 验证：`pytest tests/test_session_store.py`

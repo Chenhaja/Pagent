@@ -112,7 +112,7 @@
   - 验收：trace 可写入抽象 sink，默认不记录敏感内容。
   - 验证：`pytest tests/test_security_compliance.py tests/test_llm_tool.py`
 
-- [ ] T7.2 API routes 目录对齐
+- [x] T7.2 API routes 目录对齐
   - 验收：现有 endpoints 不变，新增 `/agent` endpoint，路由结构清晰。
   - 验证：`pytest tests/test_health.py tests/test_claim_generation_api.py tests/test_translate_api.py tests/test_revision_api.py tests/test_agent_api.py`
 

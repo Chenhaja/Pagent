@@ -24,6 +24,30 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.external_translation_agent_url is None
 
 
+def test_settings_read_llm_values_from_dotenv_when_not_testing(monkeypatch, tmp_path) -> None:
+    """本地 .env 应能提供 LLM 配置,便于开发时保存私有 API Key。"""
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "PAGENT_LLM_BASE_URL=https://llm.example.test/v1\n"
+        "PAGENT_LLM_MODEL=test-model\n"
+        "PAGENT_LLM_API_KEY=sk-test-secret\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("PAGENT_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("PAGENT_LLM_MODEL", raising=False)
+    monkeypatch.delenv("PAGENT_LLM_API_KEY", raising=False)
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.llm_base_url == "https://llm.example.test/v1"
+    assert settings.llm_model == "test-model"
+    assert settings.llm_api_key == "sk-test-secret"
+    get_settings.cache_clear()
+
+
 def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     """LLM 配置应从环境变量读取。"""
     monkeypatch.setenv("PAGENT_LLM_BASE_URL", "https://llm.example.test/v1")

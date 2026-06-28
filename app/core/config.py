@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -71,6 +72,29 @@ class Settings(BaseModel):
         }
 
 
+def _load_local_dotenv() -> None:
+    """读取项目根目录 .env 到当前进程环境变量。
+
+    Returns:
+        无返回值;已有环境变量不会被 .env 覆盖。
+    """
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return
+    dotenv_paths = [Path.cwd() / ".env", Path(__file__).resolve().parents[2] / ".env"]
+    dotenv_path = next((path for path in dotenv_paths if path.exists()), None)
+    if dotenv_path is None:
+        return
+    for line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _get_bool_env(name: str, default: bool) -> bool:
     """读取布尔环境变量。
 
@@ -94,6 +118,7 @@ def get_settings() -> Settings:
     Returns:
         从环境变量读取后的应用配置对象。
     """
+    _load_local_dotenv()
     return Settings(
         service_name=os.getenv("PAGENT_SERVICE_NAME", "patent-agent"),
         environment=os.getenv("PAGENT_ENVIRONMENT", "local"),

@@ -79,7 +79,7 @@ def test_agent_dispatch_routes_qa_workflow() -> None:
     """统一 Agent 入口应路由到 QA workflow。"""
     service = AgentDispatchService()
 
-    result = service.dispatch("这个权利要求有什么风险？")
+    result = service.dispatch("请说明创造性的判断思路？")
 
     assert result["status"] == "success"
     assert result["intent"] == "qa"
@@ -120,14 +120,27 @@ def test_agent_dispatch_continues_after_query_rewrite_fallback() -> None:
     ]
 
 
+def test_agent_dispatch_routes_claim_problem_to_revision_not_qa() -> None:
+    """权利要求问题类输入不应进入 QA workflow。"""
+    service = AgentDispatchService()
+
+    result = service.dispatch(
+        "我的权利要求有什么问题",
+        claims_draft=[{"number": 1, "claim_type": "independent", "text": "一种控制方法。"}],
+    )
+
+    assert result["status"] == "success"
+    assert result["intent"] == "claim_revision"
+    assert result["workflow"] == "claim_revision"
+
+
 def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:
     """统一 Agent 入口遇到未知意图时应返回补充输入提示。"""
     service = AgentDispatchService()
 
     result = service.dispatch("你好")
 
-    assert result == {
-        "status": "requires_user_input",
-        "errors": ["unknown_intent"],
-        "message": "请补充要办理的专利任务类型。",
-    }
+    assert result["status"] == "requires_user_input"
+    assert result["errors"] == ["unknown_intent"]
+    assert "您希望我处理哪类专利任务" in result["message"]
+    assert "supported_intents" in result

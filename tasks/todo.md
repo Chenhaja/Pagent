@@ -46,17 +46,17 @@
 
 ## Phase 3: 意图识别 LLM fallback
 
-- [ ] 增加 llm_client 注入与 build_llm_client 默认路径
+- [x] 增加 llm_client 注入与 build_llm_client 默认路径
   - 文件范围：`app/nodes/intent_router.py`
   - 验收：未注入时使用 `build_llm_client()`；关键词快路仍不会调用 LLM。
   - 验证：`pytest tests/test_intent_router_node.py`
   - 阻塞：Phase 2。
-- [ ] 增加低置信追问
+- [x] 增加低置信追问
   - 文件范围：`app/nodes/intent_router.py`、`tests/test_intent_router_node.py`
   - 验收：`confidence < 0.6` 或 `unknown` 返回 `NodeResult.need_user_input()`，包含普通发明人可理解的澄清问题和支持任务类型。
   - 验证：`pytest tests/test_intent_router_node.py`
   - 阻塞：LLM fallback。
-- [ ] 增加异常降级 trace
+- [x] 增加异常降级 trace
   - 文件范围：`app/nodes/intent_router.py`、`tests/test_intent_router_node.py`、`tests/test_agent_dispatch_service.py`
   - 验收：LLM 异常、非法 JSON、schema 校验失败记录 `intent_router_failed_fallback` 并降级追问；dispatch 能消费澄清结果。
   - 验证：`pytest tests/test_intent_router_node.py tests/test_agent_dispatch_service.py`

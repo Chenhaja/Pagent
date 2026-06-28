@@ -52,7 +52,8 @@ class AgentDispatchService:
         for trace_event in route_result.trace_events:
             state.add_trace_event(event=str(trace_event.get("event", "node_event")), data=trace_event.get("data", {}))
         if route_result.status != "success":
-            return {"status": route_result.status, "errors": route_result.errors, "message": "请补充要办理的专利任务类型。"}
+            message = route_result.output.get("message") or "请补充要办理的专利任务类型。"
+            return {"status": route_result.status, "errors": route_result.errors, "message": message, **route_result.output}
 
         workflow_def = self.workflow_registry.get_workflow_def(state.intent or "")
         remaining_nodes = self._remaining_nodes_after(workflow_def, route_result.next_node)

@@ -2,7 +2,39 @@ import json
 
 from app.core.config import Settings
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import LocalRetrievalTool, RetrievalResult, Retriever
+from app.tools.retrieval import LocalRetrievalTool, QdrantRetriever, RetrievalResult, Retriever
+
+
+class FakeQdrantHit:
+    """测试用 Qdrant 命中对象。"""
+
+    def __init__(self, payload: dict, score: float) -> None:
+        self.payload = payload
+        self.score = score
+
+
+class FakeQdrantClient:
+    """测试用 Qdrant client。"""
+
+    def __init__(self, hits: list[FakeQdrantHit] | None = None, should_raise: bool = False) -> None:
+        self.hits = hits or []
+        self.should_raise = should_raise
+        self.calls = []
+
+    def search(self, collection_name: str, query_vector: list[float], limit: int):
+        """记录查询参数并返回固定命中。"""
+        self.calls.append({"collection_name": collection_name, "query_vector": query_vector, "limit": limit})
+        if self.should_raise:
+            raise RuntimeError("qdrant failed")
+        return self.hits[:limit]
+
+
+class RaisingEmbedding:
+    """测试用异常 embedding。"""
+
+    def embed(self, text: str) -> list[float]:
+        """模拟 embedding 失败。"""
+        raise RuntimeError("embedding failed")
 
 
 class FakeHTTPResponse:
@@ -77,6 +109,49 @@ def test_openai_compatible_embedding_client_returns_empty_on_provider_error() ->
     client = OpenAICompatibleEmbeddingClient(settings=settings, urlopen=lambda request, timeout: (_ for _ in ()).throw(RuntimeError("boom secret")))
 
     assert client.embed("问题") == []
+
+
+def test_qdrant_retriever_maps_hits_to_retrieval_results() -> None:
+    """Qdrant 检索器应把命中 payload 映射为检索结果。"""
+    embedding = FakeEmbedding(vector=[0.1, 0.2])
+    qdrant = FakeQdrantClient(
+        hits=[
+            FakeQdrantHit(
+                payload={
+                    "content": "授予专利权的发明应具备创造性。",
+                    "source": "local://law/patent_law.md",
+                    "document_id": "patent_law",
+                    "doc_type": "law",
+                    "locator": "第22条",
+                },
+                score=0.87,
+            )
+        ]
+    )
+    retriever = QdrantRetriever(collection_name="patent_kb", embedding_client=embedding, qdrant_client=qdrant)
+
+    results = retriever.search("创造性", top_k=1)
+
+    assert embedding.calls == ["创造性"]
+    assert qdrant.calls == [{"collection_name": "patent_kb", "query_vector": [0.1, 0.2], "limit": 1}]
+    assert results == [
+        RetrievalResult(
+            content="授予专利权的发明应具备创造性。",
+            provenance={
+                "source": "local://law/patent_law.md",
+                "document_id": "patent_law",
+                "doc_type": "law",
+                "locator": "第22条",
+            },
+            similarity=0.87,
+        )
+    ]
+
+
+def test_qdrant_retriever_returns_empty_when_dependencies_fail() -> None:
+    """Qdrant 检索器依赖失败时应返回空列表。"""
+    assert QdrantRetriever("patent_kb", RaisingEmbedding(), FakeQdrantClient()).search("问题") == []
+    assert QdrantRetriever("patent_kb", FakeEmbedding([0.1]), FakeQdrantClient(should_raise=True)).search("问题") == []
 
 
 def test_local_retrieval_tool_returns_predictable_results_with_provenance() -> None:

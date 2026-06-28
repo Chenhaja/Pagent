@@ -1,6 +1,8 @@
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
+
+from app.tools.embeddings import EmbeddingClient
 
 
 class RetrievalResult(BaseModel):
@@ -40,6 +42,64 @@ class Retriever(Protocol):
             检索结果列表。
         """
         ...
+
+
+class QdrantRetriever:
+    """Qdrant 向量检索器。
+
+    Args:
+        collection_name: Qdrant 集合名称。
+        embedding_client: 文本向量化客户端。
+        qdrant_client: Qdrant 客户端,测试可注入 fake。
+
+    Returns:
+        基于向量召回的检索器。
+    """
+
+    def __init__(self, collection_name: str, embedding_client: EmbeddingClient, qdrant_client: Any) -> None:
+        self.collection_name = collection_name
+        self.embedding_client = embedding_client
+        self.qdrant_client = qdrant_client
+
+    def search(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+        """执行单轮 Qdrant 向量检索。
+
+        Args:
+            query: 检索查询文本。
+            top_k: 最多返回结果数。
+
+        Returns:
+            按 Qdrant 相似度排序的检索结果;依赖失败时返回空列表。
+        """
+        try:
+            query_vector = self.embedding_client.embed(query)
+            if not query_vector:
+                return []
+            hits = self.qdrant_client.search(collection_name=self.collection_name, query_vector=query_vector, limit=top_k)
+        except Exception:
+            return []
+
+        results = []
+        for hit in hits:
+            payload = getattr(hit, "payload", {}) or {}
+            content = str(payload.get("content", ""))
+            if not content:
+                continue
+            provenance = {
+                "source": str(payload.get("source", "local://unknown")),
+                "document_id": str(payload.get("document_id", "unknown")),
+            }
+            for key in ("doc_type", "locator"):
+                if payload.get(key):
+                    provenance[key] = str(payload[key])
+            results.append(
+                RetrievalResult(
+                    content=content,
+                    provenance=provenance,
+                    similarity=float(getattr(hit, "score", 0.0) or 0.0),
+                )
+            )
+        return results[:top_k]
 
 
 class LocalRetrievalTool:

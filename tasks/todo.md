@@ -69,17 +69,17 @@
 
 ## Phase 4: Qdrant 单轮检索闭环
 
-- [ ] 新增 `QdrantRetriever`
+- [x] 新增 `QdrantRetriever`
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：构造参数支持 `collection_name`、`embedding_client`、`qdrant_client`；`search(query, top_k)` 可调用 fake embedding 和 fake qdrant。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：Phase 3。
-- [ ] 映射 Qdrant payload 到 `RetrievalResult`
+- [x] 映射 Qdrant payload 到 `RetrievalResult`
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：fake hit 映射出 `content`、`source`、`document_id`、`doc_type`、`locator`、`similarity`；top_k 传递正确。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：新增 `QdrantRetriever`。
-- [ ] 实现 Qdrant / embedding 异常降级
+- [x] 实现 Qdrant / embedding 异常降级
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：embedding 或 qdrant fake 抛错时 `search()` 返回 `[]`；不抛裸异常。
   - 验证：`pytest tests/test_retrieval_tool.py`

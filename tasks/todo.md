@@ -151,22 +151,22 @@
 
 ## Phase 8: 回归验收
 
-- [ ] 运行 R4.1 目标测试
+- [x] 运行 R4.1 目标测试
   - 文件范围：R4.1 修改涉及的源码与测试。
   - 验收：retrieval、QA、配置、ingest 目标测试全部通过；默认不触发真实 embedding / Qdrant / 网络。
   - 验证：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py tests/test_core_config_logging.py tests/test_ingest_knowledge.py`
   - 阻塞：Phase 7。
-- [ ] 运行全量测试
+- [x] 运行全量测试
   - 文件范围：全项目。
   - 验收：全量 pytest 通过。
   - 验证：`pytest`
   - 阻塞：R4.1 目标测试。
-- [ ] 运行编译检查
+- [x] 运行编译检查
   - 文件范围：`app`、`tests`、`scripts`。
   - 验收：Python 编译检查通过。
   - 验证：`python -m compileall app tests scripts`
   - 阻塞：全量测试。
-- [ ] 执行最终验收命令并检查敏感文件
+- [x] 执行最终验收命令并检查敏感文件
   - 文件范围：全项目。
   - 验收：`pytest && python -m compileall app tests scripts` 通过；未提交 `.env`、API Key、Qdrant 凭证、embedding 凭证、真实法规全文或敏感案件材料。
   - 验证：`pytest && python -m compileall app tests scripts`

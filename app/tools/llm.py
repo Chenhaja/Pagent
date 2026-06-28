@@ -380,6 +380,21 @@ class OpenAICompatibleClient:
         )
 
 
+def build_llm_client(settings: Settings | None = None) -> LLMClient:
+    """根据配置构建 LLM client。
+
+    Args:
+        settings: 可选应用配置,未传入时读取全局配置。
+
+    Returns:
+        配置完整时返回 OpenAI 兼容 client;配置缺失时返回 Fake client,避免默认路径触发网络请求。
+    """
+    resolved_settings = settings or get_settings()
+    if resolved_settings.llm_base_url and resolved_settings.llm_model and resolved_settings.llm_api_key:
+        return OpenAICompatibleClient(settings=resolved_settings)
+    return FakeLLMClient()
+
+
 def _extract_openai_text(payload: dict[str, Any]) -> str:
     """从 OpenAI 兼容响应中提取文本。
 

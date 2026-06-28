@@ -4,6 +4,7 @@ from app.models.schemas import WorkflowState
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.qa import QANode
+from app.nodes.query_rewrite import QueryRewriteNode
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 from app.services.revision_service import RevisionService
@@ -20,6 +21,7 @@ class AgentDispatchService:
 
     def __init__(self) -> None:
         self.normalize_node = NormalizeInputNode()
+        self.query_rewrite_node = QueryRewriteNode()
         self.intent_router_node = IntentRouterNode()
         self.workflow_registry = WorkflowRegistry()
 
@@ -39,6 +41,12 @@ class AgentDispatchService:
             return {"status": normalize_result.status, "errors": normalize_result.errors, "message": "请补充要办理的专利任务类型。"}
         for trace_event in normalize_result.trace_events:
             state.add_trace_event(event=str(trace_event.get("event", "node_event")), data=trace_event.get("data", {}))
+
+        rewrite_result = self.query_rewrite_node.run(state)
+        for trace_event in rewrite_result.trace_events:
+            state.add_trace_event(event=str(trace_event.get("event", "node_event")), data=trace_event.get("data", {}))
+        if rewrite_result.status != "success":
+            return {"status": rewrite_result.status, "errors": rewrite_result.errors, "message": "请补充要办理的专利任务类型。"}
 
         route_result = self.intent_router_node.run(state)
         for trace_event in route_result.trace_events:

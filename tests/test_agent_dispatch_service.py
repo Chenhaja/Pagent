@@ -1,4 +1,28 @@
+from app.models.schemas import NodeResult, WorkflowState
 from app.services.agent_dispatch_service import AgentDispatchService
+
+
+class FixedRewriteNode:
+    """测试用固定改写节点。"""
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """写入固定改写结果。"""
+        state.normalized_input = "请根据技术方案生成权利要求"
+        return NodeResult.success(
+            output={"normalized_input": state.normalized_input},
+            trace_events=[{"event": "query_rewrite_completed", "data": {"confidence": 1.0, "uncertain": False}}],
+        )
+
+
+class FallbackRewriteNode:
+    """测试用降级改写节点。"""
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """保留归一化结果并返回 fallback trace。"""
+        return NodeResult.success(
+            output={"normalized_input": state.normalized_input},
+            trace_events=[{"event": "query_rewrite_failed_fallback", "data": {"reason": "llm_error"}}],
+        )
 
 
 def test_agent_dispatch_routes_claim_generation_workflow() -> None:
@@ -13,6 +37,7 @@ def test_agent_dispatch_routes_claim_generation_workflow() -> None:
     assert result["claims_draft"][0]["text"] == "一种控制方法。"
     assert [event["event"] for event in result["trace"]] == [
         "normalize_input_completed",
+        "query_rewrite_skipped",
         "intent_router_completed",
         "completeness_gate_completed",
         "feature_extract_completed",
@@ -61,6 +86,38 @@ def test_agent_dispatch_routes_qa_workflow() -> None:
     assert result["workflow"] == "qa"
     assert result["qa_result"]["answer"] == "该问题需要结合权利要求文本和技术方案初步判断。"
 
+
+
+def test_agent_dispatch_uses_rewritten_input_for_intent_router() -> None:
+    """query rewrite 的改写结果应影响后续 intent router。"""
+    service = AgentDispatchService()
+    service.query_rewrite_node = FixedRewriteNode()
+
+    result = service.dispatch("把它写出来")
+
+    assert result["status"] == "success"
+    assert result["intent"] == "claim_generation"
+    assert [event["event"] for event in result["trace"]][:3] == [
+        "normalize_input_completed",
+        "query_rewrite_completed",
+        "intent_router_completed",
+    ]
+
+
+def test_agent_dispatch_continues_after_query_rewrite_fallback() -> None:
+    """query rewrite 降级后仍应继续路由。"""
+    service = AgentDispatchService()
+    service.query_rewrite_node = FallbackRewriteNode()
+
+    result = service.dispatch("请根据技术方案生成权利要求")
+
+    assert result["status"] == "success"
+    assert result["intent"] == "claim_generation"
+    assert [event["event"] for event in result["trace"]][:3] == [
+        "normalize_input_completed",
+        "query_rewrite_failed_fallback",
+        "intent_router_completed",
+    ]
 
 
 def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:

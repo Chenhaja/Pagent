@@ -4,7 +4,7 @@ import os
 import pytest
 
 from app.core.config import Settings
-from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink, LLMMessage, OpenAICompatibleClient
+from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink, LLMMessage, OpenAICompatibleClient, build_llm_client
 
 
 def test_fake_llm_returns_fixed_response() -> None:
@@ -81,6 +81,27 @@ def test_fake_llm_can_simulate_empty_response_and_refusal() -> None:
 
     assert empty_response.errors[0]["code"] == "empty_response"
     assert refusal_response.errors[0]["code"] == "model_refusal"
+
+
+def test_build_llm_client_returns_openai_client_when_config_complete() -> None:
+    """LLM client factory 应在配置完整时返回真实兼容 client。"""
+    settings = Settings(llm_base_url="https://llm.example.test/v1", llm_model="test-model", llm_api_key="sk-test-secret")
+
+    client = build_llm_client(settings)
+
+    assert isinstance(client, OpenAICompatibleClient)
+
+
+def test_build_llm_client_returns_fake_client_when_config_incomplete() -> None:
+    """LLM client factory 应在配置缺失时返回 fake 避免默认触网。"""
+    incomplete_settings = [
+        Settings(llm_base_url=None, llm_model="test-model", llm_api_key="sk-test-secret"),
+        Settings(llm_base_url="https://llm.example.test/v1", llm_model="", llm_api_key="sk-test-secret"),
+        Settings(llm_base_url="https://llm.example.test/v1", llm_model="test-model", llm_api_key=None),
+    ]
+
+    for settings in incomplete_settings:
+        assert isinstance(build_llm_client(settings), FakeLLMClient)
 
 
 class FakeHTTPResponse:

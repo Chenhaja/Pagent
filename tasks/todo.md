@@ -33,17 +33,17 @@
 
 ## Phase 2: 检索契约与 Local 兼容
 
-- [ ] 扩展 `RetrievalResult`
+- [x] 扩展 `RetrievalResult`
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：新增 `similarity: float = 0.0`；旧构造方式不变；docstring 说明 provenance 扩展字段。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：Phase 1。
-- [ ] 新增 `Retriever` 协议
+- [x] 新增 `Retriever` 协议
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：协议包含 `search(query: str, top_k: int = 3) -> list[RetrievalResult]`；`LocalRetrievalTool` 满足协议。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：扩展 `RetrievalResult`。
-- [ ] 保持并扩展 Local provenance
+- [x] 保持并扩展 Local provenance
   - 文件范围：`app/tools/retrieval.py`、`tests/test_retrieval_tool.py`
   - 验收：Local 关键词检索行为不变；document 包含 `doc_type` / `locator` 时透传；无字段时旧测试仍通过。
   - 验证：`pytest tests/test_retrieval_tool.py`

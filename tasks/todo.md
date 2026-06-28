@@ -1,128 +1,73 @@
-# 下一阶段任务清单
+# R3.1 Query Rewrite Node 任务清单
 
-## Phase 0：计划确认与基线保护
+## Task 0：创建执行计划文件
 
-- [x] T0.1 固化基线测试
-  - 验收：明确当前 `pytest` 基线，当前基线为 99 passed。
-  - 验证：`pytest`
+- [x] 新增 `tasks/plan.md` 和 `tasks/todo.md`
+  - 验收：两个文件可直接指导执行，todo 按垂直切片排列。
+  - 验证：`pytest --collect-only`
 
-## Phase 1：P0 LLM 调用闭环最小切片
+## Task 1：固化 normalize 职责边界测试
 
-- [x] T1.1 扩展 LLM 配置与安全默认值
-  - 验收：LLM 配置全部来自环境变量 / 默认值；脱敏默认开启；不泄露 API Key。
-  - 验证：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
+- [x] 更新 `tests/test_normalize_input_node.py`
+  - 验收：测试明确表达 normalize 不读取 `dialog_context` 做语义融合。
+  - 验证：`pytest tests/test_normalize_input_node.py`
 
-- [x] T1.2 实现 LLM Protocol、结构化错误和 Fake 兼容
-  - 验收：Fake 与真实 client 调用形态一致；错误结构化；trace 不含敏感内容。
-  - 验证：`pytest tests/test_llm_tool.py tests/test_security_compliance.py`
+## Task 2：简化 NormalizeInputNode
 
-- [x] T1.3 实现 OpenAICompatibleClient 的最小真实调用路径
-  - 验收：默认测试不触网；显式开启后可真实调用兼容端点并解析 schema。
+- [x] 修改 `app/nodes/normalize_input.py`
+  - 验收：只做当前 `raw_input` 空白归一化和空输入检查，不依赖 `dialog_context`。
+  - 验证：`pytest tests/test_normalize_input_node.py`
+
+## Task 3：添加 LLM client factory 测试
+
+- [x] 更新 `tests/test_llm_tool.py`
+  - 验收：配置完整返回 `OpenAICompatibleClient`，配置缺失返回 `FakeLLMClient`，不触发网络请求。
   - 验证：`pytest tests/test_llm_tool.py`
 
-## Checkpoint 1
+## Task 4：实现 build_llm_client
 
-- [x] LLM 抽象、Fake、真实 client、配置、安全默认值全部完成。
+- [x] 修改 `app/tools/llm.py`
+  - 验收：公开函数 `build_llm_client(settings=None)` 默认配置不完整时返回 fake。
+  - 验证：`pytest tests/test_llm_tool.py`
 
-## Phase 2：P0 Feature extraction 垂直真实 LLM 切片
+## Task 5：添加 query rewrite prompt 模块
 
-- [x] T2.1 扩展 SkillContext 与 Prompt 分层结构
-  - 验收：`prompt_layers`、`safety_policy` 可用，旧测试兼容。
-  - 验证：`pytest tests/test_skill_context.py`
+- [x] 新增 `app/prompts/query_rewrite.py`
+  - 验收：prompt 覆盖六要素，数据区隔离，输出仅 JSON，含 `confidence` / `uncertain` 字段。
+  - 验证：`pytest tests/test_query_rewrite_node.py`
 
-- [x] T2.2 让 `feature_extraction` skill 构造 prompt 并调用 LLM 抽象
-  - 验收：Fake LLM 返回结构化特征时写入 state；错误时结构化失败。
-  - 验证：`pytest tests/test_feature_extraction_skill.py tests/test_feature_extract_node.py tests/test_llm_tool.py`
+## Task 6：添加 QueryRewriteNode 单元测试
 
-## Checkpoint 2
+- [x] 新增 `tests/test_query_rewrite_node.py`
+  - 验收：覆盖无历史跳过、成功改写、错误/异常/非法响应 fallback、base query 优先级和 prompt safety。
+  - 验证：`pytest tests/test_query_rewrite_node.py`
 
-- [x] 至少一个 skill 完成 prompt + LLM 抽象 + schema 校验闭环。
+## Task 7：实现 QueryRewriteNode
 
-## Phase 3：P0 编排闭环与统一入口
+- [x] 新增 `app/nodes/query_rewrite.py`
+  - 验收：失败路径均 success + fallback trace，不修改 `raw_input`，无历史不调用 LLM。
+  - 验证：`pytest tests/test_query_rewrite_node.py`
 
-- [x] T3.1 元数据化 WorkflowRegistry
-  - 验收：claim_generation / translation / claim_revision / qa 均可查询；claim_generation 包含 completeness_gate。
-  - 验证：`pytest tests/test_workflow_registry.py tests/test_phase3_workflows.py`
+## Task 8：更新 AgentDispatchService 测试
 
-- [x] T3.2 Orchestrator 支持 `next_node` 与有界回环
-  - 验收：合法跳转可执行；非法跳转和超限回环结构化失败。
-  - 验证：`pytest tests/test_orchestrator_engine.py tests/test_node_result.py`
+- [x] 修改 `tests/test_agent_dispatch_service.py`
+  - 验收：trace 顺序包含 query rewrite，改写结果影响 intent router，fallback 不阻断 dispatch。
+  - 验证：`pytest tests/test_agent_dispatch_service.py`
 
-- [x] T3.3 增加信息完整性 gate
-  - 验收：信息缺失时追问；信息充足时进入 feature_extract。
-  - 验证：`pytest tests/test_claim_generation_e2e.py tests/test_completeness_gate_node.py`
+## Task 9：接入 AgentDispatchService
 
-- [x] T3.4 统一 AgentDispatchService 到 registry + orchestrator
-  - 验收：同一请求只 normalize 一次；显式 API 也通过 known intent workflow。
-  - 验证：`pytest tests/test_agent_dispatch_service.py tests/test_known_intent_services.py tests/test_claim_generation_e2e.py tests/test_translate_e2e.py tests/test_revision_e2e.py`
+- [x] 修改 `app/services/agent_dispatch_service.py`
+  - 验收：链路为 normalize → query_rewrite → intent_router，默认无 history 不触网。
+  - 验证：`pytest tests/test_agent_dispatch_service.py`
 
-## Checkpoint 3
+## Task 10：修正相邻回归断言
 
-- [x] 统一 orchestrator 成为唯一业务编排入口，QA workflow 已注册。
+- [x] 修正硬编码 trace 顺序或列表断言
+  - 验收：默认 API / service 请求不触发真实 LLM，业务流仍成功。
+  - 验证：`pytest tests/test_agent_api.py tests/test_known_intent_services.py tests/test_phase3_workflows.py tests/test_claim_generation_e2e.py tests/test_translate_e2e.py`
 
-## Phase 4：P0/P1 QA 落点
+## Task 11：全量验证与收尾
 
-- [x] T4.1 增加 patent_qa skill、qa node 与 QA schema
-  - 验收：`qa` 意图能跑完整 workflow，输出结构化答案。
-  - 验证：`pytest tests/test_patent_qa_skill.py tests/test_qa_node.py tests/test_workflow_registry.py tests/test_agent_dispatch_service.py`
-
-- [x] T4.2 增加统一 Agent API endpoint
-  - 验收：POST `/agent` 支持 QA、权利要求生成、翻译、修改路径。
-  - 验证：`pytest tests/test_agent_api.py tests/test_api_error_responses.py`
-
-## Checkpoint 4
-
-- [x] P0 完成：统一入口 + QA + LLM 抽象 + 编排闭环可端到端验证。
-
-## Phase 5：P1 改写、检索与 bounded ReAct
-
-- [x] T5.1 normalize_input 支持基于对话历史的意图前改写
-  - 验收：结合 dialog_context 生成自包含 normalized_input；不覆盖 raw_input。
-  - 验证：`pytest tests/test_normalize_input_node.py tests/test_agent_dispatch_service.py`
-
-- [x] T5.2 增加 retrieval tool mock / 本地接口
-  - 验收：本地检索可预测返回，结果带 provenance。
-  - 验证：`pytest tests/test_retrieval_tool.py`
-
-- [x] T5.3 QA 内 bounded ReAct 最小实现
-  - 验收：限定 retrieval 工具、最大步数、token 预算、超时；输出 trace。
-  - 验证：`pytest tests/test_qa_node.py tests/test_retrieval_tool.py`
-
-## Checkpoint 5
-
-- [x] P1 QA + 检索智能增强完成。
-
-## Phase 6：P1 本地记忆与 provenance
-
-- [x] T6.1 增加 memory 抽象与本地 store
-  - 验收：会话、案件、用户画像、经验记忆可本地读写；写入带 provenance。
-  - 验证：`pytest tests/test_memory_store.py`
-
-- [x] T6.2 实现 memory gating
-  - 验收：未经校验与用户确认的模型输出不能写入长期记忆。
-  - 验证：`pytest tests/test_memory_store.py tests/test_security_compliance.py`
-
-## Checkpoint 6
-
-- [x] 记忆能力可用且只使用本地 store，不接外部 wiki。
-
-## Phase 7：P2 安全、审计与目录对齐
-
-- [x] T7.1 LLM trace 持久化接口
-  - 验收：trace 可写入抽象 sink，默认不记录敏感内容。
-  - 验证：`pytest tests/test_security_compliance.py tests/test_llm_tool.py`
-
-- [x] T7.2 API routes 目录对齐
-  - 验收：现有 endpoints 不变，新增 `/agent` endpoint，路由结构清晰。
-  - 验证：`pytest tests/test_health.py tests/test_claim_generation_api.py tests/test_translate_api.py tests/test_revision_api.py tests/test_agent_api.py`
-
-- [x] T7.3 质量工具评估
-  - 验收：如引入 ruff / mypy，配置最小化，不做大规模格式重排。
-  - 验证：`ruff check .`、`mypy app`、`pytest`
-
-## Final Checkpoint
-
-- [x] 全量测试通过：`pytest`
-- [x] 默认测试不触网。
-- [x] 日志 / trace 不含密钥、完整技术交底、完整译文或隐私内容。
-- [x] 生成结果持续包含辅助初稿免责声明。
+- [x] 运行全量测试和编译检查
+  - 验收：全量测试通过，diff 无无关改动和敏感信息。
+  - 验证：`pytest && python -m compileall app tests`

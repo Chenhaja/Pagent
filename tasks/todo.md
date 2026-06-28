@@ -51,17 +51,17 @@
 
 ## Phase 3: Embedding 客户端薄片
 
-- [ ] 新增 `EmbeddingClient` 协议和 `FakeEmbedding`
+- [x] 新增 `EmbeddingClient` 协议和 `FakeEmbedding`
   - 文件范围：`app/tools/embeddings.py`、`tests/test_retrieval_tool.py`
   - 验收：`embed(text) -> list[float]`；fake 输出可预测并记录调用；有中文 docstring。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：Phase 2。
-- [ ] 新增 OpenAI 兼容 embedding 客户端
+- [x] 新增 OpenAI 兼容 embedding 客户端
   - 文件范围：`app/tools/embeddings.py`、`tests/test_retrieval_tool.py`
   - 验收：使用 embedding 配置并可回退 LLM 配置；fake HTTP 响应可解析 vector；缺配置或 HTTP 失败不泄漏 key。
   - 验证：`pytest tests/test_retrieval_tool.py`
   - 阻塞：`EmbeddingClient` 协议。
-- [ ] 接入基础脱敏边界
+- [x] 接入基础脱敏边界
   - 文件范围：`app/tools/embeddings.py`、`tests/test_retrieval_tool.py`
   - 验收：在线 embed 前使用 `redact_sensitive_text()`；trace / 异常不记录完整敏感正文或 API Key。
   - 验证：`pytest tests/test_retrieval_tool.py`

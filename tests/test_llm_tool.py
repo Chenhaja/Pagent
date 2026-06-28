@@ -4,7 +4,7 @@ import os
 import pytest
 
 from app.core.config import Settings
-from app.tools.llm import FakeLLMClient, LLMMessage, OpenAICompatibleClient
+from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink, LLMMessage, OpenAICompatibleClient
 
 
 def test_fake_llm_returns_fixed_response() -> None:
@@ -51,6 +51,27 @@ def test_fake_llm_accepts_openai_style_messages() -> None:
     assert response.trace["model"] == "fake-model"
     assert response.trace["node_name"] == "qa"
     assert response.trace["input_chars"] > 0
+
+
+def test_llm_trace_sink_records_sanitized_trace_only() -> None:
+    """LLM trace sink 应只持久化不含敏感正文和密钥的 trace。"""
+    sink = InMemoryLLMTraceSink()
+    client = FakeLLMClient(response={"answer": "ok"}, trace_sink=sink)
+
+    client.generate(prompt="完整技术交底书内容", trace_context={"api_key": "sk-test-secret", "raw_input": "完整技术交底书内容", "node_name": "qa"})
+
+    assert sink.records == [
+        {
+            "provider": "fake",
+            "model": "fake",
+            "input_chars": 9,
+            "output_chars": 16,
+            "fallback_used": False,
+            "node_name": "qa",
+        }
+    ]
+    assert "sk-test-secret" not in str(sink.records)
+    assert "完整技术交底书内容" not in str(sink.records)
 
 
 def test_fake_llm_can_simulate_empty_response_and_refusal() -> None:

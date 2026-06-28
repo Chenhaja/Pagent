@@ -108,7 +108,7 @@
 
 ## Phase 7：P2 安全、审计与目录对齐
 
-- [ ] T7.1 LLM trace 持久化接口
+- [x] T7.1 LLM trace 持久化接口
   - 验收：trace 可写入抽象 sink，默认不记录敏感内容。
   - 验证：`pytest tests/test_security_compliance.py tests/test_llm_tool.py`
 

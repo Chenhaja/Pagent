@@ -59,6 +59,47 @@ class LLMResponse(BaseModel):
     trace: dict[str, Any] = Field(default_factory=dict)
 
 
+class LLMTraceSink(Protocol):
+    """LLM trace 持久化接口。
+
+    Returns:
+        可替换的 LLM trace sink 协议。
+    """
+
+    def write(self, trace: dict[str, Any]) -> None:
+        """写入一条已脱敏 trace。
+
+        Args:
+            trace: 不含密钥和完整输入输出正文的 trace。
+
+        Returns:
+            无返回值。
+        """
+        ...
+
+
+class InMemoryLLMTraceSink:
+    """内存版 LLM trace sink。
+
+    Returns:
+        用于测试和本地调试的 trace sink。
+    """
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+
+    def write(self, trace: dict[str, Any]) -> None:
+        """写入一条 LLM trace。
+
+        Args:
+            trace: 已脱敏的 LLM trace。
+
+        Returns:
+            无返回值。
+        """
+        self.records.append(dict(trace))
+
+
 class LLMClient(Protocol):
     """LLM 客户端协议。
 
@@ -106,9 +147,15 @@ class FakeLLMClient:
         可替代真实 LLM 的 fake client。
     """
 
-    def __init__(self, response: dict[str, Any] | None = None, error: str | None = None) -> None:
+    def __init__(
+        self,
+        response: dict[str, Any] | None = None,
+        error: str | None = None,
+        trace_sink: LLMTraceSink | None = None,
+    ) -> None:
         self.response = response or {}
         self.error = error
+        self.trace_sink = trace_sink
 
     def generate(
         self,
@@ -153,6 +200,8 @@ class FakeLLMClient:
         if trace_context:
             trace.update({key: value for key, value in trace_context.items() if key not in {"api_key", "raw_input"}})
 
+        if self.trace_sink is not None:
+            self.trace_sink.write(trace)
         if self.error:
             return LLMResponse(
                 content={},

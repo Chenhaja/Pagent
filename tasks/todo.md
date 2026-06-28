@@ -1,73 +1,117 @@
-# R3.1 Query Rewrite Node 任务清单
+# R5 Todo
 
-## Task 0：创建执行计划文件
+## Phase 0: 计划文档
 
-- [x] 新增 `tasks/plan.md` 和 `tasks/todo.md`
-  - 验收：两个文件可直接指导执行，todo 按垂直切片排列。
-  - 验证：`pytest --collect-only`
+- [x] 写入 `tasks/plan.md`
+  - 文件范围：`tasks/plan.md`
+  - 验收：包含 R5 背景、依赖图、任务拆分、风险约束和验证命令。
+  - 验证：人工检查。
+  - 阻塞：无。
+- [x] 写入 `tasks/todo.md`
+  - 文件范围：`tasks/todo.md`
+  - 验收：按垂直切片组织任务，包含文件范围、验收标准、验证命令和阻塞关系。
+  - 验证：人工检查。
+  - 阻塞：无。
 
-## Task 1：固化 normalize 职责边界测试
+## Phase 1: 安全前置
 
-- [x] 更新 `tests/test_normalize_input_node.py`
-  - 验收：测试明确表达 normalize 不读取 `dialog_context` 做语义融合。
-  - 验证：`pytest tests/test_normalize_input_node.py`
+- [ ] 核查 LLM 默认配置安全性
+  - 文件范围：`app/core/config.py`、`app/tools/llm.py`、`tests/test_core_config_logging.py`、`tests/test_llm_tool.py`
+  - 验收：默认配置不包含真实 API Key / endpoint / 模型凭据；无有效配置时 `build_llm_client()` 返回 `FakeLLMClient`；`to_public_dict()` 不暴露密钥。
+  - 验证：`pytest tests/test_core_config_logging.py tests/test_llm_tool.py`
+  - 阻塞：Phase 0。
 
-## Task 2：简化 NormalizeInputNode
+## Phase 2: 意图识别最小闭环
 
-- [x] 修改 `app/nodes/normalize_input.py`
-  - 验收：只做当前 `raw_input` 空白归一化和空输入检查，不依赖 `dialog_context`。
-  - 验证：`pytest tests/test_normalize_input_node.py`
+- [ ] 新增 `IntentClassification`
+  - 文件范围：`app/models/schemas.py`
+  - 验收：intent 枚举为 `claim_generation | claim_revision | translation | qa | unknown`，confidence 限制在 `0.0~1.0`。
+  - 验证：`pytest tests/test_intent_router_node.py`
+  - 阻塞：Phase 1。
+- [ ] 新增 intent_router prompt
+  - 文件范围：`app/prompts/intent_router.py`
+  - 验收：导出 system prompt、output schema、user prompt builder；满足六要素、数据隔离、仅输出 JSON。
+  - 验证：`pytest tests/test_intent_router_node.py`
+  - 阻塞：Phase 1。
+- [ ] 修复关键词优先级 bug
+  - 文件范围：`app/nodes/intent_router.py`
+  - 验收：权利要求相关语义优先于 `qa` 宽泛词；关键词命中不调用 LLM；trace 含 `intent`、`source: keyword`、`confidence`。
+  - 验证：`pytest tests/test_intent_router_node.py`
+  - 阻塞：新增 schema 与 prompt。
+- [ ] 补关键词快路测试
+  - 文件范围：`tests/test_intent_router_node.py`
+  - 验收：“我的权利要求有什么问题”不路由到 QA；各关键词命中不调用 LLM。
+  - 验证：`pytest tests/test_intent_router_node.py`
+  - 阻塞：关键词逻辑修改。
 
-## Task 3：添加 LLM client factory 测试
+## Phase 3: 意图识别 LLM fallback
 
-- [x] 更新 `tests/test_llm_tool.py`
-  - 验收：配置完整返回 `OpenAICompatibleClient`，配置缺失返回 `FakeLLMClient`，不触发网络请求。
-  - 验证：`pytest tests/test_llm_tool.py`
+- [ ] 增加 llm_client 注入与 build_llm_client 默认路径
+  - 文件范围：`app/nodes/intent_router.py`
+  - 验收：未注入时使用 `build_llm_client()`；关键词快路仍不会调用 LLM。
+  - 验证：`pytest tests/test_intent_router_node.py`
+  - 阻塞：Phase 2。
+- [ ] 增加低置信追问
+  - 文件范围：`app/nodes/intent_router.py`、`tests/test_intent_router_node.py`
+  - 验收：`confidence < 0.6` 或 `unknown` 返回 `NodeResult.need_user_input()`，包含普通发明人可理解的澄清问题和支持任务类型。
+  - 验证：`pytest tests/test_intent_router_node.py`
+  - 阻塞：LLM fallback。
+- [ ] 增加异常降级 trace
+  - 文件范围：`app/nodes/intent_router.py`、`tests/test_intent_router_node.py`、`tests/test_agent_dispatch_service.py`
+  - 验收：LLM 异常、非法 JSON、schema 校验失败记录 `intent_router_failed_fallback` 并降级追问；dispatch 能消费澄清结果。
+  - 验证：`pytest tests/test_intent_router_node.py tests/test_agent_dispatch_service.py`
+  - 阻塞：低置信追问。
 
-## Task 4：实现 build_llm_client
+## Phase 4: QA skill
 
-- [x] 修改 `app/tools/llm.py`
-  - 验收：公开函数 `build_llm_client(settings=None)` 默认配置不完整时返回 fake。
-  - 验证：`pytest tests/test_llm_tool.py`
+- [ ] 新增 patent_qa prompt
+  - 文件范围：`app/prompts/patent_qa.py`
+  - 验收：导出 system prompt、output schema、few-shot、user prompt builder；外部数据隔离；仅输出 JSON；禁止编造来源。
+  - 验证：`pytest tests/test_patent_qa_skill.py`
+  - 阻塞：Phase 3。
+- [ ] PatentQASkill 默认使用 build_llm_client
+  - 文件范围：`app/skills/patent_qa.py`
+  - 验收：默认构造经 `build_llm_client()`；保留 `PatentQAResult` schema 校验；测试显式 fake/stub 不触网。
+  - 验证：`pytest tests/test_patent_qa_skill.py`
+  - 阻塞：新增 prompt。
+- [ ] 更新 skill 测试
+  - 文件范围：`tests/test_patent_qa_skill.py`
+  - 验收：messages 分层清晰，合法 fake 可解析，非法响应仍按既有策略抛错。
+  - 验证：`pytest tests/test_patent_qa_skill.py`
+  - 阻塞：skill 修改。
 
-## Task 5：添加 query rewrite prompt 模块
+## Phase 5: QA node
 
-- [x] 新增 `app/prompts/query_rewrite.py`
-  - 验收：prompt 覆盖六要素，数据区隔离，输出仅 JSON，含 `confidence` / `uncertain` 字段。
-  - 验证：`pytest tests/test_query_rewrite_node.py`
+- [ ] 注入 provenance evidence
+  - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
+  - 验收：检索结果传给 skill 时包含 `content`、`provenance.source`、`provenance.document_id` 或已有 id、`score`；`qa_result.basis` 含真实 provenance 来源。
+  - 验证：`pytest tests/test_qa_node.py tests/test_patent_qa_skill.py`
+  - 阻塞：Phase 4。
+- [ ] 增加无依据路径
+  - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
+  - 验收：无检索命中时回答说明依据不足，不编造来源。
+  - 验证：`pytest tests/test_qa_node.py`
+  - 阻塞：provenance evidence。
+- [ ] 增加护栏与 trace 测试
+  - 文件范围：`app/nodes/qa.py`、`tests/test_qa_node.py`
+  - 验收：bounded 参数无效时不调用 retrieval tool；检索异常不导致 node failed；trace 含 `steps_used`、`result_count`、`token_budget`、`timeout_seconds`、`basis_count`、`has_retrieval`，且不记录完整正文。
+  - 验证：`pytest tests/test_qa_node.py tests/test_patent_qa_skill.py`
+  - 阻塞：无依据路径。
 
-## Task 6：添加 QueryRewriteNode 单元测试
+## Phase 6: 回归验收
 
-- [x] 新增 `tests/test_query_rewrite_node.py`
-  - 验收：覆盖无历史跳过、成功改写、错误/异常/非法响应 fallback、base query 优先级和 prompt safety。
-  - 验证：`pytest tests/test_query_rewrite_node.py`
-
-## Task 7：实现 QueryRewriteNode
-
-- [x] 新增 `app/nodes/query_rewrite.py`
-  - 验收：失败路径均 success + fallback trace，不修改 `raw_input`，无历史不调用 LLM。
-  - 验证：`pytest tests/test_query_rewrite_node.py`
-
-## Task 8：更新 AgentDispatchService 测试
-
-- [x] 修改 `tests/test_agent_dispatch_service.py`
-  - 验收：trace 顺序包含 query rewrite，改写结果影响 intent router，fallback 不阻断 dispatch。
+- [ ] 更新 dispatch 回归
+  - 文件范围：`tests/test_agent_dispatch_service.py`、必要时 `app/services/agent_dispatch_service.py`
+  - 验收：预处理顺序仍为 `normalize_input → query_rewrite → intent_router`；`raw_input` 不被覆盖；`qa` intent 进入 QA workflow；“权利要求有什么问题”不进入 QA；unknown / 低置信返回前端可消费追问结构。
   - 验证：`pytest tests/test_agent_dispatch_service.py`
-
-## Task 9：接入 AgentDispatchService
-
-- [x] 修改 `app/services/agent_dispatch_service.py`
-  - 验收：链路为 normalize → query_rewrite → intent_router，默认无 history 不触网。
-  - 验证：`pytest tests/test_agent_dispatch_service.py`
-
-## Task 10：修正相邻回归断言
-
-- [x] 修正硬编码 trace 顺序或列表断言
-  - 验收：默认 API / service 请求不触发真实 LLM，业务流仍成功。
-  - 验证：`pytest tests/test_agent_api.py tests/test_known_intent_services.py tests/test_phase3_workflows.py tests/test_claim_generation_e2e.py tests/test_translate_e2e.py`
-
-## Task 11：全量验证与收尾
-
-- [x] 运行全量测试和编译检查
-  - 验收：全量测试通过，diff 无无关改动和敏感信息。
+  - 阻塞：Phase 5。
+- [ ] 运行 R5 目标测试
+  - 文件范围：R5 修改涉及的源码与测试。
+  - 验收：目标测试全部通过，默认测试不触网。
+  - 验证：`pytest tests/test_intent_router_node.py tests/test_patent_qa_skill.py tests/test_qa_node.py tests/test_agent_dispatch_service.py`
+  - 阻塞：dispatch 回归。
+- [ ] 运行最终验收
+  - 文件范围：全项目。
+  - 验收：全量测试和编译检查通过。
   - 验证：`pytest && python -m compileall app tests`
+  - 阻塞：R5 目标测试。

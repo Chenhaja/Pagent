@@ -4,7 +4,9 @@
       "Bash(git:*)",
       "Bash(pytest:*)",
       "Bash(python -m compileall app tests)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(ruff check:*)",
+      "Bash(mypy app:*)"
     ]
   }
 }

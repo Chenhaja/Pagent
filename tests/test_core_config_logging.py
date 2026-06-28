@@ -27,6 +27,14 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.memory_history_window == 6
     assert settings.memory_token_budget == 1500
     assert settings.memory_summary_model is None
+    assert settings.retrieval_backend == "local"
+    assert settings.retrieval_top_k == 3
+    assert settings.qdrant_url is None
+    assert settings.qdrant_api_key is None
+    assert settings.qdrant_collection == "patent_kb"
+    assert settings.embedding_base_url is None
+    assert settings.embedding_model == ""
+    assert settings.embedding_api_key is None
 
 
 def test_settings_read_llm_values_from_dotenv_when_not_testing(monkeypatch, tmp_path) -> None:
@@ -71,6 +79,14 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_MEMORY_HISTORY_WINDOW", "8")
     monkeypatch.setenv("PAGENT_MEMORY_TOKEN_BUDGET", "2000")
     monkeypatch.setenv("PAGENT_MEMORY_SUMMARY_MODEL", "summary-model")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_BACKEND", "qdrant")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_TOP_K", "5")
+    monkeypatch.setenv("PAGENT_QDRANT_URL", "http://qdrant.example.test")
+    monkeypatch.setenv("PAGENT_QDRANT_API_KEY", "qdrant-secret")
+    monkeypatch.setenv("PAGENT_QDRANT_COLLECTION", "custom_kb")
+    monkeypatch.setenv("PAGENT_EMBEDDING_BASE_URL", "https://embedding.example.test/v1")
+    monkeypatch.setenv("PAGENT_EMBEDDING_MODEL", "embedding-model")
+    monkeypatch.setenv("PAGENT_EMBEDDING_API_KEY", "embedding-secret")
     get_settings.cache_clear()
 
     settings = get_settings()
@@ -91,22 +107,40 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.memory_history_window == 8
     assert settings.memory_token_budget == 2000
     assert settings.memory_summary_model == "summary-model"
+    assert settings.retrieval_backend == "qdrant"
+    assert settings.retrieval_top_k == 5
+    assert settings.qdrant_url == "http://qdrant.example.test"
+    assert settings.qdrant_api_key == "qdrant-secret"
+    assert settings.qdrant_collection == "custom_kb"
+    assert settings.embedding_base_url == "https://embedding.example.test/v1"
+    assert settings.embedding_model == "embedding-model"
+    assert settings.embedding_api_key == "embedding-secret"
     get_settings.cache_clear()
 
 
 def test_settings_do_not_expose_secret_values() -> None:
     """配置序列化结果不应暴露密钥字段。"""
-    settings = Settings(llm_api_key="secret-value")
+    settings = Settings(llm_api_key="secret-value", qdrant_api_key="qdrant-secret", embedding_api_key="embedding-secret")
 
     public_values = settings.to_public_dict()
 
     assert "llm_api_key" not in public_values
+    assert "qdrant_api_key" not in public_values
+    assert "embedding_api_key" not in public_values
     assert "secret-value" not in str(public_values)
+    assert "qdrant-secret" not in str(public_values)
+    assert "embedding-secret" not in str(public_values)
     assert public_values["memory_enabled"] == "True"
     assert public_values["memory_db_path"] == "./pagent_memory.db"
     assert public_values["memory_history_window"] == "6"
     assert public_values["memory_token_budget"] == "1500"
     assert public_values["memory_summary_model"] is None
+    assert public_values["retrieval_backend"] == "local"
+    assert public_values["retrieval_top_k"] == "3"
+    assert public_values["qdrant_url"] is None
+    assert public_values["qdrant_collection"] == "patent_kb"
+    assert public_values["embedding_base_url"] is None
+    assert public_values["embedding_model"] == ""
 
 
 def test_json_line_formatter_outputs_required_fields() -> None:

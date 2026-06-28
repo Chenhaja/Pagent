@@ -15,17 +15,17 @@
 
 ## Phase 1: 配置入口最小闭环
 
-- [ ] 增加 retrieval / qdrant / embedding 配置字段
+- [x] 增加 retrieval / qdrant / embedding 配置字段
   - 文件范围：`app/core/config.py`、`tests/test_core_config_logging.py`
   - 验收：`Settings` 含 `retrieval_backend`、`retrieval_top_k`、`qdrant_url`、`qdrant_api_key`、`qdrant_collection`、`embedding_base_url`、`embedding_model`、`embedding_api_key`；默认值与 SPEC 一致。
   - 验证：`pytest tests/test_core_config_logging.py`
   - 阻塞：Phase 0。
-- [ ] 读取 `PAGENT_RETRIEVAL_*` / `PAGENT_QDRANT_*` / `PAGENT_EMBEDDING_*` 环境变量
+- [x] 读取 `PAGENT_RETRIEVAL_*` / `PAGENT_QDRANT_*` / `PAGENT_EMBEDDING_*` 环境变量
   - 文件范围：`app/core/config.py`、`tests/test_core_config_logging.py`
   - 验收：环境变量可覆盖默认值；embedding base URL / API key 的回退口径清晰。
   - 验证：`pytest tests/test_core_config_logging.py`
   - 阻塞：增加配置字段。
-- [ ] 更新公开配置输出
+- [x] 更新公开配置输出
   - 文件范围：`app/core/config.py`、`tests/test_core_config_logging.py`
   - 验收：`to_public_dict()` 展示非敏感 retrieval / qdrant / embedding 配置，不暴露 `llm_api_key`、`qdrant_api_key`、`embedding_api_key` 或密钥值。
   - 验证：`pytest tests/test_core_config_logging.py`

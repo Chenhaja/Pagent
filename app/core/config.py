@@ -30,6 +30,14 @@ class Settings(BaseModel):
         memory_history_window: 会话记忆保留的最近原文 turn 数。
         memory_token_budget: 触发摘要的字符预算。
         memory_summary_model: 可选摘要模型名称。
+        retrieval_backend: 检索后端名称。
+        retrieval_top_k: 默认检索召回数量。
+        qdrant_url: Qdrant 服务地址。
+        qdrant_api_key: 可选 Qdrant API Key。
+        qdrant_collection: Qdrant 集合名称。
+        embedding_base_url: OpenAI 兼容 embedding 端点地址。
+        embedding_model: embedding 模型名称。
+        embedding_api_key: 可选 embedding API Key。
 
     Returns:
         应用配置对象。
@@ -56,6 +64,14 @@ class Settings(BaseModel):
     memory_history_window: int = 6
     memory_token_budget: int = 1500
     memory_summary_model: str | None = None
+    retrieval_backend: str = "local"
+    retrieval_top_k: int = 3
+    qdrant_url: str | None = None
+    qdrant_api_key: str | None = Field(default=None, exclude=True)
+    qdrant_collection: str = "patent_kb"
+    embedding_base_url: str | None = None
+    embedding_model: str = ""
+    embedding_api_key: str | None = Field(default=None, exclude=True)
 
     def to_public_dict(self) -> dict[str, str | None]:
         """返回不包含敏感字段的公开配置。
@@ -84,6 +100,12 @@ class Settings(BaseModel):
             "memory_history_window": str(self.memory_history_window),
             "memory_token_budget": str(self.memory_token_budget),
             "memory_summary_model": self.memory_summary_model,
+            "retrieval_backend": self.retrieval_backend,
+            "retrieval_top_k": str(self.retrieval_top_k),
+            "qdrant_url": self.qdrant_url,
+            "qdrant_collection": self.qdrant_collection,
+            "embedding_base_url": self.embedding_base_url,
+            "embedding_model": self.embedding_model,
         }
 
 
@@ -156,4 +178,12 @@ def get_settings() -> Settings:
         memory_history_window=int(os.getenv("PAGENT_MEMORY_HISTORY_WINDOW", "6")),
         memory_token_budget=int(os.getenv("PAGENT_MEMORY_TOKEN_BUDGET", "1500")),
         memory_summary_model=os.getenv("PAGENT_MEMORY_SUMMARY_MODEL"),
+        retrieval_backend=os.getenv("PAGENT_RETRIEVAL_BACKEND", "local"),
+        retrieval_top_k=int(os.getenv("PAGENT_RETRIEVAL_TOP_K", "3")),
+        qdrant_url=os.getenv("PAGENT_QDRANT_URL"),
+        qdrant_api_key=os.getenv("PAGENT_QDRANT_API_KEY"),
+        qdrant_collection=os.getenv("PAGENT_QDRANT_COLLECTION", "patent_kb"),
+        embedding_base_url=os.getenv("PAGENT_EMBEDDING_BASE_URL"),
+        embedding_model=os.getenv("PAGENT_EMBEDDING_MODEL", ""),
+        embedding_api_key=os.getenv("PAGENT_EMBEDDING_API_KEY"),
     )

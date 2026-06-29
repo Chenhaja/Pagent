@@ -33,6 +33,9 @@ class KnowledgeChunk:
         source_url: 官方来源 URL。
         retrieved_at: 入库检索日期。
         content_hash: 切片正文 sha256。
+        item_name: 办事指南事项名称。
+        section: 办事指南规范化小节。
+        category: 办事指南类别。
 
     Returns:
         可入库的知识切片。
@@ -52,6 +55,9 @@ class KnowledgeChunk:
     source_url: str | None = None
     retrieved_at: str | None = None
     content_hash: str | None = None
+    item_name: str | None = None
+    section: str | None = None
+    category: str | None = None
 
 
 def build_point_id(document_id: str, chunk_index: int) -> str:
@@ -80,13 +86,16 @@ def load_chunks(root_path: str | Path) -> list[KnowledgeChunk]:
     chunks: list[KnowledgeChunk] = []
     if not root.exists():
         return chunks
-    for doc_type in ("law", "template", "term"):
+    for doc_type in ("law", "template", "term", "procedure"):
         doc_dir = root / doc_type
         if not doc_dir.exists():
             continue
         for file_path in sorted(path for path in doc_dir.rglob("*") if path.is_file() and path.name not in {".gitkeep", "meta.json"}):
             text = _clean_text(file_path.read_text(encoding="utf-8"))
             if not text:
+                continue
+            if doc_type == "procedure":
+                chunks.extend(_load_procedure_chunks(file_path, doc_dir))
                 continue
             metadata = _load_law_metadata(file_path.parent) if doc_type == "law" else {}
             document_id = str(metadata.get("document_id") or (file_path.parent.name if metadata else file_path.stem))
@@ -157,6 +166,9 @@ def ingest_knowledge(
             "source_url",
             "retrieved_at",
             "content_hash",
+            "item_name",
+            "section",
+            "category",
         ):
             value = getattr(chunk, key)
             if value is not None:
@@ -312,8 +324,95 @@ def _split_text(text: str) -> list[str]:
     return parts or ([text] if text else [])
 
 
+def _load_procedure_chunks(file_path: Path, doc_dir: Path) -> list[KnowledgeChunk]:
+    """按办事指南 H2/H3 结构生成 procedure 切片。
+
+    Args:
+        file_path: procedure Markdown 文件路径。
+        doc_dir: procedure 根目录。
+
+    Returns:
+        按事项和小节生成的知识切片列表。
+    """
+    category = file_path.stem
+    source = f"local://procedure/{file_path.relative_to(doc_dir).as_posix()}"
+    chunks: list[KnowledgeChunk] = []
+    item_name: str | None = None
+    section: str | None = None
+    lines: list[str] = []
+    indexes: dict[str, int] = {}
+
+    def flush_section() -> None:
+        """提交当前事项小节。"""
+        if not item_name or not section:
+            return
+        cleaned_text = _clean_procedure_text("\n".join(lines))
+        if not cleaned_text:
+            return
+        document_id = f"procedure/{category}/{item_name}"
+        chunk_index = indexes.get(document_id, 0)
+        indexes[document_id] = chunk_index + 1
+        chunks.append(
+            KnowledgeChunk(
+                content=f"【{item_name} / {section}】\n{cleaned_text}",
+                source=source,
+                document_id=document_id,
+                doc_type="procedure",
+                locator=f"办事指南·{item_name}·{section}",
+                chunk_index=chunk_index,
+                item_name=item_name,
+                section=section,
+                category=category,
+            )
+        )
+
+    for raw_line in file_path.read_text(encoding="utf-8").splitlines():
+        h2_match = re.match(r"^##\s+(.+?)\s*$", raw_line)
+        h3_match = re.match(r"^###\s+(.+?)\s*$", raw_line)
+        if h2_match:
+            flush_section()
+            item_name = h2_match.group(1).strip()
+            section = None
+            lines = []
+            continue
+        if h3_match:
+            flush_section()
+            section = _normalize_procedure_section(h3_match.group(1))
+            lines = []
+            continue
+        lines.append(raw_line)
+    flush_section()
+    return chunks
+
+
+def _normalize_procedure_section(section: str) -> str:
+    """规范化办事指南小节名称。"""
+    name = section.strip()
+    aliases = {
+        "受理条件": "条件",
+        "获取途径": "渠道",
+        "申请材料": "材料",
+        "办理流程": "流程",
+        "收费标准": "费用",
+        "费用": "费用",
+        "办理时限": "时限",
+        "办理结果": "结果",
+        "相关表格": "结果",
+    }
+    return aliases.get(name, name)
+
+
+def _clean_procedure_text(text: str) -> str:
+    """清洗办事指南中的联系方式类噪声行。"""
+    noise_pattern = re.compile(r"(电话|手机号|邮编|网址|地址|https?://)")
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line and not noise_pattern.search(line))
+
+
 def _infer_locator(doc_type: str, content: str, fallback: str) -> str:
     """根据文档类型推断切片 locator。"""
+    if doc_type == "procedure":
+        return fallback
     if doc_type == "law":
         match = re.search(r"第\s*[^\s，。；:：]+\s*条", content)
         return match.group(0).replace(" ", "") if match else fallback

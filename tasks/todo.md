@@ -16,14 +16,14 @@
 
 ## 3. 建立 procedure 入库测试
 
-- [ ] 目标：新增 `tests/test_ingest_procedure.py`，覆盖 H2/H3、locator、防误抓、噪声清洗、payload、幂等 point id。
+- [x] 目标：新增 `tests/test_ingest_procedure.py`，覆盖 H2/H3、locator、防误抓、噪声清洗、payload、幂等 point id。
 - 依赖：任务 1、任务 2。
 - 验收标准：`load_chunks(tmp_path)` 能生成 `doc_type == "procedure"` 的 chunk；locator 为 `办事指南·{事项名}·{规范化小节}`；content 以 `【{事项名} / {小节}】` 开头；payload 包含 `item_name`、`section`、`category`；噪声行过滤且金额、期限、材料保留。
 - 验证命令：`pytest tests/test_ingest_procedure.py`
 
 ## 4. 实现 procedure 入库闭环
 
-- [ ] 目标：扩展 `scripts/ingest_knowledge.py`，支持 procedure 目录读取、H2/H3 解析、清洗、locator 与 payload 透传。
+- [x] 目标：扩展 `scripts/ingest_knowledge.py`，支持 procedure 目录读取、H2/H3 解析、清洗、locator 与 payload 透传。
 - 依赖：任务 3。
 - 验收标准：Task 3 测试通过；law/template/term 既有入库行为不变；不新增外部依赖。
 - 验证命令：`pytest tests/test_ingest_procedure.py tests/test_ingest_knowledge.py && python -m compileall scripts`

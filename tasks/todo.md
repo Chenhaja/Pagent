@@ -44,7 +44,7 @@
 
 ## 7. 接入 procedure 专利知识文件
 
-- [ ] 目标：创建 `knowledge/procedure/专利.md` 的最小代表样例，覆盖费用、材料、渠道、时限等办理类小节。
+- [x] 目标：创建 `knowledge/procedure/专利.md` 的最小代表样例，覆盖费用、材料、渠道、时限等办理类小节。
 - 依赖：任务 4。
 - 验收标准：`load_chunks("knowledge")` 能读取该文件；locator 包含事项名和规范化小节；完整 28 项或完整外部来源文档需用户确认后再补齐。
 - 验证命令：通过测试/fake 验证，不连接真实 Qdrant。

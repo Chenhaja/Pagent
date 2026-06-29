@@ -51,7 +51,7 @@
 
 ## 8. 运行验收
 
-- [ ] 目标：运行 R4.4 目标测试、全量回归和编译检查。
+- [x] 目标：运行 R4.4 目标测试、全量回归和编译检查。
 - 依赖：任务 3 至任务 7。
 - 验收标准：目标测试通过；全量 `pytest` 通过；编译检查通过；未引入真实网络依赖、真实 API Key 或敏感内容。
 - 验证命令：`pytest tests/test_ingest_procedure.py tests/test_ingest_knowledge.py tests/test_retrieval_tool.py && pytest && python -m compileall app tests scripts`

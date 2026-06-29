@@ -79,7 +79,7 @@ def test_qa_node_writes_structured_answer_to_state() -> None:
             "event": "qa_retrieval_completed",
             "data": {"steps_used": 0, "result_count": 0, "token_budget": 1000, "timeout_seconds": 10},
         },
-        {"event": "qa_completed", "data": {"basis_count": 1, "has_retrieval": False}},
+        {"event": "qa_completed", "data": {"basis_count": 1, "has_retrieval": False, "evidence_versions": []}},
     ]
 
 
@@ -121,8 +121,90 @@ def test_qa_node_passes_provenance_evidence_to_skill() -> None:
             "event": "qa_retrieval_completed",
             "data": {"steps_used": 1, "result_count": 1, "token_budget": 200, "timeout_seconds": 5},
         },
-        {"event": "qa_completed", "data": {"basis_count": 1, "has_retrieval": True}},
+        {"event": "qa_completed", "data": {"basis_count": 1, "has_retrieval": True, "evidence_versions": []}},
     ]
+
+
+def test_qa_node_formats_law_evidence_and_records_versions() -> None:
+    """QA evidence 应包含法规版本出处并在 trace 记录短元数据。"""
+    skill = RecordingQASkill(answer="法规依据显示需具备创造性。")
+    node = QANode(
+        skill=skill,
+        retrieval_tool=CountingRetrievalTool(
+            [
+                RetrievalResult(
+                    content="授予专利权的发明应当具备创造性。",
+                    provenance={"source": "local://law/zhuanli", "document_id": "zhuanli_fa_2020", "doc_type": "law", "locator": "第22条"},
+                    law_name="中华人民共和国专利法",
+                    version="2020修正",
+                    effective_date="2021-06-01",
+                    status="current",
+                    retrieved_at="2026-06-01",
+                )
+            ]
+        ),
+    )
+    state = WorkflowState(raw_input="创造性要求？", normalized_input="创造性要求？")
+
+    result = node.run(state)
+
+    evidence = skill.contexts[0].state_snapshot["retrieval_results"][0]
+    assert evidence["provenance"]["citation"] == "《中华人民共和国专利法(2020修正)》第22条(生效日:2021-06-01)"
+    assert evidence["provenance"]["status"] == "current"
+    assert result.output["qa_result"]["risk_notes"] == ["仅供初步参考"]
+    assert result.trace_events[1]["data"]["evidence_versions"] == [
+        {
+            "document_id": "zhuanli_fa_2020",
+            "law_name": "中华人民共和国专利法",
+            "version": "2020修正",
+            "effective_date": "2021-06-01",
+            "status": "current",
+            "retrieved_at": "2026-06-01",
+        }
+    ]
+
+
+def test_qa_node_adds_warning_for_superseded_law() -> None:
+    """命中过时法规版本时应追加固定风险提示。"""
+    node = QANode(
+        skill=RecordingQASkill(),
+        retrieval_tool=CountingRetrievalTool(
+            [
+                RetrievalResult(
+                    content="旧法材料",
+                    provenance={"source": "local://law/old", "document_id": "old", "doc_type": "law", "locator": "第22条"},
+                    status="superseded",
+                )
+            ]
+        ),
+    )
+    state = WorkflowState(raw_input="创造性？", normalized_input="创造性？")
+
+    result = node.run(state)
+
+    assert "可能过时，建议核对官方最新版本" in result.output["qa_result"]["risk_notes"]
+
+
+def test_qa_node_adds_warning_for_stale_law() -> None:
+    """retrieved_at 超过 stale 阈值时应追加固定风险提示。"""
+    node = QANode(
+        skill=RecordingQASkill(),
+        retrieval_tool=CountingRetrievalTool(
+            [
+                RetrievalResult(
+                    content="现行但旧检索材料",
+                    provenance={"source": "local://law/current", "document_id": "current", "doc_type": "law", "locator": "第22条"},
+                    status="current",
+                    retrieved_at="2020-01-01",
+                )
+            ]
+        ),
+    )
+    state = WorkflowState(raw_input="创造性？", normalized_input="创造性？")
+
+    result = node.run(state)
+
+    assert "可能过时，建议核对官方最新版本" in result.output["qa_result"]["risk_notes"]
 
 
 def test_qa_node_skips_retrieval_when_bounded_guard_blocks() -> None:

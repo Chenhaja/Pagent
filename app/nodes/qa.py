@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any
 
 from pydantic import ValidationError
@@ -32,6 +33,7 @@ class QANode(Node):
     ) -> None:
         super().__init__(name=self.name)
         settings = get_settings()
+        self.settings = settings
         self.skill = skill or PatentQASkill()
         self.retrieval_tool = retrieval_tool or build_retriever(settings)
         self.max_steps = max_steps
@@ -66,6 +68,7 @@ class QANode(Node):
         except (ValueError, ValidationError):
             return NodeResult.failed(errors=["qa_failed"])
 
+        qa_result = self._apply_law_stale_warnings(qa_result, evidence)
         output = qa_result.model_dump()
         state.dialog_context["qa_result"] = output
         return NodeResult.success(
@@ -82,7 +85,11 @@ class QANode(Node):
                 },
                 {
                     "event": "qa_completed",
-                    "data": {"basis_count": len(qa_result.basis), "has_retrieval": bool(retrieval_results)},
+                    "data": {
+                        "basis_count": len(qa_result.basis),
+                        "has_retrieval": bool(retrieval_results),
+                        "evidence_versions": self._build_evidence_versions(evidence),
+                    },
                 },
             ],
         )
@@ -107,6 +114,12 @@ class QANode(Node):
             for key in ("doc_type", "locator"):
                 if result.provenance.get(key):
                     provenance[key] = result.provenance[key]
+            for key in ("law_name", "version", "effective_date", "expiry_date", "status", "source_url", "retrieved_at"):
+                value = getattr(result, key)
+                if value:
+                    provenance[key] = value
+            if provenance.get("doc_type") == "law":
+                provenance["citation"] = self._format_law_citation(provenance)
             evidence.append(
                 {
                     "content": result.content[:1000],
@@ -116,3 +129,56 @@ class QANode(Node):
                 }
             )
         return evidence
+
+    def _format_law_citation(self, provenance: dict[str, Any]) -> str | None:
+        """按法规元数据格式化可回链引用。"""
+        law_name = provenance.get("law_name")
+        version = provenance.get("version")
+        locator = provenance.get("locator")
+        if law_name and version and locator:
+            article = str(locator).split("·")[-1]
+            citation = f"《{law_name}({version})》{article}"
+            if provenance.get("effective_date"):
+                citation = f"{citation}(生效日:{provenance['effective_date']})"
+            return citation
+        return None
+
+    def _apply_law_stale_warnings(self, qa_result: Any, evidence: list[dict[str, Any]]) -> Any:
+        """根据 evidence 中的法规版本状态追加过时风险提示。"""
+        warning = "可能过时，建议核对官方最新版本"
+        if not any(self._is_stale_law_evidence(item.get("provenance", {})) for item in evidence):
+            return qa_result
+        if warning not in qa_result.risk_notes:
+            qa_result.risk_notes.append(warning)
+        return qa_result
+
+    def _is_stale_law_evidence(self, provenance: dict[str, Any]) -> bool:
+        """判断单条法规 evidence 是否存在过时风险。"""
+        if provenance.get("doc_type") != "law":
+            return False
+        if provenance.get("status") == "superseded":
+            return True
+        retrieved_at = provenance.get("retrieved_at")
+        if not retrieved_at:
+            return False
+        try:
+            retrieved_date = date.fromisoformat(str(retrieved_at))
+        except ValueError:
+            return False
+        return (date.today() - retrieved_date).days > self.settings.law_stale_days
+
+    def _build_evidence_versions(self, evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """构造 trace 用法规版本摘要。"""
+        versions = []
+        for item in evidence:
+            provenance = item.get("provenance", {})
+            if provenance.get("doc_type") != "law":
+                continue
+            versions.append(
+                {
+                    key: provenance[key]
+                    for key in ("document_id", "law_name", "version", "effective_date", "expiry_date", "status", "retrieved_at")
+                    if provenance.get(key)
+                }
+            )
+        return versions

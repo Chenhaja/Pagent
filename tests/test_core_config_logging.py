@@ -29,10 +29,14 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.memory_summary_model is None
     assert settings.retrieval_backend == "local"
     assert settings.retrieval_top_k == 3
+    assert settings.retrieval_default_status == "current"
+    assert settings.retrieval_enable_time_filter is True
+    assert settings.law_stale_days == 365
     assert settings.qdrant_url is None
     assert settings.qdrant_api_key is None
     assert settings.qdrant_collection == "patent_kb"
     assert settings.embedding_base_url is None
+    assert settings.embedding_vector_size == 1024
     assert settings.embedding_model == ""
     assert settings.embedding_api_key is None
 
@@ -81,10 +85,14 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_MEMORY_SUMMARY_MODEL", "summary-model")
     monkeypatch.setenv("PAGENT_RETRIEVAL_BACKEND", "qdrant")
     monkeypatch.setenv("PAGENT_RETRIEVAL_TOP_K", "5")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "superseded")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", "false")
+    monkeypatch.setenv("PAGENT_LAW_STALE_DAYS", "180")
     monkeypatch.setenv("PAGENT_QDRANT_URL", "http://qdrant.example.test")
     monkeypatch.setenv("PAGENT_QDRANT_API_KEY", "qdrant-secret")
     monkeypatch.setenv("PAGENT_QDRANT_COLLECTION", "custom_kb")
     monkeypatch.setenv("PAGENT_EMBEDDING_BASE_URL", "https://embedding.example.test/v1")
+    monkeypatch.setenv("PAGENT_EMBEDDING_VECTOR_SIZE", "1536")
     monkeypatch.setenv("PAGENT_EMBEDDING_MODEL", "embedding-model")
     monkeypatch.setenv("PAGENT_EMBEDDING_API_KEY", "embedding-secret")
     get_settings.cache_clear()
@@ -109,10 +117,14 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.memory_summary_model == "summary-model"
     assert settings.retrieval_backend == "qdrant"
     assert settings.retrieval_top_k == 5
+    assert settings.retrieval_default_status == "superseded"
+    assert settings.retrieval_enable_time_filter is False
+    assert settings.law_stale_days == 180
     assert settings.qdrant_url == "http://qdrant.example.test"
     assert settings.qdrant_api_key == "qdrant-secret"
     assert settings.qdrant_collection == "custom_kb"
     assert settings.embedding_base_url == "https://embedding.example.test/v1"
+    assert settings.embedding_vector_size == 1536
     assert settings.embedding_model == "embedding-model"
     assert settings.embedding_api_key == "embedding-secret"
     get_settings.cache_clear()
@@ -137,9 +149,13 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["memory_summary_model"] is None
     assert public_values["retrieval_backend"] == "local"
     assert public_values["retrieval_top_k"] == "3"
+    assert public_values["retrieval_default_status"] == "current"
+    assert public_values["retrieval_enable_time_filter"] == "True"
+    assert public_values["law_stale_days"] == "365"
     assert public_values["qdrant_url"] is None
     assert public_values["qdrant_collection"] == "patent_kb"
     assert public_values["embedding_base_url"] is None
+    assert public_values["embedding_vector_size"] == "1024"
     assert public_values["embedding_model"] == ""
 
 

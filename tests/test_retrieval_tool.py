@@ -21,9 +21,9 @@ class FakeQdrantClient:
         self.should_raise = should_raise
         self.calls = []
 
-    def search(self, collection_name: str, query_vector: list[float], limit: int):
+    def search(self, collection_name: str, query_vector: list[float], limit: int, query_filter: dict | None = None):
         """记录查询参数并返回固定命中。"""
-        self.calls.append({"collection_name": collection_name, "query_vector": query_vector, "limit": limit})
+        self.calls.append({"collection_name": collection_name, "query_vector": query_vector, "limit": limit, "query_filter": query_filter})
         if self.should_raise:
             raise RuntimeError("qdrant failed")
         return self.hits[:limit]
@@ -59,6 +59,13 @@ def test_retrieval_result_keeps_backward_compatibility_with_similarity_default()
     result = RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc"}, score=1)
 
     assert result.similarity == 0.0
+    assert result.law_name is None
+    assert result.version is None
+    assert result.effective_date is None
+    assert result.expiry_date is None
+    assert result.status is None
+    assert result.source_url is None
+    assert result.retrieved_at is None
 
 
 def test_local_retrieval_tool_satisfies_retriever_protocol() -> None:
@@ -133,7 +140,14 @@ def test_qdrant_retriever_maps_hits_to_retrieval_results() -> None:
     results = retriever.search("创造性", top_k=1)
 
     assert embedding.calls == ["创造性"]
-    assert qdrant.calls == [{"collection_name": "patent_kb", "query_vector": [0.1, 0.2], "limit": 1}]
+    assert qdrant.calls == [
+        {
+            "collection_name": "patent_kb",
+            "query_vector": [0.1, 0.2],
+            "limit": 1,
+            "query_filter": {"should": [{"must_not": [{"key": "doc_type", "match": {"value": "law"}}]}, {"must": [{"key": "doc_type", "match": {"value": "law"}}, {"key": "status", "match": {"value": "current"}}]}]},
+        }
+    ]
     assert results == [
         RetrievalResult(
             content="授予专利权的发明应具备创造性。",
@@ -198,6 +212,95 @@ def test_local_retrieval_tool_returns_predictable_results_with_provenance() -> N
     ]
 
 
+def test_local_retrieval_tool_filters_law_by_current_status() -> None:
+    """本地检索默认只返回 current 法规且不影响非 law。"""
+    tool = LocalRetrievalTool(
+        documents=[
+            {
+                "id": "law-2020",
+                "text": "创造性 现行版本",
+                "source": "local://law/current",
+                "doc_type": "law",
+                "status": "current",
+                "effective_date": "2021-06-01",
+                "law_name": "中华人民共和国专利法",
+                "version": "2020修正",
+            },
+            {
+                "id": "law-2008",
+                "text": "创造性 历史版本",
+                "source": "local://law/old",
+                "doc_type": "law",
+                "status": "superseded",
+                "effective_date": "2009-10-01",
+                "expiry_date": "2021-06-01",
+            },
+            {"id": "template-1", "text": "创造性 模板", "source": "local://template/1", "doc_type": "template"},
+        ]
+    )
+
+    results = tool.search("创造性", top_k=3)
+
+    assert [result.provenance["document_id"] for result in results] == ["law-2020", "template-1"]
+    assert results[0].law_name == "中华人民共和国专利法"
+    assert results[0].version == "2020修正"
+
+
+def test_local_retrieval_tool_filters_law_by_as_of() -> None:
+    """本地检索传入 as_of 时返回该日期有效法规版本。"""
+    tool = LocalRetrievalTool(
+        documents=[
+            {
+                "id": "law-2020",
+                "text": "创造性 现行版本",
+                "source": "local://law/current",
+                "doc_type": "law",
+                "status": "current",
+                "effective_date": "2021-06-01",
+            },
+            {
+                "id": "law-2008",
+                "text": "创造性 历史版本",
+                "source": "local://law/old",
+                "doc_type": "law",
+                "status": "superseded",
+                "effective_date": "2009-10-01",
+                "expiry_date": "2021-06-01",
+            },
+        ]
+    )
+
+    results = tool.search("创造性", top_k=2, as_of="2020-01-01")
+
+    assert [result.provenance["document_id"] for result in results] == ["law-2008"]
+
+
+def test_local_retrieval_tool_skips_time_filter_when_disabled() -> None:
+    """关闭时间过滤时本地法规不按 status 过滤。"""
+    tool = LocalRetrievalTool(
+        documents=[
+            {"id": "law-1", "text": "创造性", "source": "local://law/1", "doc_type": "law", "status": "superseded"},
+        ],
+        settings=Settings(retrieval_enable_time_filter=False),
+    )
+
+    assert [result.provenance["document_id"] for result in tool.search("创造性")] == ["law-1"]
+
+
+def test_qdrant_retriever_builds_as_of_filter() -> None:
+    """Qdrant 检索应传递非 law OR as_of 有效期过滤条件。"""
+    embedding = FakeEmbedding(vector=[0.1])
+    qdrant = FakeQdrantClient()
+    retriever = QdrantRetriever("patent_kb", embedding, qdrant)
+
+    assert retriever.search("创造性", as_of="2020-01-01") == []
+
+    query_filter = qdrant.calls[0]["query_filter"]
+    assert query_filter["should"][0] == {"must_not": [{"key": "doc_type", "match": {"value": "law"}}]}
+    assert {"key": "effective_date", "range": {"lte": "2020-01-01"}} in query_filter["should"][1]["must"]
+    assert {"key": "expiry_date", "range": {"gt": "2020-01-01"}} in query_filter["should"][1]["should"]
+
+
 def test_local_retrieval_tool_returns_empty_when_no_match() -> None:
     """本地检索工具无命中时应返回空列表。"""
     tool = LocalRetrievalTool(documents=[{"id": "doc-1", "text": "传感器数据采集", "source": "local://case/doc-1"}])
@@ -215,6 +318,7 @@ def test_local_retrieval_tool_passes_extended_provenance() -> None:
                 "source": "local://law/patent_law.md",
                 "doc_type": "law",
                 "locator": "第22条",
+                "status": "current",
             }
         ]
     )
@@ -231,5 +335,6 @@ def test_local_retrieval_tool_passes_extended_provenance() -> None:
                 "locator": "第22条",
             },
             score=1,
+            status="current",
         )
     ]

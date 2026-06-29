@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from typing import Any, Protocol
 from urllib import request
 
@@ -16,6 +17,13 @@ class RetrievalResult(BaseModel):
         provenance: 来源信息,包含 source、document_id、doc_type、locator 等字段。
         score: 简单关键词命中分数。
         similarity: 向量相似度,本地后端默认为 0。
+        law_name: 法规名称。
+        version: 法规版本。
+        effective_date: 生效日期。
+        expiry_date: 失效日期。
+        status: 版本状态。
+        source_url: 官方来源 URL。
+        retrieved_at: 入库检索日期。
 
     Returns:
         可供 QA / ReAct 使用的检索结果。
@@ -25,6 +33,13 @@ class RetrievalResult(BaseModel):
     provenance: dict[str, str] = Field(default_factory=dict)
     score: int = 0
     similarity: float = 0.0
+    law_name: str | None = None
+    version: str | None = None
+    effective_date: str | None = None
+    expiry_date: str | None = None
+    status: str | None = None
+    source_url: str | None = None
+    retrieved_at: str | None = None
 
 
 class Retriever(Protocol):
@@ -34,12 +49,13 @@ class Retriever(Protocol):
         支持按 query 和 top_k 返回检索结果的检索器。
     """
 
-    def search(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None) -> list[RetrievalResult]:
         """检索与 query 相关的知识片段。
 
         Args:
             query: 检索查询文本。
             top_k: 最多返回结果数。
+            as_of: 可选历史追溯日期。
 
         Returns:
             检索结果列表。
@@ -78,18 +94,27 @@ class _QdrantHTTPClient:
         self.url = url.rstrip("/")
         self.api_key = api_key
 
-    def search(self, collection_name: str, query_vector: list[float], limit: int) -> list[_QdrantHTTPHit]:
+    def search(
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        limit: int,
+        query_filter: dict[str, Any] | None = None,
+    ) -> list[_QdrantHTTPHit]:
         """调用 Qdrant points search 接口。
 
         Args:
             collection_name: 集合名称。
             query_vector: 查询向量。
             limit: 最多返回数量。
+            query_filter: 可选 Qdrant 过滤条件。
 
         Returns:
             Qdrant 命中列表。
         """
         payload = {"vector": query_vector, "limit": limit, "with_payload": True}
+        if query_filter:
+            payload["filter"] = query_filter
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["api-key"] = self.api_key
@@ -107,6 +132,69 @@ class _QdrantHTTPClient:
         ]
 
 
+def _payload_is_law(payload: dict[str, Any]) -> bool:
+    """判断 payload 是否为法规材料。"""
+    return payload.get("doc_type") == "law" or any(payload.get(key) for key in ("law_name", "effective_date", "status"))
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    """安全解析 ISO 日期。"""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _law_matches_time(payload: dict[str, Any], settings: Settings, as_of: str | None = None) -> bool:
+    """判断法规 payload 是否满足时间过滤条件。"""
+    if not settings.retrieval_enable_time_filter or not _payload_is_law(payload):
+        return True
+    if as_of:
+        target_date = _parse_iso_date(as_of)
+        effective_date = _parse_iso_date(payload.get("effective_date"))
+        expiry_date = _parse_iso_date(payload.get("expiry_date"))
+        if target_date is None or effective_date is None:
+            return False
+        return effective_date <= target_date and (expiry_date is None or expiry_date > target_date)
+    return payload.get("status") == settings.retrieval_default_status
+
+
+def _build_qdrant_time_filter(settings: Settings, as_of: str | None = None) -> dict[str, Any] | None:
+    """构造非 law 或法规时间匹配的 Qdrant 过滤条件。"""
+    if not settings.retrieval_enable_time_filter:
+        return None
+    non_law = {"must_not": [{"key": "doc_type", "match": {"value": "law"}}]}
+    if as_of:
+        law_filter = {
+            "must": [
+                {"key": "doc_type", "match": {"value": "law"}},
+                {"key": "effective_date", "range": {"lte": as_of}},
+            ],
+            "should": [
+                {"key": "expiry_date", "is_null": True},
+                {"key": "expiry_date", "range": {"gt": as_of}},
+            ],
+        }
+    else:
+        law_filter = {
+            "must": [
+                {"key": "doc_type", "match": {"value": "law"}},
+                {"key": "status", "match": {"value": settings.retrieval_default_status}},
+            ]
+        }
+    return {"should": [non_law, law_filter]}
+
+
+def _result_time_fields(payload: dict[str, Any]) -> dict[str, str | None]:
+    """从 payload 提取法规时效字段。"""
+    return {key: str(payload[key]) if payload.get(key) is not None else None for key in _TIME_FIELD_KEYS}
+
+
+_TIME_FIELD_KEYS = ("law_name", "version", "effective_date", "expiry_date", "status", "source_url", "retrieved_at")
+
+
 class QdrantRetriever:
     """Qdrant 向量检索器。
 
@@ -119,12 +207,19 @@ class QdrantRetriever:
         基于向量召回的检索器。
     """
 
-    def __init__(self, collection_name: str, embedding_client: EmbeddingClient, qdrant_client: Any) -> None:
+    def __init__(
+        self,
+        collection_name: str,
+        embedding_client: EmbeddingClient,
+        qdrant_client: Any,
+        settings: Settings | None = None,
+    ) -> None:
         self.collection_name = collection_name
         self.embedding_client = embedding_client
         self.qdrant_client = qdrant_client
+        self.settings = settings or get_settings()
 
-    def search(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None) -> list[RetrievalResult]:
         """执行单轮 Qdrant 向量检索。
 
         Args:
@@ -138,7 +233,13 @@ class QdrantRetriever:
             query_vector = self.embedding_client.embed(query)
             if not query_vector:
                 return []
-            hits = self.qdrant_client.search(collection_name=self.collection_name, query_vector=query_vector, limit=top_k)
+            query_filter = _build_qdrant_time_filter(self.settings, as_of)
+            hits = self.qdrant_client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=top_k,
+                query_filter=query_filter,
+            )
         except Exception:
             return []
 
@@ -160,6 +261,7 @@ class QdrantRetriever:
                     content=content,
                     provenance=provenance,
                     similarity=float(getattr(hit, "score", 0.0) or 0.0),
+                    **_result_time_fields(payload),
                 )
             )
         return results[:top_k]
@@ -175,15 +277,17 @@ class LocalRetrievalTool:
         基于关键词匹配的可预测检索工具。
     """
 
-    def __init__(self, documents: list[dict[str, str]] | None = None) -> None:
+    def __init__(self, documents: list[dict[str, str]] | None = None, settings: Settings | None = None) -> None:
         self.documents = documents or []
+        self.settings = settings or get_settings()
 
-    def search(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None) -> list[RetrievalResult]:
         """按关键词检索本地文档。
 
         Args:
             query: 检索查询文本。
             top_k: 最多返回结果数。
+            as_of: 可选历史追溯日期。
 
         Returns:
             按命中分数降序排列的检索结果列表。
@@ -193,7 +297,7 @@ class LocalRetrievalTool:
         for document in self.documents:
             text = document.get("text", "")
             score = sum(1 for keyword in keywords if keyword in text)
-            if score <= 0:
+            if score <= 0 or not _law_matches_time(document, self.settings, as_of):
                 continue
             provenance = {
                 "source": document.get("source", "local://unknown"),
@@ -202,11 +306,15 @@ class LocalRetrievalTool:
             for key in ("doc_type", "locator"):
                 if document.get(key):
                     provenance[key] = document[key]
+            payload = dict(document)
+            payload.setdefault("document_id", provenance["document_id"])
+            payload.setdefault("source", provenance["source"])
             results.append(
                 RetrievalResult(
                     content=text,
                     provenance=provenance,
                     score=score,
+                    **_result_time_fields(payload),
                 )
             )
         return sorted(results, key=lambda result: result.score, reverse=True)[:top_k]
@@ -242,6 +350,7 @@ def build_retriever(
             collection_name=resolved_settings.qdrant_collection,
             embedding_client=resolved_embedding,
             qdrant_client=resolved_qdrant,
+            settings=resolved_settings,
         )
     except Exception:
         return LocalRetrievalTool()

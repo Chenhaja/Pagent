@@ -32,10 +32,14 @@ class Settings(BaseModel):
         memory_summary_model: 可选摘要模型名称。
         retrieval_backend: 检索后端名称。
         retrieval_top_k: 默认检索召回数量。
+        retrieval_default_status: 默认法规版本状态。
+        retrieval_enable_time_filter: 是否启用法规时间过滤。
+        law_stale_days: 法规检索时间超过该天数后提示核对。
         qdrant_url: Qdrant 服务地址。
         qdrant_api_key: 可选 Qdrant API Key。
         qdrant_collection: Qdrant 集合名称。
         embedding_base_url: OpenAI 兼容 embedding 端点地址。
+        embedding_vector_size: embedding 向量维度。
         embedding_model: embedding 模型名称。
         embedding_api_key: 可选 embedding API Key。
 
@@ -66,10 +70,14 @@ class Settings(BaseModel):
     memory_summary_model: str | None = None
     retrieval_backend: str = "local"
     retrieval_top_k: int = 3
+    retrieval_default_status: str = "current"
+    retrieval_enable_time_filter: bool = True
+    law_stale_days: int = 365
     qdrant_url: str | None = None
     qdrant_api_key: str | None = Field(default=None, exclude=True)
     qdrant_collection: str = "patent_kb"
     embedding_base_url: str | None = None
+    embedding_vector_size: int = 1024
     embedding_model: str = ""
     embedding_api_key: str | None = Field(default=None, exclude=True)
 
@@ -102,9 +110,13 @@ class Settings(BaseModel):
             "memory_summary_model": self.memory_summary_model,
             "retrieval_backend": self.retrieval_backend,
             "retrieval_top_k": str(self.retrieval_top_k),
+            "retrieval_default_status": self.retrieval_default_status,
+            "retrieval_enable_time_filter": str(self.retrieval_enable_time_filter),
+            "law_stale_days": str(self.law_stale_days),
             "qdrant_url": self.qdrant_url,
             "qdrant_collection": self.qdrant_collection,
             "embedding_base_url": self.embedding_base_url,
+            "embedding_vector_size": str(self.embedding_vector_size),
             "embedding_model": self.embedding_model,
         }
 
@@ -180,10 +192,14 @@ def get_settings() -> Settings:
         memory_summary_model=os.getenv("PAGENT_MEMORY_SUMMARY_MODEL"),
         retrieval_backend=os.getenv("PAGENT_RETRIEVAL_BACKEND", "local"),
         retrieval_top_k=int(os.getenv("PAGENT_RETRIEVAL_TOP_K", "3")),
+        retrieval_default_status=os.getenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "current"),
+        retrieval_enable_time_filter=_get_bool_env("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", True),
+        law_stale_days=int(os.getenv("PAGENT_LAW_STALE_DAYS", "365")),
         qdrant_url=os.getenv("PAGENT_QDRANT_URL"),
         qdrant_api_key=os.getenv("PAGENT_QDRANT_API_KEY"),
         qdrant_collection=os.getenv("PAGENT_QDRANT_COLLECTION", "patent_kb"),
         embedding_base_url=os.getenv("PAGENT_EMBEDDING_BASE_URL"),
+        embedding_vector_size=int(os.getenv("PAGENT_EMBEDDING_VECTOR_SIZE", "1024")),
         embedding_model=os.getenv("PAGENT_EMBEDDING_MODEL", ""),
         embedding_api_key=os.getenv("PAGENT_EMBEDDING_API_KEY"),
     )

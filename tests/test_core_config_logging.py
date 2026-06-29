@@ -27,8 +27,11 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.memory_history_window == 6
     assert settings.memory_token_budget == 1500
     assert settings.memory_summary_model is None
-    assert settings.retrieval_backend == "local"
+    assert settings.retrieval_backend == "qdrant"
     assert settings.retrieval_top_k == 3
+    assert settings.retrieval_max_steps == 1
+    assert settings.retrieval_token_budget == 1000
+    assert settings.retrieval_timeout_seconds == 10
     assert settings.retrieval_default_status == "current"
     assert settings.retrieval_enable_time_filter is True
     assert settings.law_stale_days == 365
@@ -85,6 +88,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_MEMORY_SUMMARY_MODEL", "summary-model")
     monkeypatch.setenv("PAGENT_RETRIEVAL_BACKEND", "qdrant")
     monkeypatch.setenv("PAGENT_RETRIEVAL_TOP_K", "5")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_MAX_STEPS", "2")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "300")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "superseded")
     monkeypatch.setenv("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", "false")
     monkeypatch.setenv("PAGENT_LAW_STALE_DAYS", "180")
@@ -117,6 +123,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.memory_summary_model == "summary-model"
     assert settings.retrieval_backend == "qdrant"
     assert settings.retrieval_top_k == 5
+    assert settings.retrieval_max_steps == 2
+    assert settings.retrieval_token_budget == 300
+    assert settings.retrieval_timeout_seconds == 7
     assert settings.retrieval_default_status == "superseded"
     assert settings.retrieval_enable_time_filter is False
     assert settings.law_stale_days == 180
@@ -147,8 +156,11 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["memory_history_window"] == "6"
     assert public_values["memory_token_budget"] == "1500"
     assert public_values["memory_summary_model"] is None
-    assert public_values["retrieval_backend"] == "local"
+    assert public_values["retrieval_backend"] == "qdrant"
     assert public_values["retrieval_top_k"] == "3"
+    assert public_values["retrieval_max_steps"] == "1"
+    assert public_values["retrieval_token_budget"] == "1000"
+    assert public_values["retrieval_timeout_seconds"] == "10"
     assert public_values["retrieval_default_status"] == "current"
     assert public_values["retrieval_enable_time_filter"] == "True"
     assert public_values["law_stale_days"] == "365"

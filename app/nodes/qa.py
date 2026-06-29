@@ -26,9 +26,9 @@ class QANode(Node):
         self,
         skill: PatentQASkill | None = None,
         retrieval_tool: Retriever | None = None,
-        max_steps: int = 1,
-        token_budget: int = 1000,
-        timeout_seconds: int = 10,
+        max_steps: int | None = None,
+        token_budget: int | None = None,
+        timeout_seconds: int | None = None,
         top_k: int | None = None,
     ) -> None:
         super().__init__(name=self.name)
@@ -36,9 +36,9 @@ class QANode(Node):
         self.settings = settings
         self.skill = skill or PatentQASkill()
         self.retrieval_tool = retrieval_tool or build_retriever(settings)
-        self.max_steps = max_steps
-        self.token_budget = token_budget
-        self.timeout_seconds = timeout_seconds
+        self.max_steps = settings.retrieval_max_steps if max_steps is None else max_steps
+        self.token_budget = settings.retrieval_token_budget if token_budget is None else token_budget
+        self.timeout_seconds = settings.retrieval_timeout_seconds if timeout_seconds is None else timeout_seconds
         self.top_k = top_k or settings.retrieval_top_k
 
     def run(self, state: WorkflowState) -> NodeResult:

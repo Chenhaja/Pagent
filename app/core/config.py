@@ -32,6 +32,9 @@ class Settings(BaseModel):
         memory_summary_model: 可选摘要模型名称。
         retrieval_backend: 检索后端名称。
         retrieval_top_k: 默认检索召回数量。
+        retrieval_max_steps: 检索最大步数。
+        retrieval_token_budget: 检索 evidence token 预算。
+        retrieval_timeout_seconds: 检索超时时间。
         retrieval_default_status: 默认法规版本状态。
         retrieval_enable_time_filter: 是否启用法规时间过滤。
         law_stale_days: 法规检索时间超过该天数后提示核对。
@@ -68,8 +71,11 @@ class Settings(BaseModel):
     memory_history_window: int = 6
     memory_token_budget: int = 1500
     memory_summary_model: str | None = None
-    retrieval_backend: str = "local"
+    retrieval_backend: str = "qdrant"
     retrieval_top_k: int = 3
+    retrieval_max_steps: int = 1
+    retrieval_token_budget: int = 1000
+    retrieval_timeout_seconds: int = 10
     retrieval_default_status: str = "current"
     retrieval_enable_time_filter: bool = True
     law_stale_days: int = 365
@@ -110,6 +116,9 @@ class Settings(BaseModel):
             "memory_summary_model": self.memory_summary_model,
             "retrieval_backend": self.retrieval_backend,
             "retrieval_top_k": str(self.retrieval_top_k),
+            "retrieval_max_steps": str(self.retrieval_max_steps),
+            "retrieval_token_budget": str(self.retrieval_token_budget),
+            "retrieval_timeout_seconds": str(self.retrieval_timeout_seconds),
             "retrieval_default_status": self.retrieval_default_status,
             "retrieval_enable_time_filter": str(self.retrieval_enable_time_filter),
             "law_stale_days": str(self.law_stale_days),
@@ -190,8 +199,11 @@ def get_settings() -> Settings:
         memory_history_window=int(os.getenv("PAGENT_MEMORY_HISTORY_WINDOW", "6")),
         memory_token_budget=int(os.getenv("PAGENT_MEMORY_TOKEN_BUDGET", "1500")),
         memory_summary_model=os.getenv("PAGENT_MEMORY_SUMMARY_MODEL"),
-        retrieval_backend=os.getenv("PAGENT_RETRIEVAL_BACKEND", "local"),
+        retrieval_backend=os.getenv("PAGENT_RETRIEVAL_BACKEND", "qdrant"),
         retrieval_top_k=int(os.getenv("PAGENT_RETRIEVAL_TOP_K", "3")),
+        retrieval_max_steps=int(os.getenv("PAGENT_RETRIEVAL_MAX_STEPS", "1")),
+        retrieval_token_budget=int(os.getenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "1000")),
+        retrieval_timeout_seconds=int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10")),
         retrieval_default_status=os.getenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "current"),
         retrieval_enable_time_filter=_get_bool_env("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", True),
         law_stale_days=int(os.getenv("PAGENT_LAW_STALE_DAYS", "365")),

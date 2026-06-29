@@ -1,3 +1,4 @@
+from app.core.config import Settings
 from app.models.schemas import PatentQAResult, WorkflowState
 import app.nodes.qa as qa_module
 from app.nodes.qa import QANode
@@ -61,7 +62,24 @@ def test_qa_node_uses_retriever_factory_by_default(monkeypatch) -> None:
     node = QANode(skill=RecordingQASkill(), max_steps=1)
 
     assert node.retrieval_tool is retrieval_tool
-    assert calls == ["local"]
+    assert calls == ["qdrant"]
+
+
+def test_qa_node_inherits_retrieval_budget_values_from_settings(monkeypatch) -> None:
+    """QA node 未显式传预算参数时应继承通用检索预算。"""
+    settings = Settings(retrieval_max_steps=2, retrieval_token_budget=300, retrieval_timeout_seconds=7, retrieval_top_k=4)
+    retrieval_tool = CountingRetrievalTool([RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc"}, score=1)])
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+
+    node = QANode(skill=RecordingQASkill())
+    state = WorkflowState(raw_input="问题", normalized_input="问题")
+
+    result = node.run(state)
+
+    assert retrieval_tool.calls == [{"query": "问题", "top_k": 4}]
+    assert result.trace_events[0]["data"] == {"steps_used": 1, "result_count": 1, "token_budget": 300, "timeout_seconds": 7}
 
 
 def test_qa_node_writes_structured_answer_to_state() -> None:

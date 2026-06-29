@@ -42,6 +42,21 @@
         "PYTHONPATH": "${workspaceFolder}"
       },
       "justMyCode": false
+    },
+    {
+
+      "name": "Debug ingest_knowledge",
+      "type": "python",
+      "request": "launch",
+      "module": "scripts.ingest_knowledge",
+      "args": [
+        "--path",
+        "knowledge/"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "envFile": "${workspaceFolder}/.env"
     }
   ]
 }

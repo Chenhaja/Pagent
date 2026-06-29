@@ -30,14 +30,14 @@
 
 ## 5. 建立 law-only 检索测试
 
-- [ ] 目标：补充 `tests/test_retrieval_tool.py`，验证 procedure/template/term 不受 law 时间过滤误伤。
+- [x] 目标：补充 `tests/test_retrieval_tool.py`，验证 procedure/template/term 不受 law 时间过滤误伤。
 - 依赖：任务 4。
 - 验收标准：默认 current 与 `as_of` 过滤下，非 law 文档仍可返回；Qdrant filter 包含非 law 分支；procedure payload 的 `doc_type`、`locator` 进入 provenance。
 - 验证命令：`pytest tests/test_retrieval_tool.py`
 
 ## 6. 调整检索过滤（如需要）
 
-- [ ] 目标：仅当测试暴露误判时，小幅调整 `app/tools/retrieval.py` 的 law 判断。
+- [x] 目标：仅当测试暴露误判时，小幅调整 `app/tools/retrieval.py` 的 law 判断。
 - 依赖：任务 5。
 - 验收标准：既有 law current/as_of 过滤通过；procedure/template/term 均不受 law 时间过滤误伤。
 - 验证命令：`pytest tests/test_retrieval_tool.py && python -m compileall app`

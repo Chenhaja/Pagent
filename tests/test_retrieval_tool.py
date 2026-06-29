@@ -162,6 +162,40 @@ def test_qdrant_retriever_maps_hits_to_retrieval_results() -> None:
     ]
 
 
+def test_qdrant_retriever_maps_procedure_provenance() -> None:
+    """Qdrant procedure payload 应透传 doc_type 和 locator。"""
+    embedding = FakeEmbedding(vector=[0.1])
+    qdrant = FakeQdrantClient(
+        hits=[
+            FakeQdrantHit(
+                payload={
+                    "content": "【专利申请受理 / 材料】\n应提交请求书。",
+                    "source": "local://procedure/专利.md",
+                    "document_id": "procedure/专利/专利申请受理",
+                    "doc_type": "procedure",
+                    "locator": "办事指南·专利申请受理·材料",
+                },
+                score=0.91,
+            )
+        ]
+    )
+
+    results = QdrantRetriever("patent_kb", embedding, qdrant).search("请求书", top_k=1)
+
+    assert results == [
+        RetrievalResult(
+            content="【专利申请受理 / 材料】\n应提交请求书。",
+            provenance={
+                "source": "local://procedure/专利.md",
+                "document_id": "procedure/专利/专利申请受理",
+                "doc_type": "procedure",
+                "locator": "办事指南·专利申请受理·材料",
+            },
+            similarity=0.91,
+        )
+    ]
+
+
 def test_qdrant_retriever_returns_empty_when_dependencies_fail() -> None:
     """Qdrant 检索器依赖失败时应返回空列表。"""
     assert QdrantRetriever("patent_kb", RaisingEmbedding(), FakeQdrantClient()).search("问题") == []
@@ -285,6 +319,23 @@ def test_local_retrieval_tool_skips_time_filter_when_disabled() -> None:
     )
 
     assert [result.provenance["document_id"] for result in tool.search("创造性")] == ["law-1"]
+
+
+def test_local_retrieval_tool_keeps_non_law_documents_under_time_filter() -> None:
+    """法规时效过滤不应误伤 procedure、template 和 term。"""
+    documents = [
+        {"id": "procedure-1", "text": "创造性 办理材料", "source": "local://procedure/专利.md", "doc_type": "procedure", "locator": "办事指南·事项·材料"},
+        {"id": "template-1", "text": "创造性 模板", "source": "local://template/1", "doc_type": "template"},
+        {"id": "term-1", "text": "创造性 术语", "source": "local://term/1", "doc_type": "term"},
+        {"id": "law-old", "text": "创造性 旧法", "source": "local://law/old", "doc_type": "law", "status": "superseded", "effective_date": "2009-10-01", "expiry_date": "2021-06-01"},
+    ]
+    tool = LocalRetrievalTool(documents=documents)
+
+    default_results = tool.search("创造性", top_k=4)
+    as_of_results = tool.search("创造性", top_k=4, as_of="2026-01-01")
+
+    assert [result.provenance["document_id"] for result in default_results] == ["procedure-1", "template-1", "term-1"]
+    assert [result.provenance["document_id"] for result in as_of_results] == ["procedure-1", "template-1", "term-1"]
 
 
 def test_qdrant_retriever_builds_as_of_filter() -> None:

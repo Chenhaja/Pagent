@@ -1,61 +1,59 @@
-# R4.2 时效性管理最小片规格说明
+# R4.4 办事指南入库最小片规格说明
 
 ## 1. Objective
 
 ### 目标
 
-R4.2 的目标是让法规类知识具备时效性，做到“答现行版、可追历史版、出处带生效日期”。本片在 R4.1 检索能力之上，为 `knowledge/law/` 入库、Qdrant payload、检索过滤和 QA evidence 增加法规版本与时间元数据。
+R4.4 的目标是把《知识产权政务服务事项办事指南（第二版）》中的专利类办事指南作为新的 `procedure` doc_type 入库，补齐“怎么办理 / 多少钱 / 多久 / 交什么材料 / 哪里办”等办理类 QA 的知识支撑。
 
 完成标准：
 
-- law chunk 入库后，payload 含 `law_name`、`version`、`effective_date`、`expiry_date`、`status`、`source_url`、`retrieved_at`、`content_hash`。
-- 同一条文允许多版本共存，`document_id` 必须带版本，稳定 point id 使用 `sha256(document_id:chunk_index)`。
-- 默认检索只召回 `status == "current"` 的法规版本。
-- 传入历史 `as_of` 日期时，召回该日期有效的版本：`effective_date <= as_of AND (expiry_date is null OR expiry_date > as_of)`。
-- 非 law 文档不受法规时间过滤影响，保持 R4.1 行为。
-- QA evidence / basis 引用法规时，出处形如 `《专利法(2020修正)》第22条`，并包含生效日期。
-- 命中 `superseded`，或 `retrieved_at` 超过 stale 阈值时，答案附“可能过时，建议核对官方最新版本”。
-- 系统提示增加“以官方最新公布文本为准，涉及具体时间点请核对当时有效版本”。
+- 新增 `procedure` doc_type，与 `law` / `template` / `term` 并列。
+- 不修改 `RetrievalResult` / `KnowledgeChunk` 的核心结构；优先复用现有 `provenance`、`doc_type`、`locator`、payload 字段。
+- `knowledge/procedure/*.md` 能按“事项 × 小节”结构化切分，一个三级小节生成一个主要 chunk。
+- `procedure` locator 必须由结构化解析器显式生成，格式为 `办事指南·{事项名}·{小节}`，绝不走 law 的“第X条”正则。
+- 入库前过滤电话、邮编、地址、URL 等联系方式噪声，同时保留金额、期限、材料等业务正文。
+- 检索时间过滤只对 `doc_type=law` 生效，`procedure` 不被法规时效条件误过滤。
+- 沿用稳定 point id 生成逻辑，重复入库不新增重复点。
+- 专利类 28 个事项可落盘到 `knowledge/procedure/专利.md` 并完成入库验证。
 
 ### 目标用户
 
-- 专利 QA 用户：需要当前有效法规回答，也需要按行为日、申请日、无效判断日追溯历史有效版本。
-- `patent_qa` skill：需要结构化 evidence 携带法规版本、生效日与状态，避免臆造或引用过时条款。
-- 开发与测试人员：需要 local / qdrant 后端的时间过滤行为一致，并能用 fake / stub 验证。
-- 法规语料维护人员：需要通过 `meta.json` 手工维护法规版本、状态、生效日和来源。
+- 专利 QA 用户：需要查询专利政务事项的办理条件、材料、渠道、流程、费用、时限和结果。
+- `patent_qa` / QA 调用方：需要从 evidence / basis 中引用稳定、可回链的办事指南 locator。
+- 知识库维护人员：需要用 Markdown 二级 / 三级标题维护结构化指南内容。
+- 开发与测试人员：需要验证 procedure 入库、噪声清洗、locator 防误抓、检索过滤兼容行为。
 
 ### 非目标
 
-- 不实现自动抓取、变更检测、定时重建或增量更新。
-- 不实现跨法规冲突消解、效力位阶推理或复杂法律适用规则。
-- 不对 template / term 等非法规类语料引入时效性管理。
-- 不接真实付费法规库或外部商业数据源。
-- 不改变 `PatentQAResult` 的核心 schema，优先通过现有 evidence / basis / risk_notes / disclaimer_hint 承载。
+- 不改检索架构，不在本片实现 hybrid / rerank / 意图路由。
+- 不改 `app/nodes/qa.py` 接线，召回后继续走现有 `_build_evidence`。
+- 不下载或解析指南附件 / 表格文件；“相关表格”小节只保存名称。
+- 不扩展到商标、地理标志、集成电路布图等类别；本片只做专利类 28 个事项。
+- 不改变 `RetrievalResult` / `KnowledgeChunk` 的基础契约。
+- 不让 procedure 参与法规版本、状态、生效日、失效日等 law-only 时效管理。
 
 ---
 
 ## 2. Commands
 
-项目使用 Python + FastAPI + Pydantic + pytest。R4.2 默认测试必须使用 fake / stub，不触发真实网络、真实 Qdrant 或真实 embedding 服务。
+项目使用 Python + pytest。R4.4 默认测试必须使用本地临时文件、fake / stub，不触发真实网络、真实 Qdrant 或真实 embedding 服务。
 
 ```bash
 # 安装依赖
 pip install -r requirements.txt
 
-# 配置项测试
-pytest tests/test_core_config_logging.py
+# 入库脚本与 procedure 解析测试
+pytest tests/test_ingest_procedure.py
 
-# 入库脚本时效字段、meta.json、payload 测试
-pytest tests/test_ingest_knowledge.py
+# 检索过滤与 doc_type 兼容测试
+pytest tests/test_retrieval.py
 
-# 检索过滤、RetrievalResult 时效字段、local / qdrant 后端测试
+# 如检索测试实际集中在 retrieval_tool 测试文件，则运行
 pytest tests/test_retrieval_tool.py
 
-# QA evidence 标注、过时提示、trace 测试
-pytest tests/test_qa_node.py
-
-# R4.2 目标测试
-pytest tests/test_core_config_logging.py tests/test_ingest_knowledge.py tests/test_retrieval_tool.py tests/test_qa_node.py
+# R4.4 目标测试
+pytest tests/test_ingest_procedure.py tests/test_retrieval.py
 
 # 全量测试
 pytest
@@ -72,173 +70,159 @@ pytest && python -m compileall app tests scripts
 
 TDD 实施顺序：
 
-1. 更新 `tests/test_core_config_logging.py`，覆盖 R4.2 新配置默认值、环境变量读取和公开配置输出。
-2. 更新 `tests/test_ingest_knowledge.py`，覆盖 `meta.json` 读取、law 时效字段注入、`content_hash` / `retrieved_at`、带版本 `document_id` 和 payload。
-3. 更新 `tests/test_retrieval_tool.py`，覆盖 `RetrievalResult` 时效字段、默认 current 过滤、`as_of` 历史过滤、非 law 不过滤。
-4. 更新 `tests/test_qa_node.py`，覆盖 evidence 法规版本标注、生效日期、superseded / stale 过时提示和 trace `evidence_versions`。
-5. 实现配置、入库、检索过滤、QA 标注与测试所需 fake。
-6. 为专利法 2020 文本补 `knowledge/law/zhuanli_fa_2020/meta.json`。
-7. 跑 R4.2 目标测试、全量测试和编译检查。
+1. 新增 / 更新 `tests/test_ingest_procedure.py`，覆盖 Markdown 事项 / 小节解析、section 归一化、locator、防误抓和噪声清洗。
+2. 更新检索相关测试，覆盖 law-only 时间过滤：开启时间过滤时 `procedure` 仍可召回。
+3. 实现 `scripts/ingest_knowledge.py` 的 `procedure` 分支、结构化解析、locator 显式生成和 payload 写入。
+4. 实现仅对 `procedure` 生效的联系方式噪声清洗规则。
+5. 调整 `_infer_locator` 为按 `doc_type` 分发，确保 `procedure` 不进入 law 条号正则。
+6. 调整 `_build_qdrant_time_filter` / `_law_matches_time` 等时间过滤逻辑，仅对 law 生效。
+7. 添加 `knowledge/procedure/专利.md` 的专利类办事指南内容。
+8. 运行 R4.4 目标测试、全量测试和编译检查。
 
 ---
 
 ## 3. Project Structure
 
-本片在 R4.1 结构上局部扩展，不重排目录，不移除 `LocalRetrievalTool` 降级后端。
+本片在现有知识库与入库脚本上局部扩展，不重排目录，不改变 QA 主流程。
 
 目标变更：
 
 ```text
 pagent/
   app/
-    core/
-      config.py                  # 新增 PAGENT_RETRIEVAL_DEFAULT_STATUS / PAGENT_RETRIEVAL_ENABLE_TIME_FILTER / PAGENT_LAW_STALE_DAYS
-    nodes/
-      qa.py                      # evidence 法规版本标注、过时提示、trace evidence_versions
     tools/
-      retrieval.py               # RetrievalResult 时效字段、QdrantRetriever / LocalRetrievalTool 时间过滤
-      embeddings.py              # 沿用 R4.1 embedding 能力
-    prompts/
-      patent_qa.py               # 追加官方最新文本与时间点核对提示
+      retrieval.py               # law-only 时间过滤，procedure 不被法规时效条件过滤
+    nodes/
+      qa.py                      # 不改接线，继续消费现有 RetrievalResult / provenance
   knowledge/
-    law/
-      zhuanli_fa_2020/
-        meta.json                # 专利法 2020 修正元数据
-        *.txt                    # 法规正文，可按现有入库规则读取
+    procedure/
+      专利.md                    # 专利类 28 个办事事项，H2=事项，H3=小节
   scripts/
-    ingest_knowledge.py          # KnowledgeChunk 时效字段、meta.json 读取、content_hash / retrieved_at、payload 写入
+    ingest_knowledge.py          # 新增 procedure 加载、解析、清洗、locator 分发
   tests/
-    test_core_config_logging.py  # 配置测试
-    test_ingest_knowledge.py     # 入库时效字段测试
-    test_retrieval_tool.py       # 时间过滤测试
-    test_qa_node.py              # QA 标注与过时提示测试
+    test_ingest_procedure.py     # procedure 入库解析、locator、防误抓、噪声、幂等测试
+    test_retrieval.py            # procedure 不受 law 时间过滤影响
 ```
 
-### `KnowledgeChunk` 契约
+### `knowledge/procedure/专利.md` 契约
 
-`scripts/ingest_knowledge.py` 中 `KnowledgeChunk` 增加法规时效字段：
+使用 Markdown 二级标题表示事项，三级标题表示小节：
 
-```python
-@dataclass
-class KnowledgeChunk:
-    document_id: str
-    chunk_index: int
-    content: str
-    doc_type: str
-    locator: str
-    law_name: str | None = None
-    version: str | None = None
-    effective_date: str | None = None
-    expiry_date: str | None = None
-    status: str = "current"
-    source_url: str | None = None
-    retrieved_at: str | None = None
-    content_hash: str | None = None
+```markdown
+## 专利无效宣告请求
+
+### 受理条件
+任何单位或个人认为该专利权的授予不符合……
+
+### 收费标准
+发明专利无效宣告请求费 3000 元……
 ```
 
-字段约束：
+约束：
 
-- `document_id`：law 必须带版本，例如 `zhuanli_fa_2020`，避免覆盖旧版。
-- `effective_date` / `expiry_date` / `retrieved_at`：ISO date 字符串，`expiry_date` 可为 `None`。
-- `status`：只允许 `current` / `superseded` / `not_yet_effective`。
-- `content_hash`：对 chunk 正文计算 sha256，用于审计和去重。
-- `locator`：law 应包含版本，例如 `专利法(2020修正)·第22条`，用于 QA 回链。
+- H2 为事项名，例如 `专利无效宣告请求`。
+- H3 为原始小节名，例如 `受理条件`、`获取途径`、`申请材料`、`办理流程`、`收费标准`、`办理时限`、`办理结果`、`相关表格`。
+- H3 下的 paragraph / bullet_list / ordered_list / table 等内容都归入当前事项当前小节。
+- H2 之前的正文不生成 chunk。
+- H3 之前但 H2 之后的正文默认忽略，除非现有文档明确需要归入某个小节。
 
-### law `meta.json` 契约
+### section 归一化契约
 
-`knowledge/law/` 下每个法规版本目录放一个 `meta.json`，入库时注入同目录各 chunk。
+解析器应将原文小节名归一化到稳定 section，便于 payload 过滤和评测：
 
-示例：
+| 原文小节 | 规范化 section |
+| --- | --- |
+| 受理条件 | `条件` |
+| 获取途径 | `渠道` |
+| 申请材料 | `材料` |
+| 办理流程 | `流程` |
+| 收费标准 / 费用 | `费用` |
+| 办理时限 | `时限` |
+| 办理结果 / 相关表格 | `结果` |
 
-```json
-{
-  "document_id": "zhuanli_fa_2020",
-  "law_name": "中华人民共和国专利法",
-  "version": "2020修正",
-  "effective_date": "2021-06-01",
-  "expiry_date": null,
-  "status": "current",
-  "source_url": "https://example.invalid/source"
-}
-```
+未知小节可保留原小节名作为 section，但 locator 仍必须使用可读标题。
 
-实现约束：
+### `procedure` chunk 契约
 
-- `meta.json` 缺失时，非 law 沿用 R4.1；law 允许用安全默认值继续入库，但不得伪造具体 `effective_date` / `source_url`。
-- `document_id` 优先取 `meta.json`；缺失时可用目录名，但 law 目录命名必须带版本。
-- `retrieved_at` 由入库时生成，默认使用当天日期。
-- `content_hash` 由入库时生成，不依赖人工填写。
-
-### `RetrievalResult` 契约
-
-`app/tools/retrieval.py` 中 `RetrievalResult` 增加 QA 标注所需字段：
-
-```python
-@dataclass
-class RetrievalResult:
-    content: str
-    provenance: str | dict[str, str]
-    score: int = 0
-    similarity: float = 0.0
-    law_name: str | None = None
-    version: str | None = None
-    effective_date: str | None = None
-    expiry_date: str | None = None
-    status: str | None = None
-    source_url: str | None = None
-    retrieved_at: str | None = None
-```
-
-兼容约束：
-
-- 保持 R4.1 旧构造方式可用。
-- 若当前实现 `provenance` 是 dict，则新增字段可同时存在于顶层字段和 provenance 中，但 QA 只依赖稳定字段。
-- 不伪造缺失的法规版本、生效日或来源。
-
-### 检索过滤契约
-
-公开检索接口允许扩展可选 `as_of`，并保持旧调用兼容：
-
-```python
-class Retriever(Protocol):
-    def search(self, query: str, top_k: int = 3, as_of: str | None = None) -> list[RetrievalResult]: ...
-```
-
-过滤规则：
+每个 chunk 的核心字段：
 
 ```text
-if doc_type == "law" and enable_time_filter:
-  if as_of:
-    effective_date <= as_of AND (expiry_date is null OR expiry_date > as_of)
-  else:
-    status == settings.retrieval_default_status  # 默认 current
-else:
-  不加法规时间过滤
+doc_type    = "procedure"
+locator     = "办事指南·{事项名}·{规范化小节}"
+document_id = "procedure/专利/{事项名}"
+source      = "local://procedure/专利.md"
+item_name   = "{事项名}"
+section     = "{规范化小节}"
+category    = "专利"
+content     = "【{事项名} / {规范化小节}】\n{清洗后的正文}"
 ```
 
-`QdrantRetriever`：
+切分规则：
 
-- 查询时构造 payload filter。
-- 默认 law 过滤 `status == "current"`。
-- 带 `as_of` 时按 effective / expiry 范围过滤。
-- 非 law 不附加法规时间过滤。
-- Qdrant / embedding 异常时返回 `[]` 或由工厂回退 Local，不影响 QA 主流程。
+- 基本粒度为“事项 × 小节”，一个三级小节一条 chunk。
+- 清洗后为空的 chunk 丢弃。
+- 过短小节（少于 80 字）可并入同事项相邻小节，避免碎片；合并后 locator 仍应可解释。
+- 超长“办理流程”（超过 600 字）按步骤再切，`chunk_index` 递增，locator 后缀 `·步骤N`。
+- 不做通用滑窗 overlap；只有超长流程按步骤再切时可 carry-over 末句一行，以覆盖跨步骤引用。
 
-`LocalRetrievalTool`：
+### locator 契约
 
-- 在内存结果排序前或排序后执行等价过滤。
-- 不因 payload 缺少时效字段抛异常。
-- 非 law 文档保持 R4.1 关键词匹配行为。
+`_infer_locator` 必须按 `doc_type` 分发：
 
-### QA evidence 契约
+```python
+if chunk.doc_type == "law":
+    return _format_law_locator(...)
+if chunk.doc_type == "procedure":
+    return chunk.locator
+if chunk.doc_type == "template":
+    return _infer_template_locator(...)
+```
 
-`QANode._build_evidence()`：
+关键约束：
 
-- law 命中优先生成 `《{law_name}({version})》{条号}` 格式。
-- evidence 透传 `version`、`effective_date`、`expiry_date`、`status`、`retrieved_at`。
-- evidence / trace 增加 `evidence_versions`，用于排查召回版本。
-- 命中 `status == "superseded"`，或 `retrieved_at` 距今天超过 `law_stale_days`，答案附“可能过时，建议核对官方最新版本”。
-- prompt 追加官方最新文本和具体时间点核对提示。
+- `procedure` locator 必须来自 H2 / H3 结构化路径。
+- `procedure` 中即使出现“《专利法实施细则》第四十四条”，locator 也不得出现 `《专利法》` 条号。
+- `expected_locators` 评测可用事项名做子串包含匹配，locator 中包含事项名即算命中该事项。
+
+### 噪声清洗契约
+
+仅对 `procedure` 逐行丢弃联系方式类噪声：
+
+```python
+NOISE_PATTERNS = [
+    r"^\s*(联系电话|咨询电话|传真)[：:]",
+    r"\d{3,4}-\d{7,8}",
+    r"1[3-9]\d{9}",
+    r"邮编[：:]?\s*\d{6}",
+    r"https?://\S+",
+    r"^\s*(地址|通讯地址)[：:]",
+]
+```
+
+必须保留：
+
+- 金额，例如 `3000 元`。
+- 办理期限，例如 `自请求日起一个月内`。
+- 材料名称、流程步骤、办理结果。
+
+### 检索时间过滤契约
+
+法规时效过滤只对 `doc_type=law` 生效：
+
+```text
+if doc_type == "law":
+  应用 status / effective_date / expiry_date 等法规时间条件
+else:
+  不应用法规时间条件
+```
+
+Qdrant filter 应表达为：
+
+```text
+doc_type != "law" OR 满足 law 时间条件
+```
+
+本片不得因为缺少 `effective_date` / `version` / `status` 而过滤掉 `procedure` / `template` / `term`。
 
 ---
 
@@ -246,110 +230,94 @@ else:
 
 ### 基本原则
 
-- 最小化、局部化改动，复用 R4.1 `Retriever`、`LocalRetrievalTool`、`QdrantRetriever`、`build_retriever()` 和 `QANode._retrieve()` 结构。
-- 公开类、公开方法、公开函数必须添加中文 Google 风格 docstring。
-- 不引入复杂抽象；时间过滤逻辑应是小型 helper，并同时服务 local / qdrant。
-- 不在业务代码里硬编码 Qdrant URL、API Key、embedding API Key 或真实 endpoint。
-- 不在日志 / trace 中记录完整法规正文、用户问题长文本、密钥或 API Key。
-- 检索失败必须安全降级，QA 不因 Qdrant / embedding / payload 缺字段整体 failed。
-- 对法规元数据缺失保持保守：可以不标注，不得编造。
+- 最小化、局部化改动，优先复用现有入库、清洗、point id、payload 构造和检索过滤 helper。
+- 公开函数、公开方法、公开类必须添加中文 Google 风格 docstring。
+- 私有小工具函数至少用一行中文说明其用途。
+- 不引入复杂抽象；`procedure` 解析逻辑应集中在 `scripts/ingest_knowledge.py` 或同脚本内小型 helper。
+- 不改变 QA 主流程和结果 schema，优先让现有 evidence / provenance 自然承载 procedure locator。
+- 不在日志、trace 或测试快照中记录过长指南全文。
+- 不硬编码 API Key、真实 endpoint 或外部下载 URL。
+
+### 依赖约束
+
+- PRD 推荐使用 `markdown-it-py` 解析 Markdown heading 树。
+- 如果项目尚未引入 `markdown-it-py`，安装或新增依赖前必须先确认；也可优先使用现有依赖或简单 Markdown heading 解析实现最小片。
+- 无论采用哪种解析方式，对外行为必须满足 H2 / H3 结构化切分契约。
 
 ### 配置
 
-新增配置项，沿用 `PAGENT_` 前缀：
+本片无新增必填配置。
 
-| 配置 | 默认值 | 说明 |
-| --- | --- | --- |
-| `PAGENT_RETRIEVAL_DEFAULT_STATUS` | `current` | 默认只召回现行有效法规 |
-| `PAGENT_RETRIEVAL_ENABLE_TIME_FILTER` | `true` | 是否启用 law 时间过滤 |
-| `PAGENT_LAW_STALE_DAYS` | `365` | `retrieved_at` 超过此天数标记可能过时 |
+沿用配置：
 
-兼容 R4.1 既有配置：
+- `PAGENT_QDRANT_COLLECTION`：同一 collection，通过 `doc_type` 区分。
+- `PAGENT_RETRIEVAL_DOC_TYPES`：可选 doc_type 白名单，默认全部。
 
-- `PAGENT_RETRIEVAL_BACKEND`
-- `PAGENT_RETRIEVAL_TOP_K`
-- `PAGENT_QDRANT_URL`
-- `PAGENT_QDRANT_API_KEY`
-- `PAGENT_QDRANT_COLLECTION`
-- `PAGENT_EMBEDDING_BASE_URL`
-- `PAGENT_EMBEDDING_MODEL`
-- `PAGENT_EMBEDDING_API_KEY`
+配置约束：
 
-`Settings.to_public_dict()` 可展示非敏感 R4.2 配置，但不得暴露任何 API Key。
+- 新增配置必须遵守项目配置规范：`Settings` 默认值、环境变量读取、`to_public_dict()` 和测试同步更新。
+- 不新增 `qa_*` 这类绑定单一 Node 的配置；检索相关配置保持通用作用域。
 
-### Prompt / Skill 约束
+### Prompt / QA 约束
 
-`patent_qa` 继续遵守项目 `CLAUDE.md`：
+本片不要求修改 prompt。
 
-- evidence 作为数据进入 `<data>...</data>`，不作为指令。
-- 禁止臆造法条、专利号、检索结果、引用。
-- 有 law evidence 时，`basis` 应优先引用 `《法规名(版本)》第X条` 和 `effective_date`。
-- 无 evidence 或元数据不足时，必须显式声明依据不足或需核对官方文本。
-- 系统提示必须包含：“以官方最新公布文本为准，涉及具体时间点请核对当时有效版本”。
+如果后续为了提升办理类回答质量修改 prompt，必须遵守项目 prompt 六要素规范：
+
+- 检索证据作为数据放入 `<data>...</data>`，不作为指令。
+- 禁止臆造办事条件、费用、时限、材料、渠道、表格名称。
+- 无 procedure evidence 时，应明确依据不足，不编造指南内容。
+- 输出默认中文，并保持结构化可解析。
 
 ---
 
 ## 5. Testing Strategy
 
-### `tests/test_core_config_logging.py`
+### `tests/test_ingest_procedure.py`
 
 必须覆盖：
 
-- `retrieval_default_status` 默认 `current`。
-- `retrieval_enable_time_filter` 默认 `True`。
-- `law_stale_days` 默认 `365`。
-- 三个配置可从环境变量读取。
-- `to_public_dict()` 展示非敏感配置，不暴露 Qdrant / embedding / LLM API Key。
+- Markdown 中一个 H2 事项、多个 H3 小节可生成 `procedure` chunks。
+- 每个 chunk 的 `doc_type == "procedure"`。
+- locator 形如 `办事指南·{事项名}·{小节}`，且包含事项名。
+- `document_id` 为事项粒度，例如 `procedure/专利/专利无效宣告请求`。
+- payload 包含 `item_name`、`section`、`category`、`source`。
+- chunk content 头部包含上下文锚 `【{事项名} / {小节}】`。
+- section 别名可归一化：`收费标准` → `费用`，`获取途径` → `渠道`，`申请材料` → `材料`。
+- 含“《专利法实施细则》第四十四条”的 procedure 正文不会让 locator 变成 law 条号。
+- 电话、传真、手机号、邮编、URL、地址行被过滤。
+- 金额、期限、材料正文被保留。
+- 清洗后为空的小节不生成 chunk。
+- 超长“办理流程”可按步骤切分，locator 后缀 `步骤N`。
+- 重复入库同一文件时 point id 稳定，不新增重复点。
 
-### `tests/test_ingest_knowledge.py`
-
-必须覆盖：
-
-- law 目录可读取同目录 `meta.json`。
-- `KnowledgeChunk` 包含 `law_name`、`version`、`effective_date`、`expiry_date`、`status`、`source_url`、`retrieved_at`、`content_hash`。
-- law `document_id` 带版本，例如 `zhuanli_fa_2020`。
-- `locator` 包含版本信息，例如 `专利法(2020修正)·第22条`。
-- `content_hash` 对相同正文稳定，对不同正文变化。
-- `retrieved_at` 为 ISO date。
-- fake qdrant upsert 收到完整时效 payload。
-- 非 law 文档不要求 `meta.json`，保持 R4.1 payload。
-- 输入目录为空时安全退出。
-
-### `tests/test_retrieval_tool.py`
+### 检索相关测试
 
 必须覆盖：
 
-- `RetrievalResult` 新增时效字段默认 `None`，保持旧构造兼容。
-- `QdrantRetriever` payload 映射出 `law_name`、`version`、`effective_date`、`status`、`retrieved_at`。
-- 默认 law 查询带 `status == "current"` 过滤。
-- 传入 `as_of` 时带 `effective_date <= as_of` 和 `expiry_date is null OR expiry_date > as_of` 过滤。
-- current / superseded 两版共存时，默认只返回 current。
-- 历史 `as_of` 返回该日期有效版本。
-- `LocalRetrievalTool` 实现与 Qdrant 等价的内存过滤。
-- 非 law 文档不受时间过滤影响。
-- `PAGENT_RETRIEVAL_ENABLE_TIME_FILTER=false` 时不加法规时间过滤。
-- payload 缺少时效字段时不抛裸异常。
+- 开启法规时间过滤时，`procedure` 结果不因缺少 `effective_date` / `status` 被过滤。
+- `_build_qdrant_time_filter` 生成的过滤逻辑包含 `doc_type != "law" OR law 时间条件`。
+- `_law_matches_time` 或等价 local helper 只对 `doc_type=law` 应用时间判断。
+- `template` / `term` 与 `procedure` 一样不受 law 时间过滤影响。
+- doc_type 白名单包含 `procedure` 时可召回 procedure；未限制时默认全部可召回。
 
-### `tests/test_qa_node.py`
+### 端到端 / 验收测试
 
-必须覆盖：
+建议覆盖：
 
-- `_build_evidence()` 对 law evidence 输出 `《专利法(2020修正)》第22条` 格式。
-- evidence 包含 `effective_date`。
-- 命中 `superseded` 时，答案或风险提示包含“可能过时，建议核对官方最新版本”。
-- `retrieved_at` 超过 `law_stale_days` 时，答案或风险提示包含过时提示。
-- current 且未 stale 时，不追加过时提示。
-- trace 包含 `qa_completed.evidence_versions`。
-- 无 evidence 时继续按 R4.1 依据不足逻辑返回，不编造法规引用。
-- 非 law evidence 不强制法规版本标注。
+- 使用 `knowledge/procedure/专利.md` 入库后，费用类问题可命中对应 `费用` 小节。
+- 材料类问题可命中对应 `材料` 小节。
+- 渠道类问题可命中对应 `渠道` 小节。
+- 时限类问题可命中对应 `时限` 小节。
+- golden_qa 办理流程 36 题可统计 Recall@3，expected locator 用事项名子串匹配。
 
 ### 通用测试约束
 
 - 默认测试不得触发真实 LLM、真实 embedding、真实 Qdrant 或网络请求。
 - Qdrant、embedding、QA skill 全部通过 fake / stub 注入。
 - 不在测试代码中写真实 API Key、真实 endpoint 或隐私数据。
-- trace 断言只检查稳定字段，不断言完整检索正文。
-- 本地语料测试使用 `tmp_path` 构造，除验收 `knowledge/law/zhuanli_fa_2020/meta.json` 外不依赖机器外部文件。
+- 用 `tmp_path` 构造最小 Markdown 语料，避免依赖开发机外部文件。
+- 断言稳定字段，不断言完整长正文。
 
 ---
 
@@ -357,71 +325,70 @@ else:
 
 ### Always do
 
-- 始终保留同一法规多版本，不通过新版覆盖旧版。
-- law `document_id` 始终带版本。
-- 默认 law 检索只召回 `current`。
-- 带 `as_of` 时按 effective / expiry 判断当日有效版本。
-- 非 law 检索行为不受法规时间过滤影响。
-- evidence 必须携带可回链 provenance；有法规版本和生效日时必须透传。
-- 命中旧版或 stale 语料时必须给出过时兜底提示。
+- 始终把办事指南作为 `doc_type=procedure` 入库。
+- 始终使用 H2 事项名 + H3 小节生成 procedure locator。
+- 始终避免 procedure 进入 law 的“第X条”locator 正则。
+- 始终在 procedure chunk 文本前拼接 `【事项 / 小节】` 上下文锚。
+- 始终过滤联系方式类噪声，保留金额、期限、材料、流程等业务正文。
+- 始终让 law 时间过滤只影响 law，不影响 procedure / template / term。
+- 始终使用稳定 point id，保证重复入库幂等。
 - 测试默认使用 fake / stub，不触网。
-- 日志 / trace 不记录密钥、完整 API Key、完整用户敏感材料或过长正文。
+- 日志 / trace 不记录密钥、完整 API Key、过长指南全文或敏感材料。
 
 ### Ask first
 
-- 是否安装或升级真实 `qdrant-client`、embedding SDK 或其他新依赖。
-- 是否连接本机或远端真实 Qdrant 做人工验收。
-- 是否调用云 embedding 服务处理用户问题或案件材料。
-- 是否提交真实法规全文或新增大体积知识库文件。
-- 是否修改 `PatentQAResult` schema。
-- 是否把 `PAGENT_RETRIEVAL_BACKEND` 默认值改为 `qdrant`。
-- 是否实现自动抓取、变更检测或定时重建。
+- 是否新增或升级 `markdown-it-py` 等依赖。
+- 是否连接真实 Qdrant 做人工入库验收。
+- 是否调用云 embedding 服务处理完整办事指南。
+- 是否提交大体积知识库文件或完整外部来源文档。
+- 是否修改 `RetrievalResult` / `KnowledgeChunk` 基础结构。
+- 是否修改 QA prompt 或 `app/nodes/qa.py` 主流程。
+- 是否把商标、地理标志、集成电路布图等类别纳入本片范围。
 
 ### Never do
 
-- 不伪造法条、法规版本、生效日期、失效日期、来源 URL、检索结果或相似度。
-- 不删除旧法规版本来“更新”法规。
-- 不让 Qdrant / embedding / payload 缺字段导致 QA 抛裸异常或整体 failed。
+- 不把 procedure 文本中的“第X条”误标为 law locator。
+- 不伪造办事条件、费用、时限、材料、渠道、表格名称或来源。
+- 不让 procedure 因缺少法规时效字段被检索过滤误伤。
+- 不为本片实现 hybrid / rerank / 意图路由等 R4.3 或后续能力。
+- 不下载、解析或入库附件文件本体。
 - 不把 `.env`、API Key、Qdrant API Key、embedding API Key 提交到 git。
 - 不在日志、trace 或测试快照中记录完整敏感正文。
-- 不绕过 `allow_cloud_sensitive_content=False` 把完整敏感案件材料发给云 embedding。
-- 不在本片实现自动更新机制、跨法规冲突消解或效力位阶推理。
 
 ---
 
 ## 7. Functional Acceptance Checklist
 
-- [ ] `Settings` 增加 `retrieval_default_status`、`retrieval_enable_time_filter`、`law_stale_days`。
-- [ ] `Settings.to_public_dict()` 不暴露敏感凭证。
-- [ ] `KnowledgeChunk` 增加法规时效字段。
-- [ ] `scripts/ingest_knowledge.py` 支持读取 law `meta.json`。
-- [ ] 入库自动生成 `retrieved_at` 和 `content_hash`。
-- [ ] law payload 写入完整时效字段。
-- [ ] law `document_id` 带版本，point id 使用 `sha256(document_id:chunk_index)`。
-- [ ] `RetrievalResult` 增加 `version`、`effective_date`、`status` 等时效字段。
-- [ ] `QdrantRetriever` 默认过滤 `status == "current"`。
-- [ ] `QdrantRetriever` 支持 `as_of` 时间点过滤。
-- [ ] `LocalRetrievalTool` 支持等价内存时间过滤。
-- [ ] 非 law 文档不受时间过滤影响。
-- [ ] QA evidence / basis 引用法规时包含版本和生效日期。
-- [ ] QA prompt 追加官方最新文本和具体时间点核对提示。
-- [ ] 命中 superseded 或 stale 语料时追加过时提示。
-- [ ] trace 增加 `qa_completed.evidence_versions`。
-- [ ] 新增 `knowledge/law/zhuanli_fa_2020/meta.json`。
-- [ ] R4.2 目标测试通过。
+- [ ] 新增 `knowledge/procedure/` 目录。
+- [ ] 新增 `knowledge/procedure/专利.md`，包含专利类办事事项。
+- [ ] `scripts/ingest_knowledge.py` 可识别目录名 `procedure` 并进入 procedure 解析分支。
+- [ ] procedure Markdown 按 H2 事项 / H3 小节结构化切分。
+- [ ] section 别名归一化到 `条件` / `渠道` / `材料` / `流程` / `费用` / `时限` / `结果`。
+- [ ] procedure chunk 的 `doc_type`、`locator`、`document_id`、`source`、`item_name`、`section`、`category` 正确。
+- [ ] procedure locator 格式为 `办事指南·{事项名}·{小节}`。
+- [ ] procedure locator 不受正文中“第X条”影响。
+- [ ] procedure 清洗过滤电话、邮编、地址、URL。
+- [ ] procedure 清洗保留金额、期限、材料和流程正文。
+- [ ] 清洗后空 chunk 丢弃。
+- [ ] 超长办理流程可按步骤切分并生成 `步骤N` locator。
+- [ ] point id 保持稳定，重复入库幂等。
+- [ ] `_infer_locator` 按 `doc_type` 分发。
+- [ ] `_build_qdrant_time_filter` / `_law_matches_time` 仅对 law 应用法规时效过滤。
+- [ ] 开启时间过滤时 procedure 仍可被召回。
+- [ ] R4.4 目标测试通过。
 - [ ] `pytest && python -m compileall app tests scripts` 通过。
 
 ---
 
 ## 8. Implementation Order
 
-1. 配置：在 `Settings` 增加 R4.2 三个配置项、环境变量读取和公开配置测试。
-2. 入库模型：扩展 `KnowledgeChunk`，实现 `meta.json` 读取、日期/status 校验、`content_hash` / `retrieved_at`。
-3. 入库 payload：确保 Qdrant upsert payload 写入完整时效字段，point id 使用带版本 `document_id`。
-4. 检索模型：扩展 `RetrievalResult`，保持旧构造兼容。
-5. 时间过滤 helper：实现 law-only 默认 current 过滤和 `as_of` 过滤。
-6. Qdrant：把时间过滤转换为 Qdrant payload filter，并映射时效字段。
-7. Local：实现等价内存过滤，保证后端可替换。
-8. QA：更新 evidence provenance、prompt 时效声明、过时提示和 trace `evidence_versions`。
-9. 语料：新增 `knowledge/law/zhuanli_fa_2020/meta.json`。
-10. 回归：运行 R4.2 目标测试、全量 `pytest` 和编译检查。
+1. 测试：新增 procedure Markdown 解析、locator、防误抓和噪声清洗测试。
+2. 测试：新增 law-only 时间过滤测试，证明 procedure 不被误过滤。
+3. 入库识别：让 `load_chunks` / 文件遍历逻辑识别 `knowledge/procedure/`。
+4. 解析：实现 H2 / H3 事项小节解析与 section 归一化。
+5. 清洗：实现仅对 procedure 生效的联系方式噪声过滤。
+6. chunk：生成上下文锚、locator、document_id、source、item_name、section、category。
+7. locator：改 `_infer_locator` 为按 `doc_type` 分发，procedure 直接使用结构化 locator。
+8. 过滤：调整 Qdrant / Local 时间过滤为 law-only。
+9. 语料：整理并加入 `knowledge/procedure/专利.md`。
+10. 回归：运行 R4.4 目标测试、全量 `pytest` 和编译检查。

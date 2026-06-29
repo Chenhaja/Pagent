@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 from datetime import date
 from urllib import error
 
@@ -88,10 +89,13 @@ def test_load_chunks_reads_law_version_metadata(tmp_path) -> None:
     assert chunks[0].content_hash == hashlib.sha256(chunks[0].content.encode("utf-8")).hexdigest()
 
 
-def test_build_point_id_is_stable() -> None:
-    """相同文档和 chunk 序号应生成稳定 point id。"""
-    assert build_point_id("patent_law", 0) == build_point_id("patent_law", 0)
-    assert build_point_id("patent_law", 0) != build_point_id("patent_law", 1)
+def test_build_point_id_is_stable_uuid() -> None:
+    """相同文档和 chunk 序号应生成稳定 UUID point id。"""
+    point_id = build_point_id("patent_law", 0)
+
+    assert point_id == build_point_id("patent_law", 0)
+    assert point_id != build_point_id("patent_law", 1)
+    assert str(uuid.UUID(point_id)) == point_id
 
 
 def test_ingest_knowledge_embeds_and_upserts_payload(tmp_path) -> None:

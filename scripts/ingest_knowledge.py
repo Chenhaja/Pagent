@@ -2,10 +2,12 @@ import argparse
 import hashlib
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib import error
 
 from app.core.config import get_settings
 from app.tools.embeddings import EmbeddingClient, OpenAICompatibleEmbeddingClient
@@ -62,7 +64,7 @@ def build_point_id(document_id: str, chunk_index: int) -> str:
     Returns:
         基于文档 ID 和切片序号的稳定哈希 ID。
     """
-    return hashlib.sha256(f"{document_id}:{chunk_index}".encode("utf-8")).hexdigest()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{document_id}:{chunk_index}"))
 
 
 def load_chunks(root_path: str | Path) -> list[KnowledgeChunk]:
@@ -261,8 +263,12 @@ class _QdrantHTTPUpsertClient(_QdrantHTTPClient):
             headers=headers,
             method="PUT",
         )
-        with request.urlopen(http_request):
-            return None
+        try:
+            with request.urlopen(http_request):
+                return None
+        except error.HTTPError as exc:
+            print(exc.read().decode("utf-8"))
+            raise
 
 
 def _load_law_metadata(version_dir: Path) -> dict[str, Any]:

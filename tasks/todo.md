@@ -86,7 +86,7 @@
 
 ## 13. 装配 build_retriever
 
-- [ ] 目标：扩展 `build_retriever(settings=None, embedding_client=None, qdrant_client=None, reranker=None, sparse_encoder=None, query_rewriter=None)` 并完成组合装配。
+- [x] 目标：扩展 `build_retriever(settings=None, embedding_client=None, qdrant_client=None, reranker=None, sparse_encoder=None, query_rewriter=None)` 并完成组合装配。
 - 依赖：任务 8、任务 10、任务 12。
 - 验收标准：装配顺序为 base/hybrid -> multi-query -> rerank；关闭态与当前行为一致；组合测试可使用 fake 组件，不连接真实外部服务。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`

@@ -850,10 +850,22 @@ class MultiQueryRetriever:
         return queries or [query]
 
 
+def _build_sparse_encoder(settings: Settings) -> SparseEncoder | None:
+    """按配置构建稀疏编码器。"""
+    if not settings.retrieval_use_hybrid:
+        return None
+    if settings.sparse_encoder == "service":
+        return ServiceSparseEncoder(settings)
+    return LocalLexicalSparseEncoder()
+
+
 def build_retriever(
     settings: Settings | None = None,
     embedding_client: EmbeddingClient | None = None,
     qdrant_client: Any | None = None,
+    reranker: Reranker | None = None,
+    sparse_encoder: SparseEncoder | None = None,
+    query_rewriter: QueryRewriter | None = None,
 ) -> Retriever:
     """根据配置构建检索器。
 
@@ -861,6 +873,9 @@ def build_retriever(
         settings: 应用配置,未传入时读取全局配置。
         embedding_client: 可选 embedding 客户端,测试可注入 fake。
         qdrant_client: 可选 Qdrant 客户端,测试可注入 fake。
+        reranker: 可选重排器,测试可注入 fake。
+        sparse_encoder: 可选稀疏编码器,测试可注入 fake。
+        query_rewriter: 可选查询改写器,测试可注入 fake。
 
     Returns:
         配置可用时返回对应后端;不可用时回退本地检索器。
@@ -868,19 +883,27 @@ def build_retriever(
     resolved_settings = settings or get_settings()
     backend = resolved_settings.retrieval_backend.strip().lower()
     if backend != "qdrant":
-        return LocalRetrievalTool()
-    if not resolved_settings.qdrant_url and qdrant_client is None:
-        return LocalRetrievalTool()
-    if not resolved_settings.embedding_model and embedding_client is None:
-        return LocalRetrievalTool()
-    try:
-        resolved_embedding = embedding_client or OpenAICompatibleEmbeddingClient(settings=resolved_settings)
-        resolved_qdrant = qdrant_client or _QdrantHTTPClient(resolved_settings.qdrant_url or "", resolved_settings.qdrant_api_key)
-        return QdrantRetriever(
-            collection_name=resolved_settings.qdrant_collection,
-            embedding_client=resolved_embedding,
-            qdrant_client=resolved_qdrant,
-            settings=resolved_settings,
-        )
-    except Exception:
-        return LocalRetrievalTool()
+        base: Retriever = LocalRetrievalTool(settings=resolved_settings)
+    elif not resolved_settings.qdrant_url and qdrant_client is None:
+        base = LocalRetrievalTool(settings=resolved_settings)
+    elif not resolved_settings.embedding_model and embedding_client is None:
+        base = LocalRetrievalTool(settings=resolved_settings)
+    else:
+        try:
+            resolved_embedding = embedding_client or OpenAICompatibleEmbeddingClient(settings=resolved_settings)
+            resolved_qdrant = qdrant_client or _QdrantHTTPClient(resolved_settings.qdrant_url or "", resolved_settings.qdrant_api_key)
+            base = QdrantRetriever(
+                collection_name=resolved_settings.qdrant_collection,
+                embedding_client=resolved_embedding,
+                qdrant_client=resolved_qdrant,
+                settings=resolved_settings,
+                sparse_encoder=sparse_encoder or _build_sparse_encoder(resolved_settings),
+            )
+        except Exception:
+            base = LocalRetrievalTool(settings=resolved_settings)
+    retriever = base
+    if resolved_settings.retrieval_use_query_rewrite:
+        retriever = MultiQueryRetriever(retriever, query_rewriter or HTTPQueryRewriter(resolved_settings), settings=resolved_settings)
+    if resolved_settings.retrieval_use_rerank:
+        retriever = RerankingRetriever(retriever, reranker or HTTPReranker(resolved_settings), settings=resolved_settings)
+    return retriever

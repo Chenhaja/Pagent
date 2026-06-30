@@ -470,6 +470,30 @@ def test_build_retriever_returns_qdrant_backend_with_injected_dependencies() -> 
     assert isinstance(retriever, QdrantRetriever)
 
 
+def test_build_retriever_composes_hybrid_query_rewrite_then_rerank() -> None:
+    """检索工厂应按 base/hybrid -> multi-query -> rerank 装配。"""
+    retriever = build_retriever(
+        Settings(
+            retrieval_backend="qdrant",
+            qdrant_url="http://qdrant.example.test",
+            embedding_model="embedding-model",
+            retrieval_use_hybrid=True,
+            retrieval_use_query_rewrite=True,
+            retrieval_use_rerank=True,
+        ),
+        embedding_client=FakeEmbedding([0.1]),
+        qdrant_client=FakeQdrantClient(),
+        reranker=FakeReranker(),
+        sparse_encoder=FakeSparseEncoder(),
+        query_rewriter=FakeQueryRewriter(["创造性"]),
+    )
+
+    assert isinstance(retriever, RerankingRetriever)
+    assert isinstance(retriever.inner, MultiQueryRetriever)
+    assert isinstance(retriever.inner.inner, QdrantRetriever)
+    assert retriever.inner.inner.sparse_encoder is not None
+
+
 def test_build_retriever_falls_back_to_local_when_backend_unavailable() -> None:
     """检索工厂配置缺失或未知后端时应回退本地后端。"""
     assert isinstance(build_retriever(Settings(retrieval_backend="unknown")), LocalRetrievalTool)

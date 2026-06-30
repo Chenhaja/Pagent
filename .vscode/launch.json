@@ -71,6 +71,32 @@
       "console": "integratedTerminal",
       "justMyCode": true,
       "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Debug ragas_eval",
+      "type": "python",
+      "request": "launch",
+      "module": "scripts.eval.ragas_eval",
+      "args": [
+        "--generate",
+        "--top-k",
+        "3",
+        "--limit",
+        "0",
+        "--timeout",
+        "120",
+        "--max-workers",
+        "1",
+        "--out",
+        "eval/ragas_report.csv"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
     }
   ]
 }

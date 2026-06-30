@@ -37,6 +37,20 @@ class Settings(BaseModel):
         retrieval_timeout_seconds: 检索超时时间。
         retrieval_default_status: 默认法规版本状态。
         retrieval_enable_time_filter: 是否启用法规时间过滤。
+        retrieval_fetch_k: 重排、融合和改写前候选数。
+        retrieval_use_rerank: 是否启用重排。
+        rerank_base_url: OpenAI 兼容 rerank 端点。
+        rerank_model: reranker 模型名。
+        rerank_api_key: 可选 reranker API Key。
+        rerank_top_k: 重排后保留数,未配置时回退调用方 top_k。
+        retrieval_use_hybrid: 是否启用 dense + sparse 混合检索。
+        sparse_encoder: 稀疏编码器类型。
+        sparse_base_url: 外部稀疏编码服务地址。
+        sparse_model: 外部稀疏编码模型名。
+        hybrid_fusion: 混合检索融合方式。
+        retrieval_use_query_rewrite: 是否启用查询改写。
+        query_rewrite_mode: 查询改写模式。
+        query_rewrite_count: 改写式或假设文档数量。
         law_stale_days: 法规检索时间超过该天数后提示核对。
         qdrant_url: Qdrant 服务地址。
         qdrant_api_key: 可选 Qdrant API Key。
@@ -78,6 +92,20 @@ class Settings(BaseModel):
     retrieval_timeout_seconds: int = 10
     retrieval_default_status: str = "current"
     retrieval_enable_time_filter: bool = True
+    retrieval_fetch_k: int = 30
+    retrieval_use_rerank: bool = False
+    rerank_base_url: str | None = None
+    rerank_model: str = ""
+    rerank_api_key: str | None = Field(default=None, exclude=True)
+    rerank_top_k: int | None = None
+    retrieval_use_hybrid: bool = False
+    sparse_encoder: str = "local"
+    sparse_base_url: str | None = None
+    sparse_model: str = ""
+    hybrid_fusion: str = "rrf"
+    retrieval_use_query_rewrite: bool = False
+    query_rewrite_mode: str = "multi"
+    query_rewrite_count: int = 3
     law_stale_days: int = 365
     qdrant_url: str | None = None
     qdrant_api_key: str | None = Field(default=None, exclude=True)
@@ -121,6 +149,19 @@ class Settings(BaseModel):
             "retrieval_timeout_seconds": str(self.retrieval_timeout_seconds),
             "retrieval_default_status": self.retrieval_default_status,
             "retrieval_enable_time_filter": str(self.retrieval_enable_time_filter),
+            "retrieval_fetch_k": str(self.retrieval_fetch_k),
+            "retrieval_use_rerank": str(self.retrieval_use_rerank),
+            "rerank_base_url": self.rerank_base_url,
+            "rerank_model": self.rerank_model,
+            "rerank_top_k": None if self.rerank_top_k is None else str(self.rerank_top_k),
+            "retrieval_use_hybrid": str(self.retrieval_use_hybrid),
+            "sparse_encoder": self.sparse_encoder,
+            "sparse_base_url": self.sparse_base_url,
+            "sparse_model": self.sparse_model,
+            "hybrid_fusion": self.hybrid_fusion,
+            "retrieval_use_query_rewrite": str(self.retrieval_use_query_rewrite),
+            "query_rewrite_mode": self.query_rewrite_mode,
+            "query_rewrite_count": str(self.query_rewrite_count),
             "law_stale_days": str(self.law_stale_days),
             "qdrant_url": self.qdrant_url,
             "qdrant_collection": self.qdrant_collection,
@@ -169,6 +210,14 @@ def _get_bool_env(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _get_optional_int_env(name: str) -> int | None:
+    """读取可选整数环境变量。"""
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return None
+    return int(value)
+
+
 @lru_cache
 def get_settings() -> Settings:
     """获取应用配置单例。
@@ -206,6 +255,20 @@ def get_settings() -> Settings:
         retrieval_timeout_seconds=int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10")),
         retrieval_default_status=os.getenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "current"),
         retrieval_enable_time_filter=_get_bool_env("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", True),
+        retrieval_fetch_k=int(os.getenv("PAGENT_RETRIEVAL_FETCH_K", "30")),
+        retrieval_use_rerank=_get_bool_env("PAGENT_RETRIEVAL_USE_RERANK", False),
+        rerank_base_url=os.getenv("PAGENT_RERANK_BASE_URL"),
+        rerank_model=os.getenv("PAGENT_RERANK_MODEL", ""),
+        rerank_api_key=os.getenv("PAGENT_RERANK_API_KEY"),
+        rerank_top_k=_get_optional_int_env("PAGENT_RERANK_TOP_K"),
+        retrieval_use_hybrid=_get_bool_env("PAGENT_RETRIEVAL_USE_HYBRID", False),
+        sparse_encoder=os.getenv("PAGENT_SPARSE_ENCODER", "local"),
+        sparse_base_url=os.getenv("PAGENT_SPARSE_BASE_URL"),
+        sparse_model=os.getenv("PAGENT_SPARSE_MODEL", ""),
+        hybrid_fusion=os.getenv("PAGENT_HYBRID_FUSION", "rrf"),
+        retrieval_use_query_rewrite=_get_bool_env("PAGENT_RETRIEVAL_USE_QUERY_REWRITE", False),
+        query_rewrite_mode=os.getenv("PAGENT_QUERY_REWRITE_MODE", "multi"),
+        query_rewrite_count=int(os.getenv("PAGENT_QUERY_REWRITE_COUNT", "3")),
         law_stale_days=int(os.getenv("PAGENT_LAW_STALE_DAYS", "365")),
         qdrant_url=os.getenv("PAGENT_QDRANT_URL"),
         qdrant_api_key=os.getenv("PAGENT_QDRANT_API_KEY"),

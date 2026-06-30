@@ -16,14 +16,14 @@
 
 ## 3. 建立配置测试
 
-- [ ] 目标：补充配置与安全测试，先锁定 R4.3 配置默认关闭、环境变量覆盖和敏感项不公开的预期行为。
+- [x] 目标：补充配置与安全测试，先锁定 R4.3 配置默认关闭、环境变量覆盖和敏感项不公开的预期行为。
 - 依赖：任务 2。
 - 验收标准：覆盖 `retrieval_fetch_k`、`retrieval_use_rerank`、`rerank_*`、`retrieval_use_hybrid`、`sparse_*`、`hybrid_fusion`、`retrieval_use_query_rewrite`、`query_rewrite_*`；验证默认关闭、env 覆盖、`rerank_api_key` 等敏感项不进入 `to_public_dict()`。
 - 验证命令：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
 
 ## 4. 实现配置基线
 
-- [ ] 目标：在 `app/core/config.py` 实现 R4.3 配置项、环境变量读取和公开配置输出。
+- [x] 目标：在 `app/core/config.py` 实现 R4.3 配置项、环境变量读取和公开配置输出。
 - 依赖：任务 3。
 - 验收标准：SPEC 配置项齐全；所有增强默认关闭；`to_public_dict()` 只包含非敏感项；敏感项不进入日志或 trace。
 - 验证命令：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`

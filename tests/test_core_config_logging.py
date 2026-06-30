@@ -34,6 +34,20 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.retrieval_timeout_seconds == 10
     assert settings.retrieval_default_status == "current"
     assert settings.retrieval_enable_time_filter is True
+    assert settings.retrieval_fetch_k == 30
+    assert settings.retrieval_use_rerank is False
+    assert settings.rerank_base_url is None
+    assert settings.rerank_model == ""
+    assert settings.rerank_api_key is None
+    assert settings.rerank_top_k is None
+    assert settings.retrieval_use_hybrid is False
+    assert settings.sparse_encoder == "local"
+    assert settings.sparse_base_url is None
+    assert settings.sparse_model == ""
+    assert settings.hybrid_fusion == "rrf"
+    assert settings.retrieval_use_query_rewrite is False
+    assert settings.query_rewrite_mode == "multi"
+    assert settings.query_rewrite_count == 3
     assert settings.law_stale_days == 365
     assert settings.qdrant_url is None
     assert settings.qdrant_api_key is None
@@ -93,6 +107,20 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "superseded")
     monkeypatch.setenv("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", "false")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_FETCH_K", "40")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_USE_RERANK", "true")
+    monkeypatch.setenv("PAGENT_RERANK_BASE_URL", "https://rerank.example.test")
+    monkeypatch.setenv("PAGENT_RERANK_MODEL", "rerank-model")
+    monkeypatch.setenv("PAGENT_RERANK_API_KEY", "rerank-secret")
+    monkeypatch.setenv("PAGENT_RERANK_TOP_K", "4")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_USE_HYBRID", "true")
+    monkeypatch.setenv("PAGENT_SPARSE_ENCODER", "service")
+    monkeypatch.setenv("PAGENT_SPARSE_BASE_URL", "https://sparse.example.test")
+    monkeypatch.setenv("PAGENT_SPARSE_MODEL", "sparse-model")
+    monkeypatch.setenv("PAGENT_HYBRID_FUSION", "rrf")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_USE_QUERY_REWRITE", "true")
+    monkeypatch.setenv("PAGENT_QUERY_REWRITE_MODE", "hyde")
+    monkeypatch.setenv("PAGENT_QUERY_REWRITE_COUNT", "5")
     monkeypatch.setenv("PAGENT_LAW_STALE_DAYS", "180")
     monkeypatch.setenv("PAGENT_QDRANT_URL", "http://qdrant.example.test")
     monkeypatch.setenv("PAGENT_QDRANT_API_KEY", "qdrant-secret")
@@ -128,6 +156,20 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.retrieval_timeout_seconds == 7
     assert settings.retrieval_default_status == "superseded"
     assert settings.retrieval_enable_time_filter is False
+    assert settings.retrieval_fetch_k == 40
+    assert settings.retrieval_use_rerank is True
+    assert settings.rerank_base_url == "https://rerank.example.test"
+    assert settings.rerank_model == "rerank-model"
+    assert settings.rerank_api_key == "rerank-secret"
+    assert settings.rerank_top_k == 4
+    assert settings.retrieval_use_hybrid is True
+    assert settings.sparse_encoder == "service"
+    assert settings.sparse_base_url == "https://sparse.example.test"
+    assert settings.sparse_model == "sparse-model"
+    assert settings.hybrid_fusion == "rrf"
+    assert settings.retrieval_use_query_rewrite is True
+    assert settings.query_rewrite_mode == "hyde"
+    assert settings.query_rewrite_count == 5
     assert settings.law_stale_days == 180
     assert settings.qdrant_url == "http://qdrant.example.test"
     assert settings.qdrant_api_key == "qdrant-secret"
@@ -141,16 +183,23 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
 
 def test_settings_do_not_expose_secret_values() -> None:
     """配置序列化结果不应暴露密钥字段。"""
-    settings = Settings(llm_api_key="secret-value", qdrant_api_key="qdrant-secret", embedding_api_key="embedding-secret")
+    settings = Settings(
+        llm_api_key="secret-value",
+        qdrant_api_key="qdrant-secret",
+        embedding_api_key="embedding-secret",
+        rerank_api_key="rerank-secret",
+    )
 
     public_values = settings.to_public_dict()
 
     assert "llm_api_key" not in public_values
     assert "qdrant_api_key" not in public_values
     assert "embedding_api_key" not in public_values
+    assert "rerank_api_key" not in public_values
     assert "secret-value" not in str(public_values)
     assert "qdrant-secret" not in str(public_values)
     assert "embedding-secret" not in str(public_values)
+    assert "rerank-secret" not in str(public_values)
     assert public_values["memory_enabled"] == "True"
     assert public_values["memory_db_path"] == "./pagent_memory.db"
     assert public_values["memory_history_window"] == "6"
@@ -163,6 +212,19 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["retrieval_timeout_seconds"] == "10"
     assert public_values["retrieval_default_status"] == "current"
     assert public_values["retrieval_enable_time_filter"] == "True"
+    assert public_values["retrieval_fetch_k"] == "30"
+    assert public_values["retrieval_use_rerank"] == "False"
+    assert public_values["rerank_base_url"] is None
+    assert public_values["rerank_model"] == ""
+    assert public_values["rerank_top_k"] is None
+    assert public_values["retrieval_use_hybrid"] == "False"
+    assert public_values["sparse_encoder"] == "local"
+    assert public_values["sparse_base_url"] is None
+    assert public_values["sparse_model"] == ""
+    assert public_values["hybrid_fusion"] == "rrf"
+    assert public_values["retrieval_use_query_rewrite"] == "False"
+    assert public_values["query_rewrite_mode"] == "multi"
+    assert public_values["query_rewrite_count"] == "3"
     assert public_values["law_stale_days"] == "365"
     assert public_values["qdrant_url"] is None
     assert public_values["qdrant_collection"] == "patent_kb"

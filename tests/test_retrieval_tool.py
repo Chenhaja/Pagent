@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import LocalRetrievalTool, QdrantRetriever, RetrievalResult, Retriever, build_retriever
+from app.tools.retrieval import FakeReranker, HTTPReranker, LocalRetrievalTool, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, build_retriever
 
 
 class FakeQdrantHit:
@@ -35,6 +35,32 @@ class RaisingEmbedding:
     def embed(self, text: str) -> list[float]:
         """模拟 embedding 失败。"""
         raise RuntimeError("embedding failed")
+
+
+class FakeInnerRetriever:
+    """测试用内层检索器。"""
+
+    def __init__(self, results: list[RetrievalResult]) -> None:
+        self.results = results
+        self.calls = []
+
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None, fetch_k: int | None = None) -> list[RetrievalResult]:
+        """记录 search 调用并返回截断结果。"""
+        self.calls.append({"method": "search", "query": query, "top_k": top_k, "as_of": as_of, "fetch_k": fetch_k})
+        return self.results[:top_k]
+
+    def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:
+        """记录 recall 调用并返回候选结果。"""
+        self.calls.append({"method": "recall", "query": query, "fetch_k": fetch_k, "as_of": as_of})
+        return self.results[:fetch_k]
+
+
+class RaisingReranker:
+    """测试用异常 reranker。"""
+
+    def rerank(self, query: str, documents: list[RetrievalResult], top_n: int | None = None) -> list[RetrievalResult]:
+        """模拟 rerank 失败。"""
+        raise RuntimeError("rerank failed sk-secret")
 
 
 class FakeHTTPResponse:
@@ -234,6 +260,80 @@ def test_qdrant_retriever_returns_empty_when_dependencies_fail() -> None:
     """Qdrant 检索器依赖失败时应返回空列表。"""
     assert QdrantRetriever("patent_kb", RaisingEmbedding(), FakeQdrantClient()).search("问题") == []
     assert QdrantRetriever("patent_kb", FakeEmbedding([0.1]), FakeQdrantClient(should_raise=True)).search("问题") == []
+
+
+def test_fake_reranker_sorts_by_injected_scores() -> None:
+    """Fake reranker 应按注入分数重排候选。"""
+    documents = [
+        RetrievalResult(content="A", provenance={"document_id": "a"}),
+        RetrievalResult(content="B", provenance={"document_id": "b"}),
+    ]
+
+    results = FakeReranker(scores={"b": 0.9, "a": 0.1}).rerank("问题", documents)
+
+    assert [result.provenance["document_id"] for result in results] == ["b", "a"]
+    assert [result.similarity for result in results] == [0.9, 0.1]
+
+
+def test_reranking_retriever_recalls_then_reranks_and_truncates() -> None:
+    """重排包装器应先宽召回再重排并截断。"""
+    inner = FakeInnerRetriever(
+        [
+            RetrievalResult(content="A", provenance={"document_id": "a"}),
+            RetrievalResult(content="B", provenance={"document_id": "b"}),
+            RetrievalResult(content="C", provenance={"document_id": "c"}),
+        ]
+    )
+    retriever = RerankingRetriever(inner, FakeReranker(scores={"c": 0.9, "b": 0.8, "a": 0.1}), settings=Settings(retrieval_fetch_k=3, rerank_top_k=2))
+
+    results = retriever.search("问题", top_k=1, as_of="2020-01-01")
+
+    assert inner.calls == [{"method": "recall", "query": "问题", "fetch_k": 3, "as_of": "2020-01-01"}]
+    assert [result.provenance["document_id"] for result in results] == ["c", "b"]
+
+
+def test_reranking_retriever_falls_back_to_recall_on_error() -> None:
+    """重排失败时应降级返回宽召回前 top_k。"""
+    inner = FakeInnerRetriever(
+        [
+            RetrievalResult(content="A", provenance={"document_id": "a"}),
+            RetrievalResult(content="B", provenance={"document_id": "b"}),
+        ]
+    )
+
+    results = RerankingRetriever(inner, RaisingReranker(), settings=Settings(retrieval_fetch_k=2)).search("问题", top_k=1)
+
+    assert [result.provenance["document_id"] for result in results] == ["a"]
+
+
+def test_http_reranker_redacts_documents_and_builds_request() -> None:
+    """HTTP reranker 请求体应包含必要字段且外发文档已脱敏。"""
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["headers"] = dict(request.header_items())
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeHTTPResponse({"results": [{"index": 1, "score": 0.9}, {"index": 0, "score": 0.4}]})
+
+    reranker = HTTPReranker(
+        Settings(rerank_base_url="https://rerank.example.test/v1", rerank_model="rerank-model", rerank_api_key="rerank-secret", retrieval_timeout_seconds=6),
+        urlopen=fake_urlopen,
+    )
+    documents = [
+        RetrievalResult(content="普通文本", provenance={"document_id": "a"}),
+        RetrievalResult(content="包含 sk-sensitive-secret 的文本", provenance={"document_id": "b"}),
+    ]
+
+    results = reranker.rerank("问题", documents, top_n=2)
+
+    assert captured["url"] == "https://rerank.example.test/v1/rerank"
+    assert captured["timeout"] == 6
+    assert captured["headers"]["Authorization"] == "Bearer rerank-secret"
+    assert captured["payload"] == {"model": "rerank-model", "query": "问题", "documents": ["普通文本", "包含 [REDACTED] 的文本"], "top_n": 2}
+    assert [result.provenance["document_id"] for result in results] == ["b", "a"]
+    assert [result.similarity for result in results] == [0.9, 0.4]
 
 
 def test_build_retriever_returns_local_backend_by_default() -> None:

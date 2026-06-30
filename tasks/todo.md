@@ -44,14 +44,14 @@
 
 ## 7. 建立重排测试
 
-- [ ] 目标：补充重排相关单测和安全测试。
+- [x] 目标：补充重排相关单测和安全测试。
 - 依赖：任务 6。
 - 验收标准：覆盖 fake 排序、HTTP 请求体、异常降级、外发 documents 脱敏、外部错误日志脱敏。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_security_compliance.py`
 
 ## 8. 实现重排闭环
 
-- [ ] 目标：新增 `Reranker` 协议、`FakeReranker`、`HTTPReranker` 与 `RerankingRetriever`。
+- [x] 目标：新增 `Reranker` 协议、`FakeReranker`、`HTTPReranker` 与 `RerankingRetriever`。
 - 依赖：任务 7。
 - 验收标准：`RerankingRetriever` 在宽召回候选池上重排并截断为 `top_k`；reranker 失败时返回宽召回前 `top_k`；外发文本复用 `redact_sensitive_text()`。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_security_compliance.py`

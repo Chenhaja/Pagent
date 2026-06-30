@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date
 from typing import Any, Protocol
 from urllib import request
@@ -6,6 +7,7 @@ from urllib import request
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
+from app.core.security import redact_sensitive_text
 from app.tools.embeddings import EmbeddingClient, OpenAICompatibleEmbeddingClient
 
 
@@ -207,6 +209,7 @@ def _result_time_fields(payload: dict[str, Any]) -> dict[str, str | None]:
 
 
 _TIME_FIELD_KEYS = ("law_name", "version", "effective_date", "expiry_date", "status", "source_url", "retrieved_at")
+logger = logging.getLogger(__name__)
 
 
 class QdrantRetriever:
@@ -361,6 +364,167 @@ class LocalRetrievalTool:
                 )
             )
         return sorted(results, key=lambda result: result.score, reverse=True)[:fetch_k]
+
+
+class Reranker(Protocol):
+    """检索结果重排器协议。
+
+    Returns:
+        支持按 query 对候选文档重排的组件。
+    """
+
+    def rerank(self, query: str, documents: list[RetrievalResult], top_n: int | None = None) -> list[RetrievalResult]:
+        """对候选检索结果重排。
+
+        Args:
+            query: 原始检索问题。
+            documents: 待重排候选文档。
+            top_n: 可选返回数量。
+
+        Returns:
+            重排后的检索结果列表。
+        """
+        ...
+
+
+class FakeReranker:
+    """测试用重排器。
+
+    Args:
+        scores: 按 document_id 注入的重排分数。
+
+    Returns:
+        可预测排序的重排器。
+    """
+
+    def __init__(self, scores: dict[str, float] | None = None) -> None:
+        self.scores = scores or {}
+
+    def rerank(self, query: str, documents: list[RetrievalResult], top_n: int | None = None) -> list[RetrievalResult]:
+        """按注入分数重排候选文档。
+
+        Args:
+            query: 原始检索问题。
+            documents: 待重排候选文档。
+            top_n: 可选返回数量。
+
+        Returns:
+            按分数降序排列的检索结果。
+        """
+        ranked = []
+        for document in documents:
+            document_id = document.provenance.get("document_id", "")
+            ranked.append(document.model_copy(update={"similarity": self.scores.get(document_id, document.similarity)}))
+        return sorted(ranked, key=lambda result: result.similarity, reverse=True)[: top_n or len(ranked)]
+
+
+class HTTPReranker:
+    """HTTP 重排器。
+
+    Args:
+        settings: 应用配置。
+        urlopen: 可注入 HTTP 调用函数,便于测试。
+
+    Returns:
+        调用外部 rerank 服务的重排器。
+    """
+
+    def __init__(self, settings: Settings, urlopen: Any | None = None) -> None:
+        self.settings = settings
+        self.urlopen = urlopen or request.urlopen
+
+    def rerank(self, query: str, documents: list[RetrievalResult], top_n: int | None = None) -> list[RetrievalResult]:
+        """调用 HTTP 服务对候选文档重排。
+
+        Args:
+            query: 原始检索问题。
+            documents: 待重排候选文档。
+            top_n: 可选返回数量。
+
+        Returns:
+            重排后的检索结果列表;未配置服务时返回原候选截断结果。
+        """
+        if not self.settings.rerank_base_url or not self.settings.rerank_model:
+            return documents[: top_n or len(documents)]
+        payload = {
+            "model": self.settings.rerank_model,
+            "query": query,
+            "documents": [redact_sensitive_text(document.content) for document in documents],
+            "top_n": top_n,
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.settings.rerank_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.rerank_api_key}"
+        http_request = request.Request(
+            url=f"{self.settings.rerank_base_url.rstrip('/')}/rerank",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with self.urlopen(http_request, timeout=self.settings.retrieval_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+        ranked = []
+        for item in response_payload.get("results", []):
+            index = int(item.get("index", -1))
+            if 0 <= index < len(documents):
+                ranked.append(documents[index].model_copy(update={"similarity": float(item.get("score") or 0.0)}))
+        return ranked[: top_n or len(ranked)]
+
+
+class RerankingRetriever:
+    """重排检索包装器。
+
+    Args:
+        inner: 内层候选召回器。
+        reranker: 重排器。
+        settings: 应用配置。
+
+    Returns:
+        先宽召回再重排的检索器。
+    """
+
+    def __init__(self, inner: Retriever, reranker: Reranker, settings: Settings | None = None) -> None:
+        self.inner = inner
+        self.reranker = reranker
+        self.settings = settings or get_settings()
+
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None, fetch_k: int | None = None) -> list[RetrievalResult]:
+        """宽召回后执行重排检索。
+
+        Args:
+            query: 检索查询文本。
+            top_k: 最多返回结果数。
+            as_of: 可选历史追溯日期。
+            fetch_k: 可选候选召回数量。
+
+        Returns:
+            重排后的检索结果;重排失败时返回宽召回前 top_k。
+        """
+        candidates = self.inner.recall(query, fetch_k or self.settings.retrieval_fetch_k, as_of)
+        if not candidates:
+            return []
+        final_top_k = self.settings.rerank_top_k or top_k
+        try:
+            return self.reranker.rerank(query, candidates, final_top_k)[:final_top_k]
+        except Exception:
+            logger.warning(
+                "重排失败,已降级为宽召回结果",
+                extra={"event": "rerank_failed", "error": redact_sensitive_text("rerank provider failed")},
+            )
+            return candidates[:top_k]
+
+    def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:
+        """召回重排前候选结果。
+
+        Args:
+            query: 检索查询文本。
+            fetch_k: 候选召回数量。
+            as_of: 可选历史追溯日期。
+
+        Returns:
+            内层召回候选结果。
+        """
+        return self.inner.recall(query, fetch_k, as_of)
 
 
 def build_retriever(

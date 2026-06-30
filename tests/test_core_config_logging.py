@@ -32,6 +32,9 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.retrieval_max_steps == 1
     assert settings.retrieval_token_budget == 1000
     assert settings.retrieval_timeout_seconds == 10
+    assert settings.retrieval_react_min_results == 1
+    assert settings.retrieval_react_min_score == 0.3
+    assert settings.retrieval_react_use_llm_judge is False
     assert settings.retrieval_default_status == "current"
     assert settings.retrieval_enable_time_filter is True
     assert settings.retrieval_fetch_k == 30
@@ -105,6 +108,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_RETRIEVAL_MAX_STEPS", "2")
     monkeypatch.setenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "300")
     monkeypatch.setenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "7")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_REACT_MIN_RESULTS", "2")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_REACT_MIN_SCORE", "0.6")
+    monkeypatch.setenv("PAGENT_RETRIEVAL_REACT_USE_LLM_JUDGE", "true")
     monkeypatch.setenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "superseded")
     monkeypatch.setenv("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", "false")
     monkeypatch.setenv("PAGENT_RETRIEVAL_FETCH_K", "40")
@@ -154,6 +160,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.retrieval_max_steps == 2
     assert settings.retrieval_token_budget == 300
     assert settings.retrieval_timeout_seconds == 7
+    assert settings.retrieval_react_min_results == 2
+    assert settings.retrieval_react_min_score == 0.6
+    assert settings.retrieval_react_use_llm_judge is True
     assert settings.retrieval_default_status == "superseded"
     assert settings.retrieval_enable_time_filter is False
     assert settings.retrieval_fetch_k == 40
@@ -210,6 +219,9 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["retrieval_max_steps"] == "1"
     assert public_values["retrieval_token_budget"] == "1000"
     assert public_values["retrieval_timeout_seconds"] == "10"
+    assert public_values["retrieval_react_min_results"] == "1"
+    assert public_values["retrieval_react_min_score"] == "0.3"
+    assert public_values["retrieval_react_use_llm_judge"] == "False"
     assert public_values["retrieval_default_status"] == "current"
     assert public_values["retrieval_enable_time_filter"] == "True"
     assert public_values["retrieval_fetch_k"] == "30"

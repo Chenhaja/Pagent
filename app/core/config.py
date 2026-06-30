@@ -35,6 +35,9 @@ class Settings(BaseModel):
         retrieval_max_steps: 检索最大步数。
         retrieval_token_budget: 检索 evidence token 预算。
         retrieval_timeout_seconds: 检索超时时间。
+        retrieval_react_min_results: QA ReAct 判定 evidence 充分的最少结果数。
+        retrieval_react_min_score: QA ReAct 判定 evidence 充分的最低分数。
+        retrieval_react_use_llm_judge: QA ReAct 是否启用 LLM evidence 充分性评估。
         retrieval_default_status: 默认法规版本状态。
         retrieval_enable_time_filter: 是否启用法规时间过滤。
         retrieval_fetch_k: 重排、融合和改写前候选数。
@@ -90,6 +93,9 @@ class Settings(BaseModel):
     retrieval_max_steps: int = 1
     retrieval_token_budget: int = 1000
     retrieval_timeout_seconds: int = 10
+    retrieval_react_min_results: int = 1
+    retrieval_react_min_score: float = 0.3
+    retrieval_react_use_llm_judge: bool = False
     retrieval_default_status: str = "current"
     retrieval_enable_time_filter: bool = True
     retrieval_fetch_k: int = 30
@@ -147,6 +153,9 @@ class Settings(BaseModel):
             "retrieval_max_steps": str(self.retrieval_max_steps),
             "retrieval_token_budget": str(self.retrieval_token_budget),
             "retrieval_timeout_seconds": str(self.retrieval_timeout_seconds),
+            "retrieval_react_min_results": str(self.retrieval_react_min_results),
+            "retrieval_react_min_score": str(self.retrieval_react_min_score),
+            "retrieval_react_use_llm_judge": str(self.retrieval_react_use_llm_judge),
             "retrieval_default_status": self.retrieval_default_status,
             "retrieval_enable_time_filter": str(self.retrieval_enable_time_filter),
             "retrieval_fetch_k": str(self.retrieval_fetch_k),
@@ -253,6 +262,9 @@ def get_settings() -> Settings:
         retrieval_max_steps=int(os.getenv("PAGENT_RETRIEVAL_MAX_STEPS", "1")),
         retrieval_token_budget=int(os.getenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "1000")),
         retrieval_timeout_seconds=int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10")),
+        retrieval_react_min_results=int(os.getenv("PAGENT_RETRIEVAL_REACT_MIN_RESULTS", "1")),
+        retrieval_react_min_score=float(os.getenv("PAGENT_RETRIEVAL_REACT_MIN_SCORE", "0.3")),
+        retrieval_react_use_llm_judge=_get_bool_env("PAGENT_RETRIEVAL_REACT_USE_LLM_JUDGE", False),
         retrieval_default_status=os.getenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "current"),
         retrieval_enable_time_filter=_get_bool_env("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", True),
         retrieval_fetch_k=int(os.getenv("PAGENT_RETRIEVAL_FETCH_K", "30")),

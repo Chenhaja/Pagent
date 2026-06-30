@@ -6,7 +6,8 @@
       "Bash(python -m compileall app tests)",
       "Bash(python:*)",
       "Bash(ruff check:*)",
-      "Bash(mypy app:*)"
+      "Bash(mypy app:*)",
+      "Bash(conda run:*)"
     ]
   }
 }

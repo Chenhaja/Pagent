@@ -48,6 +48,11 @@ class CountingRetrievalTool:
         return self.results[:top_k]
 
 
+def trace_event(result, event: str) -> dict:
+    """按事件名读取节点 trace。"""
+    return next(item for item in result.trace_events if item["event"] == event)
+
+
 def test_qa_node_uses_retriever_factory_by_default(monkeypatch) -> None:
     """QA node 未显式注入检索器时应通过工厂构建。"""
     retrieval_tool = CountingRetrievalTool()
@@ -79,7 +84,12 @@ def test_qa_node_inherits_retrieval_budget_values_from_settings(monkeypatch) -> 
     result = node.run(state)
 
     assert retrieval_tool.calls == [{"query": "问题", "top_k": 4}]
-    assert result.trace_events[0]["data"] == {"steps_used": 1, "result_count": 1, "token_budget": 300, "timeout_seconds": 7}
+    assert trace_event(result, "qa_retrieval_completed")["data"] == {
+        "steps_used": 1,
+        "result_count": 1,
+        "token_budget": 300,
+        "timeout_seconds": 7,
+    }
 
 
 def test_qa_node_writes_structured_answer_to_state() -> None:
@@ -92,13 +102,13 @@ def test_qa_node_writes_structured_answer_to_state() -> None:
     assert result.status == "success"
     assert result.output["qa_result"]["answer"] == "依据不足,请补充权利要求文本或相关材料。"
     assert state.dialog_context["qa_result"]["next_steps"] == ["补充材料"]
-    assert result.trace_events == [
-        {
-            "event": "qa_retrieval_completed",
-            "data": {"steps_used": 0, "result_count": 0, "token_budget": 1000, "timeout_seconds": 10},
-        },
-        {"event": "qa_completed", "data": {"basis_count": 1, "has_retrieval": False, "evidence_versions": []}},
-    ]
+    assert trace_event(result, "qa_retrieval_completed")["data"] == {
+        "steps_used": 0,
+        "result_count": 0,
+        "token_budget": 1000,
+        "timeout_seconds": 10,
+    }
+    assert trace_event(result, "qa_completed")["data"] == {"basis_count": 1, "has_retrieval": False, "evidence_versions": []}
 
 
 def test_qa_node_passes_provenance_evidence_to_skill() -> None:
@@ -134,13 +144,13 @@ def test_qa_node_passes_provenance_evidence_to_skill() -> None:
         "similarity": 0.0,
     }
     assert result.output["qa_result"]["basis"] == ["权利要求1"]
-    assert result.trace_events == [
-        {
-            "event": "qa_retrieval_completed",
-            "data": {"steps_used": 1, "result_count": 1, "token_budget": 200, "timeout_seconds": 5},
-        },
-        {"event": "qa_completed", "data": {"basis_count": 1, "has_retrieval": True, "evidence_versions": []}},
-    ]
+    assert trace_event(result, "qa_retrieval_completed")["data"] == {
+        "steps_used": 1,
+        "result_count": 1,
+        "token_budget": 200,
+        "timeout_seconds": 5,
+    }
+    assert trace_event(result, "qa_completed")["data"] == {"basis_count": 1, "has_retrieval": True, "evidence_versions": []}
 
 
 def test_qa_node_formats_law_evidence_and_records_versions() -> None:
@@ -169,8 +179,8 @@ def test_qa_node_formats_law_evidence_and_records_versions() -> None:
     evidence = skill.contexts[0].state_snapshot["retrieval_results"][0]
     assert evidence["provenance"]["citation"] == "《中华人民共和国专利法(2020修正)》第22条(生效日:2021-06-01)"
     assert evidence["provenance"]["status"] == "current"
-    assert result.output["qa_result"]["risk_notes"] == ["仅供初步参考"]
-    assert result.trace_events[1]["data"]["evidence_versions"] == [
+    assert result.output["qa_result"]["risk_notes"] == ["仅供初步参考", "依据可能不足，建议补充材料或核对官方来源"]
+    assert trace_event(result, "qa_completed")["data"]["evidence_versions"] == [
         {
             "document_id": "zhuanli_fa_2020",
             "law_name": "中华人民共和国专利法",
@@ -235,8 +245,9 @@ def test_qa_node_skips_retrieval_when_bounded_guard_blocks() -> None:
 
     assert result.status == "success"
     assert retrieval_tool.calls == []
-    assert result.trace_events[0]["data"]["steps_used"] == 0
-    assert result.trace_events[0]["data"]["result_count"] == 0
+    retrieval_trace = trace_event(result, "qa_retrieval_completed")
+    assert retrieval_trace["data"]["steps_used"] == 0
+    assert retrieval_trace["data"]["result_count"] == 0
 
 
 def test_qa_node_continues_when_retrieval_raises() -> None:
@@ -249,7 +260,7 @@ def test_qa_node_continues_when_retrieval_raises() -> None:
 
     assert result.status == "success"
     assert result.output["qa_result"]["basis"] == ["依据不足: 未检索到可引用材料"]
-    assert result.trace_events[0]["data"]["result_count"] == 0
+    assert trace_event(result, "qa_retrieval_completed")["data"]["result_count"] == 0
 
 
 def test_qa_node_returns_failed_when_skill_output_invalid() -> None:

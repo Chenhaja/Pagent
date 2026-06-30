@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import FakeReranker, HTTPReranker, LocalRetrievalTool, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, build_retriever
+from app.tools.retrieval import FakeReranker, FakeSparseEncoder, HTTPReranker, LocalRetrievalTool, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, _QdrantHTTPClient, build_retriever
 
 
 class FakeQdrantHit:
@@ -24,6 +24,13 @@ class FakeQdrantClient:
     def search(self, collection_name: str, query_vector: list[float], limit: int, query_filter: dict | None = None):
         """记录查询参数并返回固定命中。"""
         self.calls.append({"collection_name": collection_name, "query_vector": query_vector, "limit": limit, "query_filter": query_filter})
+        if self.should_raise:
+            raise RuntimeError("qdrant failed")
+        return self.hits[:limit]
+
+    def query_hybrid(self, collection_name: str, dense_vector: list[float], sparse_vector: dict, limit: int, query_filter: dict | None = None):
+        """记录 hybrid 查询参数并返回固定命中。"""
+        self.calls.append({"collection_name": collection_name, "dense_vector": dense_vector, "sparse_vector": sparse_vector, "limit": limit, "query_filter": query_filter})
         if self.should_raise:
             raise RuntimeError("qdrant failed")
         return self.hits[:limit]
@@ -254,6 +261,52 @@ def test_qdrant_retriever_recall_returns_fetch_k_candidates() -> None:
 
     assert [result.provenance["document_id"] for result in results] == ["a", "b"]
     assert qdrant.calls[0]["limit"] == 2
+
+
+def test_qdrant_retriever_uses_hybrid_query_when_sparse_encoder_exists() -> None:
+    """Qdrant hybrid 检索应传递 dense、sparse 和时间过滤。"""
+    qdrant = FakeQdrantClient([FakeQdrantHit(payload={"content": "创造性", "source": "local://a", "document_id": "a"}, score=0.9)])
+    sparse_encoder = FakeSparseEncoder({"indices": [1], "values": [0.5]})
+    retriever = QdrantRetriever("patent_kb_hybrid", FakeEmbedding([0.1]), qdrant, settings=Settings(retrieval_use_hybrid=True), sparse_encoder=sparse_encoder)
+
+    results = retriever.search("创造性", top_k=1, fetch_k=3, as_of="2020-01-01")
+
+    assert [result.provenance["document_id"] for result in results] == ["a"]
+    assert sparse_encoder.calls == ["创造性"]
+    assert qdrant.calls[0]["collection_name"] == "patent_kb_hybrid"
+    assert qdrant.calls[0]["dense_vector"] == [0.1]
+    assert qdrant.calls[0]["sparse_vector"] == {"indices": [1], "values": [0.5]}
+    assert qdrant.calls[0]["limit"] == 3
+    assert {"key": "effective_date", "range": {"lte": "2020-01-01"}} in qdrant.calls[0]["query_filter"]["should"][1]["must"]
+
+
+def test_qdrant_http_client_builds_hybrid_query_request() -> None:
+    """Qdrant HTTP hybrid 查询应使用 points/query 和 RRF prefetch。"""
+    captured = {}
+
+    def fake_urlopen(request):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeHTTPResponse({"result": {"points": [{"payload": {"content": "创造性", "source": "local://a", "document_id": "a"}, "score": 0.8}]}})
+
+    client = _QdrantHTTPClient("http://qdrant.local", "secret", urlopen=fake_urlopen)
+
+    hits = client.query_hybrid("patent_kb_hybrid", [0.1], {"indices": [1], "values": [0.5]}, limit=2, query_filter={"must": []})
+
+    assert captured["url"] == "http://qdrant.local/collections/patent_kb_hybrid/points/query"
+    assert captured["headers"]["Api-key"] == "secret"
+    assert captured["payload"] == {
+        "prefetch": [
+            {"query": [0.1], "using": "dense", "limit": 2, "filter": {"must": []}},
+            {"query": {"indices": [1], "values": [0.5]}, "using": "sparse", "limit": 2, "filter": {"must": []}},
+        ],
+        "query": {"fusion": "rrf"},
+        "limit": 2,
+        "with_payload": True,
+    }
+    assert hits[0].payload["document_id"] == "a"
+    assert hits[0].score == 0.8
 
 
 def test_qdrant_retriever_returns_empty_when_dependencies_fail() -> None:

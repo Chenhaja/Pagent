@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from datetime import date
@@ -106,9 +107,10 @@ class _QdrantHTTPClient:
         支持 search 方法的 Qdrant 客户端。
     """
 
-    def __init__(self, url: str, api_key: str | None = None) -> None:
+    def __init__(self, url: str, api_key: str | None = None, urlopen: Any | None = None) -> None:
         self.url = url.rstrip("/")
         self.api_key = api_key
+        self.urlopen = urlopen or request.urlopen
 
     def search(
         self,
@@ -140,12 +142,55 @@ class _QdrantHTTPClient:
             headers=headers,
             method="POST",
         )
-        with request.urlopen(http_request) as response:
+        with self.urlopen(http_request) as response:
             response_payload = json.loads(response.read().decode("utf-8"))
         return [
             _QdrantHTTPHit(payload=item.get("payload") or {}, score=float(item.get("score") or 0.0))
             for item in response_payload.get("result", [])
         ]
+
+    def query_hybrid(
+        self,
+        collection_name: str,
+        dense_vector: list[float],
+        sparse_vector: dict[str, list[int] | list[float]],
+        limit: int,
+        query_filter: dict[str, Any] | None = None,
+    ) -> list[_QdrantHTTPHit]:
+        """调用 Qdrant hybrid query 接口。
+
+        Args:
+            collection_name: 集合名称。
+            dense_vector: 稠密查询向量。
+            sparse_vector: 稀疏查询向量。
+            limit: 最多返回数量。
+            query_filter: 可选 Qdrant 过滤条件。
+
+        Returns:
+            Qdrant 命中列表。
+        """
+        prefetch = [
+            {"query": dense_vector, "using": "dense", "limit": limit},
+            {"query": sparse_vector, "using": "sparse", "limit": limit},
+        ]
+        if query_filter:
+            for item in prefetch:
+                item["filter"] = query_filter
+        payload = {"prefetch": prefetch, "query": {"fusion": "rrf"}, "limit": limit, "with_payload": True}
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["api-key"] = self.api_key
+        http_request = request.Request(
+            url=f"{self.url}/collections/{collection_name}/points/query",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with self.urlopen(http_request) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+        result = response_payload.get("result", {})
+        items = result.get("points") if isinstance(result, dict) else result
+        return [_QdrantHTTPHit(payload=item.get("payload") or {}, score=float(item.get("score") or 0.0)) for item in (items or [])]
 
 
 def _payload_is_law(payload: dict[str, Any]) -> bool:
@@ -212,6 +257,114 @@ _TIME_FIELD_KEYS = ("law_name", "version", "effective_date", "expiry_date", "sta
 logger = logging.getLogger(__name__)
 
 
+class SparseEncoder(Protocol):
+    """稀疏向量编码器协议。
+
+    Returns:
+        支持将文本编码为 Qdrant sparse vector 的组件。
+    """
+
+    def encode(self, text: str) -> dict[str, list[int] | list[float]]:
+        """编码文本为稀疏向量。
+
+        Args:
+            text: 待编码文本。
+
+        Returns:
+            包含 indices 和 values 的稀疏向量。
+        """
+        ...
+
+
+class LocalLexicalSparseEncoder:
+    """本地词法稀疏编码器。
+
+    Returns:
+        基于稳定 hash 的无网络稀疏编码器。
+    """
+
+    def encode(self, text: str) -> dict[str, list[int] | list[float]]:
+        """按词项频次生成稀疏向量。
+
+        Args:
+            text: 待编码文本。
+
+        Returns:
+            Qdrant sparse vector 字典。
+        """
+        counts: dict[int, float] = {}
+        for token in text.split():
+            digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            index = int(digest[:12], 16) % 1_000_000
+            counts[index] = counts.get(index, 0.0) + 1.0
+        return {"indices": sorted(counts), "values": [counts[index] for index in sorted(counts)]}
+
+
+class ServiceSparseEncoder:
+    """外部服务稀疏编码器。
+
+    Args:
+        settings: 应用配置。
+        urlopen: 可注入 HTTP 调用函数。
+
+    Returns:
+        调用外部 sparse 服务的编码器。
+    """
+
+    def __init__(self, settings: Settings, urlopen: Any | None = None) -> None:
+        self.settings = settings
+        self.urlopen = urlopen or request.urlopen
+
+    def encode(self, text: str) -> dict[str, list[int] | list[float]]:
+        """调用外部服务生成稀疏向量。
+
+        Args:
+            text: 待编码文本。
+
+        Returns:
+            Qdrant sparse vector 字典;未配置时返回空向量。
+        """
+        if not self.settings.sparse_base_url:
+            return {"indices": [], "values": []}
+        payload = {"model": self.settings.sparse_model, "input": redact_sensitive_text(text)}
+        http_request = request.Request(
+            url=f"{self.settings.sparse_base_url.rstrip('/')}/sparse-embeddings",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.urlopen(http_request, timeout=self.settings.retrieval_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+        return response_payload.get("sparse") or {"indices": [], "values": []}
+
+
+class FakeSparseEncoder:
+    """测试用稀疏编码器。
+
+    Args:
+        vector: 固定稀疏向量。
+
+    Returns:
+        可预测输出的稀疏编码器。
+    """
+
+    def __init__(self, vector: dict[str, list[int] | list[float]] | None = None) -> None:
+        self.vector = vector or {"indices": [], "values": []}
+        self.calls = []
+
+    def encode(self, text: str) -> dict[str, list[int] | list[float]]:
+        """记录文本并返回固定稀疏向量。
+
+        Args:
+            text: 待编码文本。
+
+        Returns:
+            固定稀疏向量。
+        """
+        self.calls.append(text)
+        return self.vector
+
+
 class QdrantRetriever:
     """Qdrant 向量检索器。
 
@@ -230,11 +383,13 @@ class QdrantRetriever:
         embedding_client: EmbeddingClient,
         qdrant_client: Any,
         settings: Settings | None = None,
+        sparse_encoder: SparseEncoder | None = None,
     ) -> None:
         self.collection_name = collection_name
         self.embedding_client = embedding_client
         self.qdrant_client = qdrant_client
         self.settings = settings or get_settings()
+        self.sparse_encoder = sparse_encoder
 
     def search(self, query: str, top_k: int = 3, as_of: str | None = None, fetch_k: int | None = None) -> list[RetrievalResult]:
         """执行单轮 Qdrant 向量检索。
@@ -266,12 +421,21 @@ class QdrantRetriever:
             if not query_vector:
                 return []
             query_filter = _build_qdrant_time_filter(self.settings, as_of)
-            hits = self.qdrant_client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=fetch_k,
-                query_filter=query_filter,
-            )
+            if self.settings.retrieval_use_hybrid and self.sparse_encoder is not None:
+                hits = self.qdrant_client.query_hybrid(
+                    collection_name=self.collection_name,
+                    dense_vector=query_vector,
+                    sparse_vector=self.sparse_encoder.encode(query),
+                    limit=fetch_k,
+                    query_filter=query_filter,
+                )
+            else:
+                hits = self.qdrant_client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    limit=fetch_k,
+                    query_filter=query_filter,
+                )
         except Exception:
             return []
 

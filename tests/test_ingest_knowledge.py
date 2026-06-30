@@ -4,6 +4,8 @@ import uuid
 from datetime import date
 from urllib import error
 
+from app.core.config import Settings
+from app.tools.retrieval import FakeSparseEncoder
 from scripts.ingest_knowledge import _QdrantHTTPUpsertClient, build_point_id, ingest_knowledge, load_chunks
 
 
@@ -25,9 +27,12 @@ class FakeQdrant:
     def __init__(self) -> None:
         self.calls = []
 
-    def ensure_collection(self, collection_name: str, vector_size: int) -> None:
+    def ensure_collection(self, collection_name: str, vector_size: int, settings: Settings | None = None) -> None:
         """记录建集合参数。"""
-        self.calls.append({"collection_name": collection_name, "vector_size": vector_size})
+        call = {"collection_name": collection_name, "vector_size": vector_size}
+        if settings is not None:
+            call["settings"] = settings
+        self.calls.append(call)
 
     def upsert(self, collection_name: str, points: list[dict]) -> None:
         """记录 upsert 参数。"""
@@ -132,6 +137,30 @@ def test_ingest_knowledge_embeds_and_upserts_payload(tmp_path) -> None:
     }
 
 
+def test_ingest_knowledge_writes_hybrid_vectors_when_enabled(tmp_path) -> None:
+    """开启 hybrid 时入库 point 应写入 named dense 和 sparse 向量。"""
+    (tmp_path / "law").mkdir()
+    (tmp_path / "law" / "patent_law.md").write_text("第22条\n授予专利权的发明应具备创造性。", encoding="utf-8")
+    embedding = FakeEmbedding()
+    sparse_encoder = FakeSparseEncoder({"indices": [1], "values": [0.5]})
+    qdrant = FakeQdrant()
+    settings = Settings(retrieval_use_hybrid=True)
+
+    points = ingest_knowledge(
+        tmp_path,
+        collection_name="patent_kb_hybrid",
+        embedding_client=embedding,
+        qdrant_client=qdrant,
+        vector_size=1024,
+        settings=settings,
+        sparse_encoder=sparse_encoder,
+    )
+
+    assert qdrant.calls[0] == {"collection_name": "patent_kb_hybrid", "vector_size": 1024, "settings": settings}
+    assert points[0]["vector"] == {"dense": [0.1, 0.2], "sparse": {"indices": [1], "values": [0.5]}}
+    assert sparse_encoder.calls == ["第22条\n授予专利权的发明应具备创造性。"]
+
+
 def test_ingest_knowledge_empty_directory_is_safe(tmp_path) -> None:
     """空语料目录应安全退出。"""
     embedding = FakeEmbedding()
@@ -139,6 +168,24 @@ def test_ingest_knowledge_empty_directory_is_safe(tmp_path) -> None:
 
     assert ingest_knowledge(tmp_path, "patent_kb", embedding, qdrant) == []
     assert qdrant.calls == []
+
+
+def test_qdrant_http_client_creates_hybrid_collection(monkeypatch) -> None:
+    """开启 hybrid 时应创建 named dense 和 sparse schema。"""
+    calls = []
+
+    def fake_urlopen(http_request):
+        """模拟 Qdrant 查询集合 404 后创建成功。"""
+        calls.append(http_request)
+        if http_request.get_method() == "GET":
+            raise error.HTTPError(http_request.full_url, 404, "not found", {}, None)
+        return _FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    _QdrantHTTPUpsertClient("http://qdrant.local", "secret").ensure_collection("patent_kb_hybrid", 1024, settings=Settings(retrieval_use_hybrid=True))
+
+    assert json.loads(calls[1].data.decode("utf-8")) == {"vectors": {"dense": {"size": 1024, "distance": "Cosine"}}, "sparse_vectors": {"sparse": {}}}
 
 
 def test_qdrant_http_client_creates_missing_collection(monkeypatch) -> None:

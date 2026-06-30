@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 from urllib import error
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.tools.embeddings import EmbeddingClient, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import _QdrantHTTPClient
+from app.tools.retrieval import LocalLexicalSparseEncoder, SparseEncoder, _QdrantHTTPClient
 
 
 @dataclass(frozen=True)
@@ -129,6 +129,8 @@ def ingest_knowledge(
     embedding_client: EmbeddingClient,
     qdrant_client: Any,
     vector_size: int | None = None,
+    settings: Settings | None = None,
+    sparse_encoder: SparseEncoder | None = None,
 ) -> list[dict[str, Any]]:
     """将本地知识切片 embedding 后 upsert 到 Qdrant。
 
@@ -138,12 +140,19 @@ def ingest_knowledge(
         embedding_client: embedding 客户端。
         qdrant_client: Qdrant upsert 客户端。
         vector_size: 可选向量维度,传入时入库前确保集合存在。
+        settings: 可选应用配置,用于判断是否写入 hybrid 向量。
+        sparse_encoder: 可选稀疏编码器,hybrid 开启时使用。
 
     Returns:
         已构造的 point 列表;空目录返回空列表。
     """
+    resolved_settings = settings or get_settings()
+    resolved_sparse_encoder = sparse_encoder or LocalLexicalSparseEncoder()
     if vector_size is not None and hasattr(qdrant_client, "ensure_collection"):
-        qdrant_client.ensure_collection(collection_name=collection_name, vector_size=vector_size)
+        if settings is None:
+            qdrant_client.ensure_collection(collection_name=collection_name, vector_size=vector_size)
+        else:
+            qdrant_client.ensure_collection(collection_name=collection_name, vector_size=vector_size, settings=resolved_settings)
     points = []
     for chunk in load_chunks(path):
         vector = embedding_client.embed(chunk.content)
@@ -173,10 +182,13 @@ def ingest_knowledge(
             value = getattr(chunk, key)
             if value is not None:
                 payload[key] = value
+        point_vector: list[float] | dict[str, Any] = vector
+        if resolved_settings.retrieval_use_hybrid:
+            point_vector = {"dense": vector, "sparse": resolved_sparse_encoder.encode(chunk.content)}
         points.append(
             {
                 "id": build_point_id(chunk.document_id, chunk.chunk_index),
-                "vector": vector,
+                "vector": point_vector,
                 "payload": payload,
             }
         )
@@ -202,6 +214,7 @@ def main() -> None:
         embedding_client=OpenAICompatibleEmbeddingClient(settings=settings),
         qdrant_client=qdrant_client,
         vector_size=settings.embedding_vector_size,
+        settings=settings,
     )
 
 
@@ -212,12 +225,13 @@ class _QdrantHTTPUpsertClient(_QdrantHTTPClient):
         可供入库脚本使用的 Qdrant 客户端。
     """
 
-    def ensure_collection(self, collection_name: str, vector_size: int) -> None:
+    def ensure_collection(self, collection_name: str, vector_size: int, settings: Settings | None = None) -> None:
         """确保 Qdrant 集合存在。
 
         Args:
             collection_name: 集合名称。
             vector_size: 向量维度。
+            settings: 可选应用配置,开启 hybrid 时创建 named dense + sparse schema。
 
         Returns:
             无返回值。
@@ -242,9 +256,12 @@ class _QdrantHTTPUpsertClient(_QdrantHTTPClient):
             if exc.code != 404:
                 raise
 
+        schema = {"vectors": {"size": vector_size, "distance": "Cosine"}}
+        if settings is not None and settings.retrieval_use_hybrid:
+            schema = {"vectors": {"dense": {"size": vector_size, "distance": "Cosine"}}, "sparse_vectors": {"sparse": {}}}
         create_request = request.Request(
             url=f"{self.url}/collections/{collection_name}",
-            data=json.dumps({"vectors": {"size": vector_size, "distance": "Cosine"}}).encode("utf-8"),
+            data=json.dumps(schema).encode("utf-8"),
             headers=headers,
             method="PUT",
         )

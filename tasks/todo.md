@@ -58,14 +58,14 @@
 
 ## 9. 建立混合检索测试
 
-- [ ] 目标：补充 hybrid schema、双向量 point 和 hybrid query 测试。
+- [x] 目标：补充 hybrid schema、双向量 point 和 hybrid query 测试。
 - 依赖：任务 6。
 - 验收标准：覆盖 named dense + sparse schema、`{"dense": ..., "sparse": ...}` 双向量 point、`query_hybrid()` 请求体、dense + sparse prefetch、RRF、time filter 透传；默认 dense-only 路径不变。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py`
 
 ## 10. 实现混合检索闭环
 
-- [ ] 目标：新增 sparse encoder 体系，扩展 Qdrant hybrid 查询与入库 schema / point 写入。
+- [x] 目标：新增 sparse encoder 体系，扩展 Qdrant hybrid 查询与入库 schema / point 写入。
 - 依赖：任务 9。
 - 验收标准：默认 dense-only 不变；hybrid 开启时支持新集合使用 named dense + sparse schema；不污染现有未命名稠密集合；hybrid 查询继续透传 `as_of` 与 filter。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py`

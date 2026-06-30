@@ -44,3 +44,6 @@
 - 非敏感参数可进入 `to_public_dict()` 便于排查;API Key、token、secret、password 等敏感参数必须排除,不得进入日志或 trace。
 - 删除参数必须同步清理字段、环境变量读取、公开配置、测试和文档;除非有明确迁移窗口,不要保留无意义兼容壳。
 
+## agent-skills
+
+在使用agent-skills:plan时，只需要生成plan.md和todo.md文档，不需要执行到生成代码这一步。

@@ -1,59 +1,64 @@
-# R4.4 办事指南入库最小片规格说明
+# R4.3 检索质量增强规格说明
 
 ## 1. Objective
 
 ### 目标
 
-R4.4 的目标是把《知识产权政务服务事项办事指南（第二版）》中的专利类办事指南作为新的 `procedure` doc_type 入库，补齐“怎么办理 / 多少钱 / 多久 / 交什么材料 / 哪里办”等办理类 QA 的知识支撑。
+R4.3 的目标是在不改 `QANode` 主流程的前提下，为现有检索层补齐四类可开关增强能力：宽召回、重排、混合检索和查询改写，提升专利 QA 的上下文召回质量与证据排序稳定性。
 
 完成标准：
 
-- 新增 `procedure` doc_type，与 `law` / `template` / `term` 并列。
-- 不修改 `RetrievalResult` / `KnowledgeChunk` 的核心结构；优先复用现有 `provenance`、`doc_type`、`locator`、payload 字段。
-- `knowledge/procedure/*.md` 能按“事项 × 小节”结构化切分，一个三级小节生成一个主要 chunk。
-- `procedure` locator 必须由结构化解析器显式生成，格式为 `办事指南·{事项名}·{小节}`，绝不走 law 的“第X条”正则。
-- 入库前过滤电话、邮编、地址、URL 等联系方式噪声，同时保留金额、期限、材料等业务正文。
-- 检索时间过滤只对 `doc_type=law` 生效，`procedure` 不被法规时效条件误过滤。
-- 沿用稳定 point id 生成逻辑，重复入库不新增重复点。
-- 专利类 28 个事项可落盘到 `knowledge/procedure/专利.md` 并完成入库验证。
+- `Retriever.search(...)` 向后兼容地支持 `fetch_k`，并可通过 `recall(query, fetch_k, as_of)` 暴露宽召回候选池。
+- 默认关闭所有增强时，`build_retriever` 行为与当前纯稠密 Qdrant / Local 回退检索一致。
+- 开启宽召回时，检索阶段可先取 `PAGENT_RETRIEVAL_FETCH_K` 个候选，为重排、融合和改写留排序空间。
+- 开启重排时，`RerankingRetriever` 在合并后的候选池上调用 reranker，并最终截断到 `top_k` 或 `rerank_top_k`。
+- 开启混合检索时，Qdrant 使用命名 dense 向量 + sparse 向量的新集合 schema，通过 RRF 融合 dense / sparse 两路召回。
+- 开启查询改写时，`MultiQueryRetriever` 对多个改写式分别召回、合并去重，并可由后置重排统一排序。
+- R4.2 的法规时效过滤继续透传到 Qdrant / Local 检索，不因 R4.3 包装器丢失。
+- reranker、rewriter、sparse encoder 任一未配置或失败时，检索必须安全降级，不打挂 QA。
+- 每个阶段都可用 `scripts.eval.ragas_eval` 与 golden set 做 A/B 对比。
 
 ### 目标用户
 
-- 专利 QA 用户：需要查询专利政务事项的办理条件、材料、渠道、流程、费用、时限和结果。
-- `patent_qa` / QA 调用方：需要从 evidence / basis 中引用稳定、可回链的办事指南 locator。
-- 知识库维护人员：需要用 Markdown 二级 / 三级标题维护结构化指南内容。
-- 开发与测试人员：需要验证 procedure 入库、噪声清洗、locator 防误抓、检索过滤兼容行为。
+- 专利 QA 用户：需要更稳定地命中正确法规、办事指南、模板或术语上下文。
+- QA 调用方：需要保持 `QANode` 调用契约不变，同时获得更好的 evidence 排序。
+- 开发与测试人员：需要通过开关矩阵验证各增强能力的关闭态回归和开启态收益。
+- 知识库维护人员：需要在不污染现有纯稠密集合的情况下灰度验证混合检索集合。
 
 ### 非目标
 
-- 不改检索架构，不在本片实现 hybrid / rerank / 意图路由。
-- 不改 `app/nodes/qa.py` 接线，召回后继续走现有 `_build_evidence`。
-- 不下载或解析指南附件 / 表格文件；“相关表格”小节只保存名称。
-- 不扩展到商标、地理标志、集成电路布图等类别；本片只做专利类 28 个事项。
-- 不改变 `RetrievalResult` / `KnowledgeChunk` 的基础契约。
-- 不让 procedure 参与法规版本、状态、生效日、失效日等 law-only 时效管理。
+- 不修改 `QANode._retrieve` 调用方式，不扩展 ReAct 主循环。
+- 不实现切分增强；R4.3 只保留宽召回，不做 chunk overlap / 重新切片策略。
+- 不直接迁移或覆盖现有未命名稠密 Qdrant 集合；混合检索必须使用新集合灰度。
+- 不默认开启重排、混合检索或查询改写。
+- 不把 reranker / rewriter / sparse 服务异常暴露为 QA 失败。
+- 不在本片扩充 websearch、Agentic 编排或外部案例检索。
 
 ---
 
 ## 2. Commands
 
-项目使用 Python + pytest。R4.4 默认测试必须使用本地临时文件、fake / stub，不触发真实网络、真实 Qdrant 或真实 embedding 服务。
+项目使用 Python + pytest。R4.3 单元测试默认使用 fake / stub，不触发真实 rerank、embedding、sparse 或 Qdrant 网络请求。
 
 ```bash
 # 安装依赖
 pip install -r requirements.txt
 
-# 入库脚本与 procedure 解析测试
-pytest tests/test_ingest_procedure.py
-
-# 检索过滤与 doc_type 兼容测试
+# 检索层单元测试
 pytest tests/test_retrieval.py
 
-# 如检索测试实际集中在 retrieval_tool 测试文件，则运行
+# 若检索工具测试实际拆分在独立文件
 pytest tests/test_retrieval_tool.py
 
-# R4.4 目标测试
-pytest tests/test_ingest_procedure.py tests/test_retrieval.py
+# 入库与 Qdrant schema / point 结构测试
+pytest tests/test_ingest_knowledge.py
+
+# R4.3 目标测试
+pytest tests/test_retrieval.py tests/test_ingest_knowledge.py
+
+# ragas 基线 / A-B 评测
+python -m scripts.eval.ragas_eval
+python -m scripts.eval.ragas_eval --top-k 3
 
 # 全量测试
 pytest
@@ -68,161 +73,223 @@ python -m compileall app tests scripts
 pytest && python -m compileall app tests scripts
 ```
 
-TDD 实施顺序：
+阶段验收顺序：
 
-1. 新增 / 更新 `tests/test_ingest_procedure.py`，覆盖 Markdown 事项 / 小节解析、section 归一化、locator、防误抓和噪声清洗。
-2. 更新检索相关测试，覆盖 law-only 时间过滤：开启时间过滤时 `procedure` 仍可召回。
-3. 实现 `scripts/ingest_knowledge.py` 的 `procedure` 分支、结构化解析、locator 显式生成和 payload 写入。
-4. 实现仅对 `procedure` 生效的联系方式噪声清洗规则。
-5. 调整 `_infer_locator` 为按 `doc_type` 分发，确保 `procedure` 不进入 law 条号正则。
-6. 调整 `_build_qdrant_time_filter` / `_law_matches_time` 等时间过滤逻辑，仅对 law 生效。
-7. 添加 `knowledge/procedure/专利.md` 的专利类办事指南内容。
-8. 运行 R4.4 目标测试、全量测试和编译检查。
+1. 宽召回：扩展协议与 Qdrant / Local 签名，关闭态无回归。
+2. 重排：新增 reranker 协议、HTTP 实现、包装器与开关，验证异常降级。
+3. 混合检索：新增 sparse encoder、命名向量 schema、双向量 upsert 与 `query_hybrid` 请求体测试。
+4. 查询改写：新增 rewriter 协议、multi / hyde 模式与去重逻辑，验证失败降级。
+5. 每步运行 ragas A/B，对比 `NonLLMContextRecall`、`NonLLMContextPrecisionWithReference`、`item_hit`、`section_hit`。
 
 ---
 
 ## 3. Project Structure
 
-本片在现有知识库与入库脚本上局部扩展，不重排目录，不改变 QA 主流程。
+本片应把增强能力收敛在 retrieval 层、配置层、入库脚本和测试中，不改 QA 主流程。
 
 目标变更：
 
 ```text
 pagent/
   app/
+    core/
+      config.py                 # 新增 R4.3 通用检索配置与公开配置输出
     tools/
-      retrieval.py               # law-only 时间过滤，procedure 不被法规时效条件过滤
-    nodes/
-      qa.py                      # 不改接线，继续消费现有 RetrievalResult / provenance
-  knowledge/
-    procedure/
-      专利.md                    # 专利类 28 个办事事项，H2=事项，H3=小节
+      retrieval.py              # Retriever fetch_k / recall、包装器、Qdrant hybrid 查询
+      redaction.py              # 复用 redact_sensitive_text 后再外发 rerank 文本
   scripts/
-    ingest_knowledge.py          # 新增 procedure 加载、解析、清洗、locator 分发
+    ingest_knowledge.py         # 混合集合 schema、稠密+稀疏 point upsert
   tests/
-    test_ingest_procedure.py     # procedure 入库解析、locator、防误抓、噪声、幂等测试
-    test_retrieval.py            # procedure 不受 law 时间过滤影响
+    test_retrieval.py           # 宽召回、重排、混合查询、改写、开关矩阵
+    test_ingest_knowledge.py    # 混合 schema 与双向量 upsert 测试
+  scripts/eval/
+    ragas_eval.py               # 不强制修改，作为阶段评测入口
 ```
 
-### `knowledge/procedure/专利.md` 契约
+### 检索组装契约
 
-使用 Markdown 二级标题表示事项，三级标题表示小节：
-
-```markdown
-## 专利无效宣告请求
-
-### 受理条件
-任何单位或个人认为该专利权的授予不符合……
-
-### 收费标准
-发明专利无效宣告请求费 3000 元……
-```
-
-约束：
-
-- H2 为事项名，例如 `专利无效宣告请求`。
-- H3 为原始小节名，例如 `受理条件`、`获取途径`、`申请材料`、`办理流程`、`收费标准`、`办理时限`、`办理结果`、`相关表格`。
-- H3 下的 paragraph / bullet_list / ordered_list / table 等内容都归入当前事项当前小节。
-- H2 之前的正文不生成 chunk。
-- H3 之前但 H2 之后的正文默认忽略，除非现有文档明确需要归入某个小节。
-
-### section 归一化契约
-
-解析器应将原文小节名归一化到稳定 section，便于 payload 过滤和评测：
-
-| 原文小节 | 规范化 section |
-| --- | --- |
-| 受理条件 | `条件` |
-| 获取途径 | `渠道` |
-| 申请材料 | `材料` |
-| 办理流程 | `流程` |
-| 收费标准 / 费用 | `费用` |
-| 办理时限 | `时限` |
-| 办理结果 / 相关表格 | `结果` |
-
-未知小节可保留原小节名作为 section，但 locator 仍必须使用可读标题。
-
-### `procedure` chunk 契约
-
-每个 chunk 的核心字段：
-
-```text
-doc_type    = "procedure"
-locator     = "办事指南·{事项名}·{规范化小节}"
-document_id = "procedure/专利/{事项名}"
-source      = "local://procedure/专利.md"
-item_name   = "{事项名}"
-section     = "{规范化小节}"
-category    = "专利"
-content     = "【{事项名} / {规范化小节}】\n{清洗后的正文}"
-```
-
-切分规则：
-
-- 基本粒度为“事项 × 小节”，一个三级小节一条 chunk。
-- 清洗后为空的 chunk 丢弃。
-- 过短小节（少于 80 字）可并入同事项相邻小节，避免碎片；合并后 locator 仍应可解释。
-- 超长“办理流程”（超过 600 字）按步骤再切，`chunk_index` 递增，locator 后缀 `·步骤N`。
-- 不做通用滑窗 overlap；只有超长流程按步骤再切时可 carry-over 末句一行，以覆盖跨步骤引用。
-
-### locator 契约
-
-`_infer_locator` 必须按 `doc_type` 分发：
+`build_retriever` 负责按开关组装能力，关闭态保持现状：
 
 ```python
-if chunk.doc_type == "law":
-    return _format_law_locator(...)
-if chunk.doc_type == "procedure":
-    return chunk.locator
-if chunk.doc_type == "template":
-    return _infer_template_locator(...)
+def build_retriever(settings=None, embedding_client=None, qdrant_client=None,
+                    reranker=None, sparse_encoder=None, query_rewriter=None) -> Retriever:
+    s = settings or get_settings()
+    base = _build_base_retriever(s, embedding_client, qdrant_client, sparse_encoder)
+
+    recaller = base
+    if s.retrieval_use_query_rewrite:
+        recaller = MultiQueryRetriever(recaller, query_rewriter or _build_rewriter(s), settings=s)
+
+    if s.retrieval_use_rerank:
+        return RerankingRetriever(recaller, reranker or _build_reranker(s), settings=s)
+    return recaller
 ```
 
 关键约束：
 
-- `procedure` locator 必须来自 H2 / H3 结构化路径。
-- `procedure` 中即使出现“《专利法实施细则》第四十四条”，locator 也不得出现 `《专利法》` 条号。
-- `expected_locators` 评测可用事项名做子串包含匹配，locator 中包含事项名即算命中该事项。
+- 重排永远在候选合并之后执行。
+- 重排是最后一层截断到 `top_k` / `rerank_top_k`。
+- `QANode` 仍只调用 `retrieval_tool.search(question, top_k=self.top_k)`。
+- `fetch_k` 由包装器内部从配置读取并向内层透传。
 
-### 噪声清洗契约
-
-仅对 `procedure` 逐行丢弃联系方式类噪声：
+### Retriever 契约
 
 ```python
-NOISE_PATTERNS = [
-    r"^\s*(联系电话|咨询电话|传真)[：:]",
-    r"\d{3,4}-\d{7,8}",
-    r"1[3-9]\d{9}",
-    r"邮编[：:]?\s*\d{6}",
-    r"https?://\S+",
-    r"^\s*(地址|通讯地址)[：:]",
-]
+class Retriever(Protocol):
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None,
+               fetch_k: int | None = None) -> list[RetrievalResult]: ...
 ```
 
-必须保留：
+可选扩展：
 
-- 金额，例如 `3000 元`。
-- 办理期限，例如 `自请求日起一个月内`。
-- 材料名称、流程步骤、办理结果。
-
-### 检索时间过滤契约
-
-法规时效过滤只对 `doc_type=law` 生效：
-
-```text
-if doc_type == "law":
-  应用 status / effective_date / expiry_date 等法规时间条件
-else:
-  不应用法规时间条件
+```python
+def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]: ...
 ```
 
-Qdrant filter 应表达为：
+约束：
 
-```text
-doc_type != "law" OR 满足 law 时间条件
+- `search` 对外语义不变：返回最多 `top_k` 条。
+- `recall` 返回宽召回候选池，不按最终 `top_k` 截断。
+- 未实现专门 `recall` 的检索器可用默认逻辑调用 `search(..., top_k=fetch_k, fetch_k=fetch_k)`。
+- Qdrant 和 Local 检索都必须接受 `fetch_k` 形参，保持调用兼容。
+
+### 宽召回契约
+
+- `QdrantRetriever.search` 的 Qdrant `limit = fetch_k or top_k`。
+- `LocalRetrievalTool.search` 同步扩签名；本地排序逻辑可按 `fetch_k or top_k` 截断。
+- 不启用重排 / 改写 / 混合时，`fetch_k` 不应改变当前外部 `top_k` 结果语义。
+- R4.2 的 `as_of` 时间过滤必须原样透传。
+
+### 重排契约
+
+```python
+class Reranker(Protocol):
+    def rerank(self, query: str, results: list[RetrievalResult],
+               top_k: int) -> list[RetrievalResult]: ...
 ```
 
-本片不得因为缺少 `effective_date` / `version` / `status` 而过滤掉 `procedure` / `template` / `term`。
+`HTTPReranker`：
+
+- 调 OpenAI 兼容 `/rerank`。
+- 请求体：`{"model": model, "query": query, "documents": [content...], "top_n": top_k}`。
+- 响应：`{"results": [{"index": i, "relevance_score": s}, ...]}`。
+- 按 `index` 取回原 `RetrievalResult`，并写回 `similarity = relevance_score`。
+- 文本外发前必须复用 `redact_sensitive_text`。
+- 端点、模型或 key 未配置时安全降级。
+
+`RerankingRetriever`：
+
+- 调用 `inner.recall(query, fetch_k or settings.retrieval_fetch_k, as_of)` 获取候选池。
+- 候选为空时返回 `[]`。
+- reranker 异常时返回宽召回前 `top_k` 条。
+- 正常时返回 `ranked[:rerank_top_k or top_k]`。
+
+### 混合检索契约
+
+混合检索必须使用新 Qdrant 集合 schema，要求 Qdrant 支持 named vectors 与 sparse vectors。
+
+集合 schema：
+
+```json
+{
+  "vectors": {"dense": {"size": 1024, "distance": "Cosine"}},
+  "sparse_vectors": {"sparse": {}}
+}
+```
+
+upsert point：
+
+```json
+{
+  "id": "...",
+  "vector": {
+    "dense": [],
+    "sparse": {"indices": [], "values": []}
+  },
+  "payload": {}
+}
+```
+
+融合查询：
+
+```json
+{
+  "prefetch": [
+    {"query": [], "using": "dense", "limit": 30},
+    {"query": {"indices": [], "values": []}, "using": "sparse", "limit": 30}
+  ],
+  "query": {"fusion": "rrf"},
+  "limit": 30,
+  "with_payload": true,
+  "filter": {}
+}
+```
+
+约束：
+
+- 未开启 `retrieval_use_hybrid` 时继续使用现有未命名稠密向量 schema 和 `/points/search`。
+- 开启 `retrieval_use_hybrid` 时必须使用新集合名，例如 `patent_kb_hybrid`，避免污染现有 `patent_kb`。
+- ingest 和 query 必须使用同一 sparse encoder 实现与同一 hash / 词表规则。
+- `_build_qdrant_time_filter` 输出必须透传到 hybrid query 的 `filter`。
+
+### SparseEncoder 契约
+
+```python
+class SparseEncoder(Protocol):
+    def encode(self, text: str) -> dict: ...  # {"indices": [int...], "values": [float...]}
+```
+
+实现：
+
+- `LocalLexicalSparseEncoder`：本地分词 / token 稳定 hash → index，计算 tf / bm25 类权重；无网络依赖。
+- `ServiceSparseEncoder`：调用外部稀疏编码服务，例如 bge-m3 lexical weights。
+- `FakeSparseEncoder`：测试用固定稀疏向量。
+
+### 查询改写契约
+
+```python
+class QueryRewriter(Protocol):
+    def expand(self, query: str) -> list[str]: ...
+```
+
+模式：
+
+- `multi`：生成 N 个同义或法言法语改写式。
+- `hyde`：生成假设答案 / 假设法条文本用于检索。
+
+`MultiQueryRetriever`：
+
+- `expand` 失败或模型未配置时降级为 `[query]`。
+- 对每个 query 调用 `inner.recall(q, fetch_k, as_of)`。
+- 以 `(document_id, locator, content[:64])` 作为去重 key。
+- `search` 返回合并候选前 `top_k`，若后面有重排则由 `RerankingRetriever` 统一排序。
+
+### 配置契约
+
+新增配置均使用 `PAGENT_` 前缀，默认关闭增强能力：
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `RETRIEVAL_FETCH_K` | `30` | 重排 / 融合 / 改写前候选数 |
+| `RETRIEVAL_USE_RERANK` | `false` | 是否启用重排 |
+| `RERANK_BASE_URL` | 空 | OpenAI 兼容 `/rerank` 端点 |
+| `RERANK_MODEL` | 空 | reranker 模型名 |
+| `RERANK_API_KEY` | 空 | reranker 鉴权，敏感排除 |
+| `RERANK_TOP_K` | 空 | 重排后保留数，空则回退调用方 `top_k` |
+| `RETRIEVAL_USE_HYBRID` | `false` | 是否启用 dense + sparse 混合检索 |
+| `SPARSE_ENCODER` | `local` | `local` 或 `service` |
+| `SPARSE_BASE_URL` | 空 | service 模式稀疏端点 |
+| `SPARSE_MODEL` | 空 | service 模式稀疏模型名 |
+| `HYBRID_FUSION` | `rrf` | 融合方式 |
+| `RETRIEVAL_USE_QUERY_REWRITE` | `false` | 是否启用查询改写 |
+| `QUERY_REWRITE_MODE` | `multi` | `multi` 或 `hyde` |
+| `QUERY_REWRITE_COUNT` | `3` | 改写式 / 假设文档数量 |
+
+配置要求：
+
+- 新增字段必须同步 `Settings` 默认值、环境变量读取、`to_public_dict()` 和配置测试。
+- `rerank_api_key` 等敏感字段必须 `Field(exclude=True)`，不得进入公开配置、日志或 trace。
+- 配置命名保持检索通用作用域，不新增 `qa_*` 这类单 Node 配置。
 
 ---
 
@@ -230,94 +297,105 @@ doc_type != "law" OR 满足 law 时间条件
 
 ### 基本原则
 
-- 最小化、局部化改动，优先复用现有入库、清洗、point id、payload 构造和检索过滤 helper。
+- 最小化、局部化改动，优先复用现有 Qdrant client、embedding client、时间过滤、payload 解析和脱敏 helper。
 - 公开函数、公开方法、公开类必须添加中文 Google 风格 docstring。
-- 私有小工具函数至少用一行中文说明其用途。
-- 不引入复杂抽象；`procedure` 解析逻辑应集中在 `scripts/ingest_knowledge.py` 或同脚本内小型 helper。
-- 不改变 QA 主流程和结果 schema，优先让现有 evidence / provenance 自然承载 procedure locator。
-- 不在日志、trace 或测试快照中记录过长指南全文。
-- 不硬编码 API Key、真实 endpoint 或外部下载 URL。
+- 私有小工具函数至少用一行中文概述用途。
+- 关闭态必须复现当前行为，不引入无意义兼容壳或全局副作用。
+- 包装器职责单一：宽召回、改写、重排、混合检索分层组合，不互相内嵌复杂逻辑。
+- 不在日志中记录 API Key、完整外发文本、长文档正文或隐私数据。
+- 可恢复异常使用 warning 并说明降级结果；不要让增强能力异常打挂主检索。
 
-### 依赖约束
+### 错误处理与降级
 
-- PRD 推荐使用 `markdown-it-py` 解析 Markdown heading 树。
-- 如果项目尚未引入 `markdown-it-py`，安装或新增依赖前必须先确认；也可优先使用现有依赖或简单 Markdown heading 解析实现最小片。
-- 无论采用哪种解析方式，对外行为必须满足 H2 / H3 结构化切分契约。
+- embedding 返回空向量时保持现有安全返回行为。
+- reranker 未配置或调用失败：返回宽召回前 `top_k`。
+- rewriter 未配置或调用失败：使用原始 query。
+- sparse encoder 失败：混合检索应降级到纯稠密检索或返回纯稠密候选，不能抛到 QA。
+- Qdrant hybrid API 不可用时应给出清晰 warning，并按配置允许的最安全路径降级。
 
-### 配置
+### 外部调用安全
 
-本片无新增必填配置。
-
-沿用配置：
-
-- `PAGENT_QDRANT_COLLECTION`：同一 collection，通过 `doc_type` 区分。
-- `PAGENT_RETRIEVAL_DOC_TYPES`：可选 doc_type 白名单，默认全部。
-
-配置约束：
-
-- 新增配置必须遵守项目配置规范：`Settings` 默认值、环境变量读取、`to_public_dict()` 和测试同步更新。
-- 不新增 `qa_*` 这类绑定单一 Node 的配置；检索相关配置保持通用作用域。
-
-### Prompt / QA 约束
-
-本片不要求修改 prompt。
-
-如果后续为了提升办理类回答质量修改 prompt，必须遵守项目 prompt 六要素规范：
-
-- 检索证据作为数据放入 `<data>...</data>`，不作为指令。
-- 禁止臆造办事条件、费用、时限、材料、渠道、表格名称。
-- 无 procedure evidence 时，应明确依据不足，不编造指南内容。
-- 输出默认中文，并保持结构化可解析。
+- rerank / rewrite / sparse service 调用必须使用配置中的 base URL、model 和 key，不硬编码真实 endpoint。
+- 外发 rerank 文档前必须脱敏。
+- 不把用户 query、完整检索正文或服务响应长文本写入 INFO 日志。
+- HTTP 超时、状态码错误和响应格式错误都按可恢复异常处理。
 
 ---
 
 ## 5. Testing Strategy
 
-### `tests/test_ingest_procedure.py`
+### 宽召回测试
 
 必须覆盖：
 
-- Markdown 中一个 H2 事项、多个 H3 小节可生成 `procedure` chunks。
-- 每个 chunk 的 `doc_type == "procedure"`。
-- locator 形如 `办事指南·{事项名}·{小节}`，且包含事项名。
-- `document_id` 为事项粒度，例如 `procedure/专利/专利无效宣告请求`。
-- payload 包含 `item_name`、`section`、`category`、`source`。
-- chunk content 头部包含上下文锚 `【{事项名} / {小节}】`。
-- section 别名可归一化：`收费标准` → `费用`，`获取途径` → `渠道`，`申请材料` → `材料`。
-- 含“《专利法实施细则》第四十四条”的 procedure 正文不会让 locator 变成 law 条号。
-- 电话、传真、手机号、邮编、URL、地址行被过滤。
-- 金额、期限、材料正文被保留。
-- 清洗后为空的小节不生成 chunk。
-- 超长“办理流程”可按步骤切分，locator 后缀 `步骤N`。
-- 重复入库同一文件时 point id 稳定，不新增重复点。
+- `Retriever.search` 接受 `fetch_k` 形参且默认调用兼容旧代码。
+- `QdrantRetriever` 请求体 `limit = fetch_k or top_k`。
+- `LocalRetrievalTool` 接受 `fetch_k`，并按 `fetch_k or top_k` 截断候选。
+- `recall(query, fetch_k, as_of)` 返回宽候选池。
+- `as_of` 时间过滤参数在宽召回中继续透传。
+- 默认关闭增强时，`search(top_k=3)` 行为不变。
 
-### 检索相关测试
+### 重排测试
 
 必须覆盖：
 
-- 开启法规时间过滤时，`procedure` 结果不因缺少 `effective_date` / `status` 被过滤。
-- `_build_qdrant_time_filter` 生成的过滤逻辑包含 `doc_type != "law" OR law 时间条件`。
-- `_law_matches_time` 或等价 local helper 只对 `doc_type=law` 应用时间判断。
-- `template` / `term` 与 `procedure` 一样不受 law 时间过滤影响。
-- doc_type 白名单包含 `procedure` 时可召回 procedure；未限制时默认全部可召回。
+- `RerankingRetriever.search` 调用 `inner.recall(fetch_k=settings.retrieval_fetch_k)`。
+- `FakeReranker` 可按注入分数重排结果。
+- 最终返回数量为 `rerank_top_k or top_k`。
+- reranker 未配置或抛异常时降级为宽召回前 `top_k`。
+- `HTTPReranker` 请求体包含 `model`、`query`、`documents`、`top_n`。
+- `HTTPReranker` 按响应 `index` 映射回原结果，并写回 `similarity`。
+- rerank 外发文本经过脱敏 helper。
 
-### 端到端 / 验收测试
+### 混合检索测试
 
-建议覆盖：
+必须覆盖：
 
-- 使用 `knowledge/procedure/专利.md` 入库后，费用类问题可命中对应 `费用` 小节。
-- 材料类问题可命中对应 `材料` 小节。
-- 渠道类问题可命中对应 `渠道` 小节。
-- 时限类问题可命中对应 `时限` 小节。
-- golden_qa 办理流程 36 题可统计 Recall@3，expected locator 用事项名子串匹配。
+- `ensure_collection` 在 `retrieval_use_hybrid=false` 时保持现有未命名稠密 schema。
+- `ensure_collection` 在 `retrieval_use_hybrid=true` 时生成 named dense + sparse schema。
+- ingest hybrid point 的 `vector` 同时包含 `dense` 和 `sparse`。
+- `_QdrantHTTPClient.query_hybrid` 请求体包含 dense / sparse 两路 `prefetch`、`fusion=rrf`、`limit`、`with_payload`。
+- hybrid query 透传 `_build_qdrant_time_filter` 结果。
+- `FakeSparseEncoder` 可稳定生成稀疏向量，测试不触网。
+- sparse encoder 异常时检索安全降级。
 
-### 通用测试约束
+### 查询改写测试
 
-- 默认测试不得触发真实 LLM、真实 embedding、真实 Qdrant 或网络请求。
-- Qdrant、embedding、QA skill 全部通过 fake / stub 注入。
-- 不在测试代码中写真实 API Key、真实 endpoint 或隐私数据。
-- 用 `tmp_path` 构造最小 Markdown 语料，避免依赖开发机外部文件。
-- 断言稳定字段，不断言完整长正文。
+必须覆盖：
+
+- `QueryRewriter.expand` 返回 `[原查询, 改写1, 改写2]` 后，`MultiQueryRetriever` 对每个 query 调用 inner recall。
+- expand 抛异常或返回空时降级为 `[query]`。
+- 合并去重 key 使用 `document_id`、`locator`、`content[:64]`。
+- `MultiQueryRetriever.search` 在不开重排时按合并顺序截断到 `top_k`。
+- 与 `RerankingRetriever` 组合时，重排作用在改写合并后的候选池上。
+
+### 配置与开关矩阵测试
+
+必须覆盖：
+
+- 所有新增配置默认值正确，增强能力默认关闭。
+- 非敏感配置进入 `to_public_dict()`。
+- `rerank_api_key` 不进入 `to_public_dict()`。
+- 开关关闭态复现当前行为。
+- 单独开启宽召回、重排、混合、改写时各自只影响对应层。
+- 组合开启改写 + 重排时，先改写合并，再重排截断。
+
+### 评测验收
+
+每个阶段建议记录：
+
+- `NonLLMContextRecall`
+- `NonLLMContextPrecisionWithReference`
+- `item_hit`
+- `section_hit`
+
+验收口径：
+
+- 关闭态指标不应低于当前基线。
+- 宽召回应保持或提升 recall，不应显著降低 precision。
+- 重排应提升 top_k=3 的 precision 或 section_hit。
+- 混合检索重点观察术语类、条号类、精确关键词类问题。
+- 查询改写默认关，只有在与重排搭配有稳定增益时才考虑后续默认开启。
 
 ---
 
@@ -325,70 +403,76 @@ doc_type != "law" OR 满足 law 时间条件
 
 ### Always do
 
-- 始终把办事指南作为 `doc_type=procedure` 入库。
-- 始终使用 H2 事项名 + H3 小节生成 procedure locator。
-- 始终避免 procedure 进入 law 的“第X条”locator 正则。
-- 始终在 procedure chunk 文本前拼接 `【事项 / 小节】` 上下文锚。
-- 始终过滤联系方式类噪声，保留金额、期限、材料、流程等业务正文。
-- 始终让 law 时间过滤只影响 law，不影响 procedure / template / term。
-- 始终使用稳定 point id，保证重复入库幂等。
+- 始终保持所有 R4.3 增强默认关闭。
+- 始终让关闭态行为与当前检索保持一致。
+- 始终把重排放在候选池合并之后，并作为最后一层截断。
+- 始终透传 `as_of` 与 R4.2 时间过滤。
+- 始终在外发 rerank 文本前脱敏。
+- 始终让 reranker / rewriter / sparse encoder 异常安全降级。
+- 始终使用新集合灰度混合检索，不污染现有未命名稠密集合。
+- 始终让 ingest 与 query 使用一致的 sparse encoder。
 - 测试默认使用 fake / stub，不触网。
-- 日志 / trace 不记录密钥、完整 API Key、过长指南全文或敏感材料。
+- 新增配置必须同步默认值、环境变量、公开配置和测试。
 
 ### Ask first
 
-- 是否新增或升级 `markdown-it-py` 等依赖。
-- 是否连接真实 Qdrant 做人工入库验收。
-- 是否调用云 embedding 服务处理完整办事指南。
-- 是否提交大体积知识库文件或完整外部来源文档。
-- 是否修改 `RetrievalResult` / `KnowledgeChunk` 基础结构。
-- 是否修改 QA prompt 或 `app/nodes/qa.py` 主流程。
-- 是否把商标、地理标志、集成电路布图等类别纳入本片范围。
+- 是否安装或新增分词、BM25、稀疏编码相关依赖。
+- 是否连接真实 Qdrant 创建 hybrid 集合。
+- 是否调用真实 rerank、LLM rewrite、embedding 或 sparse 服务。
+- 是否切换生产 / 主集合 `PAGENT_QDRANT_COLLECTION` 到 hybrid 集合。
+- 是否修改 `QANode`、QA prompt 或对外回答 schema。
+- 是否把查询改写或重排默认开启。
+- 是否提交评测结果文件或大体积语料变更。
 
 ### Never do
 
-- 不把 procedure 文本中的“第X条”误标为 law locator。
-- 不伪造办事条件、费用、时限、材料、渠道、表格名称或来源。
-- 不让 procedure 因缺少法规时效字段被检索过滤误伤。
-- 不为本片实现 hybrid / rerank / 意图路由等 R4.3 或后续能力。
-- 不下载、解析或入库附件文件本体。
-- 不把 `.env`、API Key、Qdrant API Key、embedding API Key 提交到 git。
-- 不在日志、trace 或测试快照中记录完整敏感正文。
+- 不覆盖或迁移现有 `patent_kb` 未命名稠密集合。
+- 不让增强能力异常导致 QA 检索失败。
+- 不硬编码 API Key、真实 endpoint、token 或 secret。
+- 不把敏感配置写入 `to_public_dict()`、日志、trace 或测试快照。
+- 不在本片实现切分增强、websearch、ReAct 主循环或 Agentic 编排。
+- 不新增 `qa_*` 这类绑定单一 Node 的检索配置。
+- 不为了兼容混合检索而破坏当前纯稠密路径。
 
 ---
 
 ## 7. Functional Acceptance Checklist
 
-- [ ] 新增 `knowledge/procedure/` 目录。
-- [ ] 新增 `knowledge/procedure/专利.md`，包含专利类办事事项。
-- [ ] `scripts/ingest_knowledge.py` 可识别目录名 `procedure` 并进入 procedure 解析分支。
-- [ ] procedure Markdown 按 H2 事项 / H3 小节结构化切分。
-- [ ] section 别名归一化到 `条件` / `渠道` / `材料` / `流程` / `费用` / `时限` / `结果`。
-- [ ] procedure chunk 的 `doc_type`、`locator`、`document_id`、`source`、`item_name`、`section`、`category` 正确。
-- [ ] procedure locator 格式为 `办事指南·{事项名}·{小节}`。
-- [ ] procedure locator 不受正文中“第X条”影响。
-- [ ] procedure 清洗过滤电话、邮编、地址、URL。
-- [ ] procedure 清洗保留金额、期限、材料和流程正文。
-- [ ] 清洗后空 chunk 丢弃。
-- [ ] 超长办理流程可按步骤切分并生成 `步骤N` locator。
-- [ ] point id 保持稳定，重复入库幂等。
-- [ ] `_infer_locator` 按 `doc_type` 分发。
-- [ ] `_build_qdrant_time_filter` / `_law_matches_time` 仅对 law 应用法规时效过滤。
-- [ ] 开启时间过滤时 procedure 仍可被召回。
-- [ ] R4.4 目标测试通过。
+- [ ] `Retriever.search` 支持可选 `fetch_k`。
+- [ ] Qdrant / Local 检索器支持 `recall(query, fetch_k, as_of)` 或等价宽召回逻辑。
+- [ ] `QdrantRetriever` 使用 `limit = fetch_k or top_k`。
+- [ ] `build_retriever` 可按开关组装 base、`MultiQueryRetriever`、`RerankingRetriever`。
+- [ ] 所有增强默认关闭，关闭态行为与当前一致。
+- [ ] 新增 R4.3 配置项与 `to_public_dict()` 测试完成。
+- [ ] `rerank_api_key` 等敏感字段被排除。
+- [ ] 新增 `Reranker` 协议、`HTTPReranker` 和 `FakeReranker`。
+- [ ] `RerankingRetriever` 调用宽召回、重排并最终截断。
+- [ ] reranker 失败时安全降级。
+- [ ] rerank 外发文本经过脱敏。
+- [ ] 新增 `SparseEncoder` 协议、local / service / fake 实现。
+- [ ] hybrid collection schema 使用 named dense + sparse vectors。
+- [ ] hybrid ingest point 同时写入 dense 与 sparse 向量。
+- [ ] `_QdrantHTTPClient.query_hybrid` 使用 `/points/query` 和 RRF 融合请求体。
+- [ ] hybrid 查询透传 time filter。
+- [ ] 现有未命名稠密集合路径不被破坏。
+- [ ] 新增 `QueryRewriter` 协议与 multi / hyde 模式。
+- [ ] `MultiQueryRetriever` 支持改写召回、合并去重和失败降级。
+- [ ] 改写 + 重排组合顺序正确。
+- [ ] 宽召回、重排、混合、改写测试通过。
 - [ ] `pytest && python -m compileall app tests scripts` 通过。
+- [ ] 每阶段可运行 `python -m scripts.eval.ragas_eval` 做 A/B 对比。
 
 ---
 
 ## 8. Implementation Order
 
-1. 测试：新增 procedure Markdown 解析、locator、防误抓和噪声清洗测试。
-2. 测试：新增 law-only 时间过滤测试，证明 procedure 不被误过滤。
-3. 入库识别：让 `load_chunks` / 文件遍历逻辑识别 `knowledge/procedure/`。
-4. 解析：实现 H2 / H3 事项小节解析与 section 归一化。
-5. 清洗：实现仅对 procedure 生效的联系方式噪声过滤。
-6. chunk：生成上下文锚、locator、document_id、source、item_name、section、category。
-7. locator：改 `_infer_locator` 为按 `doc_type` 分发，procedure 直接使用结构化 locator。
-8. 过滤：调整 Qdrant / Local 时间过滤为 law-only。
-9. 语料：整理并加入 `knowledge/procedure/专利.md`。
-10. 回归：运行 R4.4 目标测试、全量 `pytest` 和编译检查。
+1. 配置：新增 R4.3 检索配置字段、环境变量读取、公开配置和测试。
+2. 宽召回：扩展 `Retriever` / Qdrant / Local 签名，新增 `recall` 语义和测试。
+3. 组装：调整 `build_retriever`，确保关闭态完全复现当前行为。
+4. 重排：实现 `Reranker`、`HTTPReranker`、`RerankingRetriever`、fake 与异常降级测试。
+5. 混合 schema：调整 `ensure_collection`，按开关区分未命名稠密与 named dense + sparse。
+6. 稀疏编码：实现 `SparseEncoder`、local / service / fake，并补充一致性测试。
+7. 混合入库：ingest 写入 dense + sparse 命名向量，保持现有 payload 与 point id 稳定。
+8. 混合查询：新增 `_QdrantHTTPClient.query_hybrid` 与 QdrantRetriever hybrid 分支。
+9. 查询改写：实现 `QueryRewriter`、multi / hyde 模式、`MultiQueryRetriever` 与去重测试。
+10. 组合回归：跑开关矩阵、全量测试、编译检查和 ragas A/B。

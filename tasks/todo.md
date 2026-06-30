@@ -1,57 +1,99 @@
-# R4.4 Todo
+# R4.3 Todo
 
-## 1. 写入计划文档
+## 1. 写入 R4.3 计划文档
 
-- [x] 目标：生成 `tasks/plan.md`，说明 R4.4 办事指南入库的背景、依赖图、阶段、检查点和验收命令。
-- 依赖：`SPEC.md` 与 R4.4 实施计划。
-- 验收标准：文件标题为 R4.4 办事指南入库计划；包含 `scripts/ingest_knowledge.py`、`app/tools/retrieval.py`、`tests/test_ingest_procedure.py`、`tests/test_retrieval_tool.py`、`knowledge/procedure/专利.md`。
+- [x] 目标：生成 `tasks/plan.md`，说明 R4.3 检索质量增强的背景、依赖图、关键文件、实施阶段、checkpoint、风险边界和最终验收命令。
+- 依赖：`SPEC.md`。
+- 验收标准：`tasks/plan.md` 标题为 `R4.3 检索质量增强实施计划`；内容包含依赖图、阶段、checkpoint、风险边界和验收命令。
 - 验证命令：人工读取 `tasks/plan.md`。
 
-## 2. 写入任务清单
+## 2. 写入 R4.3 任务清单
 
-- [x] 目标：生成 `tasks/todo.md`，按垂直切片列出目标、依赖、验收标准、验证命令。
+- [x] 目标：生成 `tasks/todo.md`，按依赖顺序列出可勾选任务。
 - 依赖：任务 1。
-- 验收标准：每个任务可独立验证；任务顺序与依赖关系一致。
+- 验收标准：`tasks/todo.md` 标题为 `R4.3 Todo`；每项任务包含目标、依赖、验收标准、验证命令。
 - 验证命令：人工读取 `tasks/todo.md`。
 
-## 3. 建立 procedure 入库测试
+## 3. 建立配置测试
 
-- [x] 目标：新增 `tests/test_ingest_procedure.py`，覆盖 H2/H3、locator、防误抓、噪声清洗、payload、幂等 point id。
-- 依赖：任务 1、任务 2。
-- 验收标准：`load_chunks(tmp_path)` 能生成 `doc_type == "procedure"` 的 chunk；locator 为 `办事指南·{事项名}·{规范化小节}`；content 以 `【{事项名} / {小节}】` 开头；payload 包含 `item_name`、`section`、`category`；噪声行过滤且金额、期限、材料保留。
-- 验证命令：`pytest tests/test_ingest_procedure.py`
+- [ ] 目标：补充配置与安全测试，先锁定 R4.3 配置默认关闭、环境变量覆盖和敏感项不公开的预期行为。
+- 依赖：任务 2。
+- 验收标准：覆盖 `retrieval_fetch_k`、`retrieval_use_rerank`、`rerank_*`、`retrieval_use_hybrid`、`sparse_*`、`hybrid_fusion`、`retrieval_use_query_rewrite`、`query_rewrite_*`；验证默认关闭、env 覆盖、`rerank_api_key` 等敏感项不进入 `to_public_dict()`。
+- 验证命令：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
 
-## 4. 实现 procedure 入库闭环
+## 4. 实现配置基线
 
-- [x] 目标：扩展 `scripts/ingest_knowledge.py`，支持 procedure 目录读取、H2/H3 解析、清洗、locator 与 payload 透传。
+- [ ] 目标：在 `app/core/config.py` 实现 R4.3 配置项、环境变量读取和公开配置输出。
 - 依赖：任务 3。
-- 验收标准：Task 3 测试通过；law/template/term 既有入库行为不变；不新增外部依赖。
-- 验证命令：`pytest tests/test_ingest_procedure.py tests/test_ingest_knowledge.py && python -m compileall scripts`
+- 验收标准：SPEC 配置项齐全；所有增强默认关闭；`to_public_dict()` 只包含非敏感项；敏感项不进入日志或 trace。
+- 验证命令：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
 
-## 5. 建立 law-only 检索测试
+## 5. 建立宽召回测试
 
-- [x] 目标：补充 `tests/test_retrieval_tool.py`，验证 procedure/template/term 不受 law 时间过滤误伤。
+- [ ] 目标：补充 `tests/test_retrieval_tool.py` 和 `tests/test_qa_node.py`，锁定宽召回接口与默认行为。
 - 依赖：任务 4。
-- 验收标准：默认 current 与 `as_of` 过滤下，非 law 文档仍可返回；Qdrant filter 包含非 law 分支；procedure payload 的 `doc_type`、`locator` 进入 provenance。
+- 验收标准：覆盖 `fetch_k`、`recall`、Qdrant `limit = fetch_k or top_k`、Local 候选截断、`as_of` 和 Qdrant time filter 透传；确认 `QANode` 主流程不改。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`
+
+## 6. 实现宽召回闭环
+
+- [ ] 目标：扩展 `Retriever.search(..., fetch_k=None)`，并为 Qdrant / Local 检索实现 `recall(query, fetch_k, as_of)`。
+- 依赖：任务 5。
+- 验收标准：默认行为不变；`fetch_k` 仅扩大候选池；时间过滤继续生效；`QANode` 仍只调用 `search(question, top_k=self.top_k)`。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`
+
+## 7. 建立重排测试
+
+- [ ] 目标：补充重排相关单测和安全测试。
+- 依赖：任务 6。
+- 验收标准：覆盖 fake 排序、HTTP 请求体、异常降级、外发 documents 脱敏、外部错误日志脱敏。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_security_compliance.py`
+
+## 8. 实现重排闭环
+
+- [ ] 目标：新增 `Reranker` 协议、`FakeReranker`、`HTTPReranker` 与 `RerankingRetriever`。
+- 依赖：任务 7。
+- 验收标准：`RerankingRetriever` 在宽召回候选池上重排并截断为 `top_k`；reranker 失败时返回宽召回前 `top_k`；外发文本复用 `redact_sensitive_text()`。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_security_compliance.py`
+
+## 9. 建立混合检索测试
+
+- [ ] 目标：补充 hybrid schema、双向量 point 和 hybrid query 测试。
+- 依赖：任务 6。
+- 验收标准：覆盖 named dense + sparse schema、`{"dense": ..., "sparse": ...}` 双向量 point、`query_hybrid()` 请求体、dense + sparse prefetch、RRF、time filter 透传；默认 dense-only 路径不变。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py`
+
+## 10. 实现混合检索闭环
+
+- [ ] 目标：新增 sparse encoder 体系，扩展 Qdrant hybrid 查询与入库 schema / point 写入。
+- 依赖：任务 9。
+- 验收标准：默认 dense-only 不变；hybrid 开启时支持新集合使用 named dense + sparse schema；不污染现有未命名稠密集合；hybrid 查询继续透传 `as_of` 与 filter。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py`
+
+## 11. 建立查询改写测试
+
+- [ ] 目标：补充 query rewrite 与 multi-query 合并测试。
+- 依赖：任务 6。
+- 验收标准：覆盖 expand 失败降级为 `[query]`、多查询结果合并、按 `(document_id, locator, content[:64])` 去重、与重排组合时先改写合并再重排。
 - 验证命令：`pytest tests/test_retrieval_tool.py`
 
-## 6. 调整检索过滤（如需要）
+## 12. 实现查询改写闭环
 
-- [x] 目标：仅当测试暴露误判时，小幅调整 `app/tools/retrieval.py` 的 law 判断。
-- 依赖：任务 5。
-- 验收标准：既有 law current/as_of 过滤通过；procedure/template/term 均不受 law 时间过滤误伤。
-- 验证命令：`pytest tests/test_retrieval_tool.py && python -m compileall app`
+- [ ] 目标：新增 `QueryRewriter` 协议、fake / HTTP 或 LLM 兼容实现与 `MultiQueryRetriever`。
+- 依赖：任务 11。
+- 验收标准：`MultiQueryRetriever` 可独立启用；未配置或失败时降级为原始 query；不改变 `QANode` 调用方式。
+- 验证命令：`pytest tests/test_retrieval_tool.py`
 
-## 7. 接入 procedure 专利知识文件
+## 13. 装配 build_retriever
 
-- [x] 目标：创建 `knowledge/procedure/专利.md` 的最小代表样例，覆盖费用、材料、渠道、时限等办理类小节。
-- 依赖：任务 4。
-- 验收标准：`load_chunks("knowledge")` 能读取该文件；locator 包含事项名和规范化小节；完整 28 项或完整外部来源文档需用户确认后再补齐。
-- 验证命令：通过测试/fake 验证，不连接真实 Qdrant。
+- [ ] 目标：扩展 `build_retriever(settings=None, embedding_client=None, qdrant_client=None, reranker=None, sparse_encoder=None, query_rewriter=None)` 并完成组合装配。
+- 依赖：任务 8、任务 10、任务 12。
+- 验收标准：装配顺序为 base/hybrid -> multi-query -> rerank；关闭态与当前行为一致；组合测试可使用 fake 组件，不连接真实外部服务。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`
 
-## 8. 运行验收
+## 14. 运行项目级验收
 
-- [x] 目标：运行 R4.4 目标测试、全量回归和编译检查。
-- 依赖：任务 3 至任务 7。
-- 验收标准：目标测试通过；全量 `pytest` 通过；编译检查通过；未引入真实网络依赖、真实 API Key 或敏感内容。
-- 验证命令：`pytest tests/test_ingest_procedure.py tests/test_ingest_knowledge.py tests/test_retrieval_tool.py && pytest && python -m compileall app tests scripts`
+- [ ] 目标：运行 R4.3 目标测试、全量回归、编译检查和 ragas 评估入口。
+- 依赖：任务 13。
+- 验收标准：目标测试通过；全量 `pytest` 通过；`compileall` 通过；`python -m scripts.eval.ragas_eval` 可运行；未引入真实网络依赖、真实 API Key 或敏感内容。
+- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py tests/test_core_config_logging.py tests/test_security_compliance.py tests/test_qa_node.py && pytest && python -m compileall app tests scripts && python -m scripts.eval.ragas_eval`

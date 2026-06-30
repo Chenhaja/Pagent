@@ -1,112 +1,192 @@
-# R4.4 办事指南入库计划
+# R4.3 检索质量增强实施计划
 
 ## 背景
 
-R4.4 将《知识产权政务服务事项办事指南（第二版）》中的专利类指南作为新的 `procedure` doc_type 入库，用于支撑“怎么办理 / 多少钱 / 多久 / 交什么材料 / 哪里办”等办理类 QA。
+R4.3 的目标是先形成检索质量增强的可执行实施计划，而不是立即进入代码实现。当前仓库已有 `Retriever`、`QdrantRetriever`、`LocalRetrievalTool`、`build_retriever`、Qdrant 时间过滤、配置读取、敏感信息脱敏和 QA 主流程。R4.3 将围绕宽召回、重排、混合检索、查询改写建立逐步可验证的垂直切片，并保持所有增强能力默认关闭。
 
-现有 `scripts/ingest_knowledge.py` 仅遍历 `law` / `template` / `term`，且 law locator 会用“第X条”正则推断。procedure 正文可能包含法规引用，必须避免误抓为 law locator。现有 `app/tools/retrieval.py` 已采用“非 law 或满足 law 时间条件”的过滤结构，本次通过测试确认 procedure 不被法规时效过滤误伤。
+本阶段只替换 `tasks/plan.md` 与 `tasks/todo.md`，后续实现阶段再按任务清单逐项落地。
 
 ## 依赖图
 
 ```text
 SPEC.md
   -> tasks/plan.md / tasks/todo.md
-  -> tests/test_ingest_procedure.py
-      -> scripts/ingest_knowledge.py: KnowledgeChunk 可选字段
-      -> scripts/ingest_knowledge.py: procedure H2/H3 解析
-      -> scripts/ingest_knowledge.py: procedure 专属清洗
-      -> scripts/ingest_knowledge.py: procedure payload 透传
-  -> tests/test_retrieval_tool.py
-      -> app/tools/retrieval.py: law-only 时间过滤验证
-  -> knowledge/procedure/专利.md
-      -> scripts/ingest_knowledge.py: load_chunks 读取 procedure 目录
+  -> 配置基线
+      -> app/core/config.py: Settings / env / to_public_dict
+      -> tests/test_core_config_logging.py
+      -> tests/test_security_compliance.py
+  -> 宽召回
+      -> app/tools/retrieval.py: Retriever.search(fetch_k) / recall
+      -> QdrantRetriever / LocalRetrievalTool
+      -> tests/test_retrieval_tool.py
+  -> 重排
+      -> Reranker / HTTPReranker / FakeReranker
+      -> RerankingRetriever
+      -> redact_sensitive_text
+      -> build_retriever 组合
+      -> tests/test_retrieval_tool.py
+  -> 混合检索
+      -> SparseEncoder / LocalLexicalSparseEncoder / ServiceSparseEncoder / FakeSparseEncoder
+      -> _QdrantHTTPClient.query_hybrid
+      -> scripts/ingest_knowledge.py: hybrid schema / hybrid point
+      -> tests/test_ingest_knowledge.py
+      -> tests/test_retrieval_tool.py
+  -> 查询改写
+      -> QueryRewriter / MultiQueryRetriever
+      -> build_retriever 组合
+      -> tests/test_retrieval_tool.py
+  -> 回归验证
+      -> tests/test_qa_node.py 确认 QANode 不改
+      -> python -m scripts.eval.ragas_eval
 ```
 
-## Phase 1 — 计划与任务文档
+## 关键文件
+
+- `app/core/config.py`：新增 R4.3 配置默认值、环境变量读取和公开配置输出。
+- `app/tools/retrieval.py`：实现宽召回、重排、混合检索、查询改写与 `build_retriever` 装配。
+- `scripts/ingest_knowledge.py`：在 hybrid 开启时支持 named dense + sparse schema 和双向量 point。
+- `app/core/security.py`：复用 `redact_sensitive_text()` 处理 rerank 外发文本和外部错误日志。
+- `app/nodes/qa.py`：不修改主流程，仅通过测试确认仍只调用 `retrieval_tool.search(question, top_k=self.top_k)`。
+- `tests/test_retrieval_tool.py`：覆盖 R4.3 检索增强主体行为。
+- `tests/test_ingest_knowledge.py`：覆盖 hybrid collection schema 与 upsert point。
+- `tests/test_core_config_logging.py`：覆盖配置默认值、环境变量覆盖和公开配置。
+- `tests/test_security_compliance.py`：覆盖敏感配置不公开、rerank 脱敏和外部错误日志脱敏。
+- `tests/test_qa_node.py`：确认 QA 主流程不被 R4.3 改动。
+
+## Phase 1 — 配置基线与安全边界
 
 **修改文件**
-- `tasks/plan.md`
-- `tasks/todo.md`
+- `app/core/config.py`
+- `tests/test_core_config_logging.py`
+- `tests/test_security_compliance.py`
 
 **实施内容**
-- 写入本 R4.4 实施计划。
-- 按垂直切片维护可独立验证的任务清单。
+- 增加 SPEC 指定的 R4.3 配置：`retrieval_fetch_k`、`retrieval_use_rerank`、`rerank_*`、`retrieval_use_hybrid`、`sparse_*`、`hybrid_fusion`、`retrieval_use_query_rewrite`、`query_rewrite_*`。
+- 所有增强能力默认关闭，关闭态保持当前检索行为。
+- `rerank_api_key` 等敏感项使用 `Field(exclude=True)` 或等价机制排除，不进入 `to_public_dict()`、日志或 trace。
+- 环境变量使用项目统一前缀 `PAGENT_`，字段名与配置项一一对应。
+- 对非敏感参数补齐 `to_public_dict()` 输出，便于排查。
 
-**Checkpoint A**
-- 确认计划与任务清单包含关键路径：`scripts/ingest_knowledge.py`、`app/tools/retrieval.py`、`tests/test_ingest_procedure.py`、`tests/test_retrieval_tool.py`、`knowledge/procedure/专利.md`。
-
-## Phase 2 — procedure 入库最小闭环
-
-**修改文件**
-- `tests/test_ingest_procedure.py`
-- `scripts/ingest_knowledge.py`
-
-**实施内容**
-- 新增 procedure 入库测试，覆盖 H2/H3 解析、locator、防误抓 law 条号、噪声清洗、payload、幂等 point id。
-- 扩展 `KnowledgeChunk`，增加 `item_name`、`section`、`category` 可选字段。
-- `load_chunks()` 遍历加入 `procedure`。
-- procedure 文件走 H2/H3 专用解析，不走 `_split_text()`。
-- 使用小节别名归一化：受理条件→条件、获取途径→渠道、申请材料→材料、办理流程→流程、收费标准/费用→费用、办理时限→时限、办理结果/相关表格→结果。
-- procedure 专属清洗仅丢弃联系方式类行。
-- payload 写入 `item_name`、`section`、`category`。
-- `_infer_locator()` 对 `procedure` 直接返回 fallback。
-
-**Checkpoint B**
+**Checkpoint**
 ```bash
-pytest tests/test_ingest_procedure.py tests/test_ingest_knowledge.py
-python -m compileall scripts
+pytest tests/test_core_config_logging.py tests/test_security_compliance.py
 ```
 
-## Phase 3 — law-only 时间过滤兼容
+## Phase 2 — 宽召回最小闭环
 
 **修改文件**
+- `app/tools/retrieval.py`
 - `tests/test_retrieval_tool.py`
-- `app/tools/retrieval.py`（仅测试证明需要时小幅调整）
+- `tests/test_qa_node.py`（只验证，不改 QANode 主流程）
 
 **实施内容**
-- 补充 Local 检索测试，验证 `procedure` / `template` / `term` 在默认 current 与 `as_of` 过滤下仍可返回。
-- 补充 Qdrant filter 测试，验证 `_build_qdrant_time_filter()` 保持 `should: [doc_type != law, law_filter]` 结构。
-- 补充 Qdrant hit 映射测试，验证 procedure payload 的 `doc_type`、`locator` 进入 `RetrievalResult.provenance`。
-- 如测试暴露误判，将 `_payload_is_law()` 收紧为优先只认 `doc_type == "law"`。
+- 扩展 `Retriever.search(..., fetch_k=None)`。
+- 为 `QdrantRetriever` / `LocalRetrievalTool` 增加 `recall(query, fetch_k, as_of)`。
+- `QdrantRetriever` 请求 `limit = fetch_k or top_k`。
+- Local 检索按 `fetch_k or top_k` 取候选。
+- `_build_qdrant_time_filter()` 与 `_law_matches_time()` 继续透传并生效，确保 `as_of` 与 Qdrant filter 不丢失。
+- `QANode` 仍只调用 `retrieval_tool.search(question, top_k=self.top_k)`。
 
-**Checkpoint C**
+**Checkpoint**
+```bash
+pytest tests/test_retrieval_tool.py tests/test_qa_node.py
+```
+
+## Phase 3 — 重排闭环
+
+**修改文件**
+- `app/tools/retrieval.py`
+- `tests/test_retrieval_tool.py`
+- `tests/test_security_compliance.py`
+
+**实施内容**
+- 新增 `Reranker` 协议、`FakeReranker`、`HTTPReranker`。
+- 新增 `RerankingRetriever`，基于宽召回候选池重排并截断为 `top_k`。
+- reranker 调用失败、未配置或返回异常时，降级返回宽召回前 `top_k`。
+- 外发 documents 前复用 `redact_sensitive_text()`，避免 API Key、token、隐私内容或过长原文进入外部请求与错误日志。
+- 错误日志使用稳定英文 `event`，`message` 保持中文可读，异常保留堆栈但不泄露敏感原文。
+
+**Checkpoint**
+```bash
+pytest tests/test_retrieval_tool.py tests/test_security_compliance.py
+```
+
+## Phase 4 — 混合检索闭环
+
+**修改文件**
+- `app/tools/retrieval.py`
+- `scripts/ingest_knowledge.py`
+- `tests/test_retrieval_tool.py`
+- `tests/test_ingest_knowledge.py`
+
+**实施内容**
+- 新增 `SparseEncoder` 协议、`LocalLexicalSparseEncoder`、`ServiceSparseEncoder`、`FakeSparseEncoder`。
+- `_QdrantHTTPClient` 增加 `query_hybrid()`，请求 `/points/query`，使用 dense + sparse prefetch 和 RRF。
+- hybrid 查询必须继续透传 `as_of` 和 Qdrant time filter。
+- `_QdrantHTTPUpsertClient.ensure_collection()` 按开关支持 named dense + sparse schema。
+- `ingest_knowledge()` 在开启 hybrid 时写入 `{"dense": ..., "sparse": ...}` 命名向量。
+- 默认 dense-only 路径不变，不能污染现有未命名稠密 Qdrant 集合。
+
+**Checkpoint**
+```bash
+pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py
+```
+
+## Phase 5 — 查询改写闭环
+
+**修改文件**
+- `app/tools/retrieval.py`
+- `tests/test_retrieval_tool.py`
+
+**实施内容**
+- 新增 `QueryRewriter` 协议、fake 实现、HTTP 或 LLM 兼容实现。
+- 新增 `MultiQueryRetriever`。
+- expand 失败、未配置或返回空结果时降级为 `[query]`。
+- 合并去重 key 使用 `(document_id, locator, content[:64])`。
+- 与重排组合时，先改写合并，再重排。
+- 查询改写不改变 `QANode` 调用方式。
+
+**Checkpoint**
 ```bash
 pytest tests/test_retrieval_tool.py
-python -m compileall app
 ```
 
-## Phase 4 — 知识文件接入
+## Phase 6 — build_retriever 装配与组合测试
 
 **修改文件**
-- `knowledge/procedure/专利.md`
+- `app/tools/retrieval.py`
+- `tests/test_retrieval_tool.py`
+- `tests/test_qa_node.py`
 
 **实施内容**
-- 创建 procedure 知识目录与专利指南最小代表样例。
-- H2 表示事项，H3 表示小节。
-- 最小样例覆盖费用、材料、渠道、时限等办理类典型小节。
-- 完整 28 个事项或完整外部来源文档需用户确认后再补齐。
+- 扩展 `build_retriever(settings=None, embedding_client=None, qdrant_client=None, reranker=None, sparse_encoder=None, query_rewriter=None)`。
+- 装配顺序固定为：base/hybrid -> `MultiQueryRetriever` -> `RerankingRetriever`。
+- 关闭态与当前行为一致。
+- 支持通过 fake reranker、fake sparse encoder、fake query rewriter 做组合测试，不连接真实 Qdrant、rerank、LLM rewrite 或 sparse service。
 
-**Checkpoint D**
-- `load_chunks("knowledge")` 能读取 `knowledge/procedure/专利.md`。
-- locator 包含事项名和规范化小节名。
+**Checkpoint**
+```bash
+pytest tests/test_retrieval_tool.py tests/test_qa_node.py
+```
 
-## Phase 5 — 项目级验收
-
-**修改文件**
-- 无固定文件，按测试结果回修。
+## Phase 7 — 项目级验收
 
 **验收命令**
 ```bash
-pytest tests/test_ingest_procedure.py tests/test_ingest_knowledge.py tests/test_retrieval_tool.py
+pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py tests/test_core_config_logging.py tests/test_security_compliance.py tests/test_qa_node.py
 pytest
 python -m compileall app tests scripts
+python -m scripts.eval.ragas_eval
 ```
 
-## 边界
+## 风险与边界
 
-- 不改 QA 主流程和 `RetrievalResult` 基础结构。
-- 不新增外部依赖。
-- 不连接真实 Qdrant / embedding 服务。
-- 不提交完整大体积指南内容，除非用户确认。
-- 不让 procedure 文本中的“第X条”进入 law locator 正则。
-- 不把 procedure 加入 law 时效字段或法规时间过滤。
+- 不改 `QANode._retrieve`。
+- 不默认开启重排、混合检索或查询改写。
+- 不覆盖现有未命名稠密 Qdrant 集合。
+- 不连接真实 Qdrant、rerank、LLM rewrite、sparse service，除非用户后续明确要求。
+- 不硬编码 API Key、token、endpoint。
+- 不让增强能力异常打挂基础检索。
+- 不新增文档之外的大范围重构。
+- 配置项保持通用作用域，Node/模块自行决定是否继承或覆盖。
+- 混合检索只在新集合或明确 hybrid schema 下启用，避免与既有 dense-only 集合互相污染。

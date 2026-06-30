@@ -114,9 +114,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_RERANK_API_KEY", "rerank-secret")
     monkeypatch.setenv("PAGENT_RERANK_TOP_K", "4")
     monkeypatch.setenv("PAGENT_RETRIEVAL_USE_HYBRID", "true")
-    monkeypatch.setenv("PAGENT_SPARSE_ENCODER", "service")
+    monkeypatch.setenv("PAGENT_SPARSE_ENCODER", "fastembed")
     monkeypatch.setenv("PAGENT_SPARSE_BASE_URL", "https://sparse.example.test")
-    monkeypatch.setenv("PAGENT_SPARSE_MODEL", "sparse-model")
+    monkeypatch.setenv("PAGENT_SPARSE_MODEL", "Qdrant/bm42-all-minilm-l6-v2-attentions")
     monkeypatch.setenv("PAGENT_HYBRID_FUSION", "rrf")
     monkeypatch.setenv("PAGENT_RETRIEVAL_USE_QUERY_REWRITE", "true")
     monkeypatch.setenv("PAGENT_QUERY_REWRITE_MODE", "hyde")
@@ -163,9 +163,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.rerank_api_key == "rerank-secret"
     assert settings.rerank_top_k == 4
     assert settings.retrieval_use_hybrid is True
-    assert settings.sparse_encoder == "service"
+    assert settings.sparse_encoder == "fastembed"
     assert settings.sparse_base_url == "https://sparse.example.test"
-    assert settings.sparse_model == "sparse-model"
+    assert settings.sparse_model == "Qdrant/bm42-all-minilm-l6-v2-attentions"
     assert settings.hybrid_fusion == "rrf"
     assert settings.retrieval_use_query_rewrite is True
     assert settings.query_rewrite_mode == "hyde"
@@ -222,6 +222,9 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["sparse_base_url"] is None
     assert public_values["sparse_model"] == ""
     assert public_values["hybrid_fusion"] == "rrf"
+    fastembed_values = Settings(sparse_encoder="fastembed", sparse_model="Qdrant/bm25").to_public_dict()
+    assert fastembed_values["sparse_encoder"] == "fastembed"
+    assert fastembed_values["sparse_model"] == "Qdrant/bm25"
     assert public_values["retrieval_use_query_rewrite"] == "False"
     assert public_values["query_rewrite_mode"] == "multi"
     assert public_values["query_rewrite_count"] == "3"

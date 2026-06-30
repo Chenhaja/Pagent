@@ -30,14 +30,14 @@
 
 ## 5. 建立配置与公开配置测试
 
-- [ ] 目标：扩充 `tests/test_core_config_logging.py`，验证 `PAGENT_SPARSE_ENCODER=fastembed` 与 `PAGENT_SPARSE_MODEL` 覆盖行为。
+- [x] 目标：扩充 `tests/test_core_config_logging.py`，验证 `PAGENT_SPARSE_ENCODER=fastembed` 与 `PAGENT_SPARSE_MODEL` 覆盖行为。
 - 依赖：任务 4。
 - 验收标准：环境变量可读到 `fastembed`；`sparse_model` 可读到 FastEmbed 模型名；`to_public_dict()` 包含非敏感 sparse 配置；无新增敏感字段暴露。
 - 验证命令：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
 
 ## 6. 标注 FastEmbed 可选依赖
 
-- [ ] 目标：更新 `requirements.txt`，以注释形式标注 `fastembed` 为可选依赖。
+- [x] 目标：更新 `requirements.txt`，以注释形式标注 `fastembed` 为可选依赖。
 - 依赖：任务 5。
 - 验收标准：默认安装/测试不强制安装 fastembed；说明仅启用 `PAGENT_SPARSE_ENCODER=fastembed` 时需要安装；不提交模型权重。
 - 验证命令：人工读取 `requirements.txt`；`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_core_config_logging.py`

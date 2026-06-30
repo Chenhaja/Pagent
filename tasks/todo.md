@@ -93,7 +93,7 @@
 
 ## 14. 运行项目级验收
 
-- [ ] 目标：运行 R4.3 目标测试、全量回归、编译检查和 ragas 评估入口。
+- [x] 目标：运行 R4.3 目标测试、全量回归、编译检查和 ragas 评估入口。
 - 依赖：任务 13。
 - 验收标准：目标测试通过；全量 `pytest` 通过；`compileall` 通过；`python -m scripts.eval.ragas_eval` 可运行；未引入真实网络依赖、真实 API Key 或敏感内容。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py tests/test_core_config_logging.py tests/test_security_compliance.py tests/test_qa_node.py && pytest && python -m compileall app tests scripts && python -m scripts.eval.ragas_eval`

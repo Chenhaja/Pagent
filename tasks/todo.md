@@ -72,14 +72,14 @@
 
 ## 11. 运行目标回归
 
-- [ ] 目标：运行 R4.6 目标测试，确认适配器、工厂、配置和入库一致性闭环通过。
+- [x] 目标：运行 R4.6 目标测试，确认适配器、工厂、配置和入库一致性闭环通过。
 - 依赖：任务 10。
 - 验收标准：目标测试全部通过；无真实网络、无模型下载、无 fastembed 强依赖。
 - 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_retrieval_tool.py tests/test_ingest_knowledge.py tests/test_core_config_logging.py`
 
 ## 12. 运行项目级验收
 
-- [ ] 目标：运行全量测试与编译检查。
+- [x] 目标：运行全量测试与编译检查。
 - 依赖：任务 11。
 - 验收标准：全量 `pytest` 通过；`compileall` 通过；未引入敏感信息、真实服务调用或模型权重。
 - 验证命令：`conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests scripts`

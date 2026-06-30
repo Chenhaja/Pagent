@@ -63,11 +63,11 @@ def _empty_sparse_vector() -> dict[str, list[int] | list[float]]:
 def _normalize_sparse_result(result: Any) -> dict[str, list[int] | list[float]]:
     """将 FastEmbed sparse 输出归一为 Qdrant sparse dict。"""
     if isinstance(result, dict):
-        indices = result.get("indices") or []
-        values = result.get("values") or []
+        indices = result.get("indices")
+        values = result.get("values")
     else:
-        indices = getattr(result, "indices", []) or []
-        values = getattr(result, "values", []) or []
-    if len(indices) != len(values):
+        indices = getattr(result, "indices", None)
+        values = getattr(result, "values", None)
+    if indices is None or values is None or len(indices) != len(values):
         return _empty_sparse_vector()
     return {"indices": [int(index) for index in indices], "values": [float(value) for value in values]}

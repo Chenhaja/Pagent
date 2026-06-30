@@ -9,6 +9,22 @@ class FakeSparseResult:
         self.values = values
 
 
+class FakeArrayLike:
+    """测试用模拟 numpy array 的数组。"""
+
+    def __init__(self, values) -> None:
+        self.values = values
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def __bool__(self) -> bool:
+        raise ValueError("The truth value of an array with more than one element is ambiguous")
+
+
 class FakeFastEmbedModel:
     """测试用 FastEmbed 模型。"""
 
@@ -70,6 +86,14 @@ def test_fastembed_sparse_encoder_converts_dict_output() -> None:
     encoder = FastEmbedSparseEncoder(model=model)
 
     assert encoder.encode("新颖性") == {"indices": [7], "values": [0.75]}
+
+
+def test_fastembed_sparse_encoder_converts_array_like_output() -> None:
+    """FastEmbed sparse 适配器应转换 numpy array 类输出。"""
+    result = FakeSparseResult(FakeArrayLike([3, 5]), FakeArrayLike([0.3, 0.5]))
+    encoder = FastEmbedSparseEncoder(model=FakeFastEmbedModel(result))
+
+    assert encoder.encode("创造性") == {"indices": [3, 5], "values": [0.3, 0.5]}
 
 
 def test_fastembed_sparse_encoder_returns_empty_when_model_load_fails() -> None:

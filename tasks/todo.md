@@ -2,28 +2,28 @@
 
 ## 1. 建立 FastEmbed 适配器测试
 
-- [ ] 目标：新增 `tests/test_sparse_encoders.py`，用 fake model / monkeypatch 锁定 FastEmbed 适配器输出、默认模型和失败降级行为。
+- [x] 目标：新增 `tests/test_sparse_encoders.py`，用 fake model / monkeypatch 锁定 FastEmbed 适配器输出、默认模型和失败降级行为。
 - 依赖：`SPEC.md`、`tasks/plan.md`。
 - 验收标准：覆盖 fake 正常输出、默认 `Qdrant/bm25`、模型加载异常、编码异常、输出格式 `indices` / `values`；测试不触网、不下载模型。
 - 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py`
 
 ## 2. 实现 FastEmbed 适配器
 
-- [ ] 目标：新增 `app/tools/adapters/fastembed_sparse.py`，实现 `FastEmbedSparseEncoder`。
+- [x] 目标：新增 `app/tools/adapters/fastembed_sparse.py`，实现 `FastEmbedSparseEncoder`。
 - 依赖：任务 1。
 - 验收标准：公共类/方法有中文 Google 风格 docstring；`fastembed` 只在适配器初始化路径延迟导入；`encode()` 返回 `{"indices": list[int], "values": list[float]}`；加载/编码失败返回空向量。
 - 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py`
 
 ## 3. 建立工厂分发测试
 
-- [ ] 目标：扩充 `tests/test_retrieval_tool.py`，锁定 `_build_sparse_encoder()` 对 `fastembed` 的分发和默认路径隔离。
+- [x] 目标：扩充 `tests/test_retrieval_tool.py`，锁定 `_build_sparse_encoder()` 对 `fastembed` 的分发和默认路径隔离。
 - 依赖：任务 2。
 - 验收标准：`retrieval_use_hybrid=false` 返回 `None`；`local` / 未知值走 `LocalLexicalSparseEncoder`；`service` 走 `ServiceSparseEncoder`；`fastembed` 走 `FastEmbedSparseEncoder`；local/service/dense-only 路径不要求安装 fastembed。
 - 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_retrieval_tool.py`
 
 ## 4. 接入 `_build_sparse_encoder()` fastembed 分支
 
-- [ ] 目标：在 `app/tools/retrieval.py` 为 `_build_sparse_encoder()` 增加 `sparse_encoder == "fastembed"` 分支。
+- [x] 目标：在 `app/tools/retrieval.py` 为 `_build_sparse_encoder()` 增加 `sparse_encoder == "fastembed"` 分支。
 - 依赖：任务 3。
 - 验收标准：`build_retriever()` 在 hybrid + fastembed 配置下可装配 FastEmbed sparse encoder；`local` / `service` 行为不变；`retrieval.py` 不顶层导入 `fastembed`。
 - 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_retrieval_tool.py`

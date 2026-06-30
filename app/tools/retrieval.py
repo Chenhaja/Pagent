@@ -856,6 +856,10 @@ def _build_sparse_encoder(settings: Settings) -> SparseEncoder | None:
         return None
     if settings.sparse_encoder == "service":
         return ServiceSparseEncoder(settings)
+    if settings.sparse_encoder == "fastembed":
+        from app.tools.adapters.fastembed_sparse import FastEmbedSparseEncoder
+
+        return FastEmbedSparseEncoder(model_name=settings.sparse_model)
     return LocalLexicalSparseEncoder()
 
 

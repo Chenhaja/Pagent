@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, _QdrantHTTPClient, build_retriever
+from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LocalLexicalSparseEncoder, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, ServiceSparseEncoder, _QdrantHTTPClient, _build_sparse_encoder, build_retriever
 
 
 class FakeQdrantHit:
@@ -450,6 +450,32 @@ def test_http_query_rewriter_builds_request() -> None:
     assert captured["url"] == "https://llm.example.test/v1/query-rewrite"
     assert captured["timeout"] == 6
     assert captured["payload"] == {"model": "rewrite-model", "query": "创造性要求", "mode": "hyde", "count": 2}
+
+
+def test_build_sparse_encoder_dispatches_configured_backends() -> None:
+    """稀疏编码器工厂应按配置分发后端。"""
+    assert _build_sparse_encoder(Settings(retrieval_use_hybrid=False)) is None
+    assert isinstance(_build_sparse_encoder(Settings(retrieval_use_hybrid=True, sparse_encoder="local")), LocalLexicalSparseEncoder)
+    assert isinstance(_build_sparse_encoder(Settings(retrieval_use_hybrid=True, sparse_encoder="unknown")), LocalLexicalSparseEncoder)
+    assert isinstance(_build_sparse_encoder(Settings(retrieval_use_hybrid=True, sparse_encoder="service")), ServiceSparseEncoder)
+
+
+def test_build_sparse_encoder_dispatches_fastembed_backend(monkeypatch) -> None:
+    """fastembed 模式应延迟导入并返回 FastEmbed 适配器。"""
+    created = {}
+
+    class FakeFastEmbedSparseEncoder:
+        """测试用 FastEmbed sparse 适配器。"""
+
+        def __init__(self, model_name: str | None = None) -> None:
+            created["model_name"] = model_name
+
+    monkeypatch.setattr("app.tools.adapters.fastembed_sparse.FastEmbedSparseEncoder", FakeFastEmbedSparseEncoder)
+
+    encoder = _build_sparse_encoder(Settings(retrieval_use_hybrid=True, sparse_encoder="fastembed", sparse_model="Qdrant/bm42"))
+
+    assert isinstance(encoder, FakeFastEmbedSparseEncoder)
+    assert created == {"model_name": "Qdrant/bm42"}
 
 
 def test_build_retriever_returns_local_backend_by_default() -> None:

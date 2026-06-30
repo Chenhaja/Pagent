@@ -11,7 +11,7 @@ from urllib import error
 
 from app.core.config import Settings, get_settings
 from app.tools.embeddings import EmbeddingClient, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import LocalLexicalSparseEncoder, SparseEncoder, _QdrantHTTPClient
+from app.tools.retrieval import SparseEncoder, _QdrantHTTPClient, _build_sparse_encoder
 
 
 @dataclass(frozen=True)
@@ -147,7 +147,7 @@ def ingest_knowledge(
         已构造的 point 列表;空目录返回空列表。
     """
     resolved_settings = settings or get_settings()
-    resolved_sparse_encoder = sparse_encoder or LocalLexicalSparseEncoder()
+    resolved_sparse_encoder = sparse_encoder or _build_sparse_encoder(resolved_settings)
     if vector_size is not None and hasattr(qdrant_client, "ensure_collection"):
         if settings is None:
             qdrant_client.ensure_collection(collection_name=collection_name, vector_size=vector_size)

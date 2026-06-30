@@ -44,28 +44,28 @@
 
 ## 7. 建立 hybrid 空 sparse 降级测试
 
-- [ ] 目标：扩充 `tests/test_retrieval_tool.py`，证明 FastEmbed 编码失败或返回空 sparse 时检索不抛异常。
+- [x] 目标：扩充 `tests/test_retrieval_tool.py`，证明 FastEmbed 编码失败或返回空 sparse 时检索不抛异常。
 - 依赖：任务 4。
 - 验收标准：hybrid 请求可携带 `{"indices": [], "values": []}`；`as_of` time filter 仍透传；Qdrant 异常时保持安全返回；dense-only 路径不受影响。
 - 验证命令：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
 
 ## 8. 补齐 hybrid 查询降级实现
 
-- [ ] 目标：如任务 7 暴露缺口，最小调整 `QdrantRetriever` 或相关逻辑以满足降级要求。
+- [x] 目标：如任务 7 暴露缺口，最小调整 `QdrantRetriever` 或相关逻辑以满足降级要求。
 - 依赖：任务 7。
 - 验收标准：sparse 编码失败不抛到 QA；hybrid 请求格式不变；`query_hybrid` RRF 契约不变；已有 hybrid 测试继续通过。
 - 验证命令：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
 
 ## 9. 建立入库一致性测试
 
-- [ ] 目标：扩充 `tests/test_ingest_knowledge.py`，锁定 ingest 默认 sparse encoder 与 query 工厂同源。
+- [x] 目标：扩充 `tests/test_ingest_knowledge.py`，锁定 ingest 默认 sparse encoder 与 query 工厂同源。
 - 依赖：任务 4。
 - 验收标准：hybrid + `sparse_encoder="fastembed"` 且未显式注入 sparse encoder 时，通过 monkeypatch fake 工厂确认 ingest 使用 `_build_sparse_encoder()`；显式注入 `FakeSparseEncoder` 时仍优先使用注入对象；point vector 格式不变。
 - 验证命令：`conda run -n autoGLM pytest tests/test_ingest_knowledge.py`
 
 ## 10. 实现入库同源 sparse encoder 与配置记录
 
-- [ ] 目标：调整 `scripts/ingest_knowledge.py`，hybrid 默认 sparse encoder 使用与检索侧同源的工厂，并记录 sparse 配置。
+- [x] 目标：调整 `scripts/ingest_knowledge.py`，hybrid 默认 sparse encoder 使用与检索侧同源的工厂，并记录 sparse 配置。
 - 依赖：任务 9。
 - 验收标准：默认 hybrid 入库不再固定使用 `LocalLexicalSparseEncoder()`；`sparse_encoder` 显式注入优先级不变；入库日志或可测试记录体现 `sparse_encoder` / `sparse_model`；不改变业务 payload schema。
 - 验证命令：`conda run -n autoGLM pytest tests/test_ingest_knowledge.py tests/test_retrieval_tool.py`

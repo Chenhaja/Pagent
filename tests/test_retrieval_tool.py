@@ -317,6 +317,21 @@ def test_qdrant_http_client_builds_hybrid_query_request() -> None:
     assert hits[0].score == 0.8
 
 
+def test_qdrant_retriever_allows_empty_sparse_vector_in_hybrid_query() -> None:
+    """hybrid sparse 为空时仍应携带 dense、空 sparse 和时间过滤。"""
+    qdrant = FakeQdrantClient([FakeQdrantHit(payload={"content": "创造性", "source": "local://a", "document_id": "a"}, score=0.9)])
+    sparse_encoder = FakeSparseEncoder({"indices": [], "values": []})
+    retriever = QdrantRetriever("patent_kb_hybrid", FakeEmbedding([0.1]), qdrant, settings=Settings(retrieval_use_hybrid=True), sparse_encoder=sparse_encoder)
+
+    results = retriever.search("创造性", top_k=1, fetch_k=3, as_of="2020-01-01")
+
+    assert [result.provenance["document_id"] for result in results] == ["a"]
+    assert qdrant.calls[0]["dense_vector"] == [0.1]
+    assert qdrant.calls[0]["sparse_vector"] == {"indices": [], "values": []}
+    assert qdrant.calls[0]["limit"] == 3
+    assert {"key": "effective_date", "range": {"lte": "2020-01-01"}} in qdrant.calls[0]["query_filter"]["should"][1]["must"]
+
+
 def test_qdrant_retriever_returns_empty_when_dependencies_fail() -> None:
     """Qdrant 检索器依赖失败时应返回空列表。"""
     assert QdrantRetriever("patent_kb", RaisingEmbedding(), FakeQdrantClient()).search("问题") == []

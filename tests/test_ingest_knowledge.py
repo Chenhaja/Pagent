@@ -161,6 +161,33 @@ def test_ingest_knowledge_writes_hybrid_vectors_when_enabled(tmp_path) -> None:
     assert sparse_encoder.calls == ["第22条\n授予专利权的发明应具备创造性。"]
 
 
+def test_ingest_knowledge_uses_sparse_factory_when_hybrid_enabled(tmp_path, monkeypatch) -> None:
+    """hybrid 入库未显式注入 sparse 时应使用检索侧同源工厂。"""
+    (tmp_path / "law").mkdir()
+    (tmp_path / "law" / "patent_law.md").write_text("第22条\n授予专利权的发明应具备创造性。", encoding="utf-8")
+    sparse_encoder = FakeSparseEncoder({"indices": [8], "values": [0.8]})
+    factory_calls = []
+
+    def fake_build_sparse_encoder(settings):
+        """记录配置并返回 fake sparse encoder。"""
+        factory_calls.append(settings)
+        return sparse_encoder
+
+    monkeypatch.setattr("scripts.ingest_knowledge._build_sparse_encoder", fake_build_sparse_encoder)
+    settings = Settings(retrieval_use_hybrid=True, sparse_encoder="fastembed", sparse_model="Qdrant/bm25")
+
+    points = ingest_knowledge(
+        tmp_path,
+        collection_name="patent_kb_hybrid",
+        embedding_client=FakeEmbedding(),
+        qdrant_client=FakeQdrant(),
+        settings=settings,
+    )
+
+    assert factory_calls == [settings]
+    assert points[0]["vector"] == {"dense": [0.1, 0.2], "sparse": {"indices": [8], "values": [0.8]}}
+
+
 def test_ingest_knowledge_empty_directory_is_safe(tmp_path) -> None:
     """空语料目录应安全退出。"""
     embedding = FakeEmbedding()

@@ -691,6 +691,165 @@ class RerankingRetriever:
         return self.inner.recall(query, fetch_k, as_of)
 
 
+class QueryRewriter(Protocol):
+    """查询改写器协议。
+
+    Returns:
+        支持将单个 query 扩展为多个检索 query 的组件。
+    """
+
+    def expand(self, query: str) -> list[str]:
+        """扩展查询。
+
+        Args:
+            query: 原始查询。
+
+        Returns:
+            改写后的查询列表。
+        """
+        ...
+
+
+class FakeQueryRewriter:
+    """测试用查询改写器。
+
+    Args:
+        queries: 固定返回的改写查询。
+
+    Returns:
+        可预测输出的查询改写器。
+    """
+
+    def __init__(self, queries: list[str] | None = None) -> None:
+        self.queries = queries or []
+        self.calls = []
+
+    def expand(self, query: str) -> list[str]:
+        """记录 query 并返回固定改写式。
+
+        Args:
+            query: 原始查询。
+
+        Returns:
+            固定改写查询列表。
+        """
+        self.calls.append(query)
+        return self.queries
+
+
+class HTTPQueryRewriter:
+    """HTTP 查询改写器。
+
+    Args:
+        settings: 应用配置。
+        urlopen: 可注入 HTTP 调用函数。
+
+    Returns:
+        调用外部服务生成改写式的组件。
+    """
+
+    def __init__(self, settings: Settings, urlopen: Any | None = None) -> None:
+        self.settings = settings
+        self.urlopen = urlopen or request.urlopen
+
+    def expand(self, query: str) -> list[str]:
+        """调用外部服务扩展查询。
+
+        Args:
+            query: 原始查询。
+
+        Returns:
+            改写查询列表;未配置时返回空列表。
+        """
+        if not self.settings.llm_base_url or not self.settings.llm_model:
+            return []
+        payload = {
+            "model": self.settings.llm_model,
+            "query": query,
+            "mode": self.settings.query_rewrite_mode,
+            "count": self.settings.query_rewrite_count,
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.settings.llm_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
+        http_request = request.Request(
+            url=f"{self.settings.llm_base_url.rstrip('/')}/query-rewrite",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with self.urlopen(http_request, timeout=self.settings.retrieval_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+        return [str(item) for item in response_payload.get("queries", []) if str(item).strip()]
+
+
+class MultiQueryRetriever:
+    """多查询检索包装器。
+
+    Args:
+        inner: 内层候选召回器。
+        query_rewriter: 查询改写器。
+        settings: 应用配置。
+
+    Returns:
+        对多个改写 query 召回并合并去重的检索器。
+    """
+
+    def __init__(self, inner: Retriever, query_rewriter: QueryRewriter, settings: Settings | None = None) -> None:
+        self.inner = inner
+        self.query_rewriter = query_rewriter
+        self.settings = settings or get_settings()
+
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None, fetch_k: int | None = None) -> list[RetrievalResult]:
+        """执行多查询召回并返回截断结果。
+
+        Args:
+            query: 原始查询。
+            top_k: 最多返回结果数。
+            as_of: 可选历史追溯日期。
+            fetch_k: 可选候选召回数量。
+
+        Returns:
+            合并去重后的检索结果。
+        """
+        return self.recall(query, fetch_k or self.settings.retrieval_fetch_k, as_of)[:top_k]
+
+    def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:
+        """召回多个改写 query 的候选并去重。
+
+        Args:
+            query: 原始查询。
+            fetch_k: 每个 query 的候选召回数量。
+            as_of: 可选历史追溯日期。
+
+        Returns:
+            合并去重后的候选列表。
+        """
+        queries = self._expand_queries(query)
+        merged: list[RetrievalResult] = []
+        seen = set()
+        for item in queries:
+            for result in self.inner.recall(item, fetch_k, as_of):
+                key = (
+                    result.provenance.get("document_id"),
+                    result.provenance.get("locator"),
+                    result.content[:64],
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(result)
+        return merged
+
+    def _expand_queries(self, query: str) -> list[str]:
+        """安全扩展查询,失败时回退原始 query。"""
+        try:
+            queries = [item for item in self.query_rewriter.expand(query) if item.strip()]
+        except Exception:
+            return [query]
+        return queries or [query]
+
+
 def build_retriever(
     settings: Settings | None = None,
     embedding_client: EmbeddingClient | None = None,

@@ -72,14 +72,14 @@
 
 ## 11. 建立查询改写测试
 
-- [ ] 目标：补充 query rewrite 与 multi-query 合并测试。
+- [x] 目标：补充 query rewrite 与 multi-query 合并测试。
 - 依赖：任务 6。
 - 验收标准：覆盖 expand 失败降级为 `[query]`、多查询结果合并、按 `(document_id, locator, content[:64])` 去重、与重排组合时先改写合并再重排。
 - 验证命令：`pytest tests/test_retrieval_tool.py`
 
 ## 12. 实现查询改写闭环
 
-- [ ] 目标：新增 `QueryRewriter` 协议、fake / HTTP 或 LLM 兼容实现与 `MultiQueryRetriever`。
+- [x] 目标：新增 `QueryRewriter` 协议、fake / HTTP 或 LLM 兼容实现与 `MultiQueryRetriever`。
 - 依赖：任务 11。
 - 验收标准：`MultiQueryRetriever` 可独立启用；未配置或失败时降级为原始 query；不改变 `QANode` 调用方式。
 - 验证命令：`pytest tests/test_retrieval_tool.py`

@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import FakeReranker, FakeSparseEncoder, HTTPReranker, LocalRetrievalTool, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, _QdrantHTTPClient, build_retriever
+from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, _QdrantHTTPClient, build_retriever
 
 
 class FakeQdrantHit:
@@ -68,6 +68,14 @@ class RaisingReranker:
     def rerank(self, query: str, documents: list[RetrievalResult], top_n: int | None = None) -> list[RetrievalResult]:
         """模拟 rerank 失败。"""
         raise RuntimeError("rerank failed sk-secret")
+
+
+class RaisingQueryRewriter:
+    """测试用异常查询改写器。"""
+
+    def expand(self, query: str) -> list[str]:
+        """模拟查询改写失败。"""
+        raise RuntimeError("rewrite failed")
 
 
 class FakeHTTPResponse:
@@ -387,6 +395,61 @@ def test_http_reranker_redacts_documents_and_builds_request() -> None:
     assert captured["payload"] == {"model": "rerank-model", "query": "问题", "documents": ["普通文本", "包含 [REDACTED] 的文本"], "top_n": 2}
     assert [result.provenance["document_id"] for result in results] == ["b", "a"]
     assert [result.similarity for result in results] == [0.9, 0.4]
+
+
+def test_fake_query_rewriter_returns_configured_queries() -> None:
+    """Fake query rewriter 应返回配置好的改写式。"""
+    rewriter = FakeQueryRewriter(["创造性", "非显而易见性"])
+
+    assert rewriter.expand("创造性要求") == ["创造性", "非显而易见性"]
+    assert rewriter.calls == ["创造性要求"]
+
+
+def test_multi_query_retriever_expands_merges_and_deduplicates() -> None:
+    """多查询检索应对改写式分别召回并按 key 去重。"""
+    inner = FakeInnerRetriever(
+        [
+            RetrievalResult(content="重复内容" * 10, provenance={"document_id": "a", "locator": "第1条"}),
+            RetrievalResult(content="唯一内容", provenance={"document_id": "b", "locator": "第2条"}),
+        ]
+    )
+    rewriter = FakeQueryRewriter(["创造性", "非显而易见性"])
+
+    results = MultiQueryRetriever(inner, rewriter, settings=Settings(retrieval_fetch_k=2)).search("创造性要求", top_k=3, as_of="2020-01-01")
+
+    assert inner.calls == [
+        {"method": "recall", "query": "创造性", "fetch_k": 2, "as_of": "2020-01-01"},
+        {"method": "recall", "query": "非显而易见性", "fetch_k": 2, "as_of": "2020-01-01"},
+    ]
+    assert [result.provenance["document_id"] for result in results] == ["a", "b"]
+
+
+def test_multi_query_retriever_falls_back_to_original_query_on_expand_error() -> None:
+    """查询改写失败时应降级为原始 query。"""
+    inner = FakeInnerRetriever([RetrievalResult(content="A", provenance={"document_id": "a"})])
+
+    results = MultiQueryRetriever(inner, RaisingQueryRewriter(), settings=Settings(retrieval_fetch_k=2)).search("原始问题", top_k=1)
+
+    assert inner.calls == [{"method": "recall", "query": "原始问题", "fetch_k": 2, "as_of": None}]
+    assert [result.provenance["document_id"] for result in results] == ["a"]
+
+
+def test_http_query_rewriter_builds_request() -> None:
+    """HTTP query rewriter 应按配置请求改写服务。"""
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeHTTPResponse({"queries": ["创造性", "非显而易见性"]})
+
+    rewriter = HTTPQueryRewriter(Settings(llm_base_url="https://llm.example.test/v1", llm_model="rewrite-model", query_rewrite_mode="hyde", query_rewrite_count=2, retrieval_timeout_seconds=6), urlopen=fake_urlopen)
+
+    assert rewriter.expand("创造性要求") == ["创造性", "非显而易见性"]
+    assert captured["url"] == "https://llm.example.test/v1/query-rewrite"
+    assert captured["timeout"] == 6
+    assert captured["payload"] == {"model": "rewrite-model", "query": "创造性要求", "mode": "hyde", "count": 2}
 
 
 def test_build_retriever_returns_local_backend_by_default() -> None:

@@ -1,3 +1,17 @@
+## 开发环境
+
+### 环境约定
+- 本项目使用 conda 环境 `autoGLM`,所有 Python / pytest / 脚本命令都必须在该环境下运行。
+- 依赖统一记录在 `requirements.txt`,新增依赖需同步更新该文件。
+
+### 命令执行规范
+- 每条命令都用 `conda run -n autoGLM <command>` 自带环境,不要依赖前一条 `conda activate` 的状态(各命令为独立子进程,激活状态不保证保留)。
+- 推荐:
+  - `conda run -n autoGLM pytest tests/test_retrieval_tool.py`
+  - `conda run -n autoGLM pytest`
+  - `conda run -n autoGLM python -m compileall app tests scripts`
+- 避免:先单独 `conda activate autoGLM` 再分行执行命令。
+
 ## Prompt 编写规范
 
 ### R1. 结构:六要素必须齐全

@@ -196,6 +196,40 @@ def test_qdrant_retriever_maps_procedure_provenance() -> None:
     ]
 
 
+def test_qdrant_retriever_uses_fetch_k_for_candidate_recall() -> None:
+    """Qdrant 宽召回应使用 fetch_k 扩大候选池并保留 as_of 过滤。"""
+    embedding = FakeEmbedding(vector=[0.1])
+    qdrant = FakeQdrantClient(
+        hits=[
+            FakeQdrantHit(payload={"content": "创造性 A", "source": "local://a", "document_id": "a"}, score=0.9),
+            FakeQdrantHit(payload={"content": "创造性 B", "source": "local://b", "document_id": "b"}, score=0.8),
+            FakeQdrantHit(payload={"content": "创造性 C", "source": "local://c", "document_id": "c"}, score=0.7),
+        ]
+    )
+    retriever = QdrantRetriever("patent_kb", embedding, qdrant)
+
+    results = retriever.search("创造性", top_k=1, fetch_k=3, as_of="2020-01-01")
+
+    assert [result.provenance["document_id"] for result in results] == ["a"]
+    assert qdrant.calls[0]["limit"] == 3
+    assert {"key": "effective_date", "range": {"lte": "2020-01-01"}} in qdrant.calls[0]["query_filter"]["should"][1]["must"]
+
+
+def test_qdrant_retriever_recall_returns_fetch_k_candidates() -> None:
+    """Qdrant recall 应返回 fetch_k 个候选供后续重排使用。"""
+    qdrant = FakeQdrantClient(
+        hits=[
+            FakeQdrantHit(payload={"content": "创造性 A", "source": "local://a", "document_id": "a"}, score=0.9),
+            FakeQdrantHit(payload={"content": "创造性 B", "source": "local://b", "document_id": "b"}, score=0.8),
+        ]
+    )
+
+    results = QdrantRetriever("patent_kb", FakeEmbedding([0.1]), qdrant).recall("创造性", fetch_k=2)
+
+    assert [result.provenance["document_id"] for result in results] == ["a", "b"]
+    assert qdrant.calls[0]["limit"] == 2
+
+
 def test_qdrant_retriever_returns_empty_when_dependencies_fail() -> None:
     """Qdrant 检索器依赖失败时应返回空列表。"""
     assert QdrantRetriever("patent_kb", RaisingEmbedding(), FakeQdrantClient()).search("问题") == []
@@ -244,6 +278,23 @@ def test_local_retrieval_tool_returns_predictable_results_with_provenance() -> N
             score=2,
         )
     ]
+
+
+def test_local_retrieval_tool_uses_fetch_k_for_candidate_recall() -> None:
+    """本地检索 search 应用 top_k 截断,recall 应用 fetch_k 截断。"""
+    tool = LocalRetrievalTool(
+        documents=[
+            {"id": "doc-1", "text": "创造性 传感器 控制", "source": "local://doc-1"},
+            {"id": "doc-2", "text": "创造性 传感器", "source": "local://doc-2"},
+            {"id": "doc-3", "text": "创造性", "source": "local://doc-3"},
+        ]
+    )
+
+    search_results = tool.search("创造性 传感器 控制", top_k=1, fetch_k=3)
+    recall_results = tool.recall("创造性 传感器 控制", fetch_k=3)
+
+    assert [result.provenance["document_id"] for result in search_results] == ["doc-1"]
+    assert [result.provenance["document_id"] for result in recall_results] == ["doc-1", "doc-2", "doc-3"]
 
 
 def test_local_retrieval_tool_filters_law_by_current_status() -> None:

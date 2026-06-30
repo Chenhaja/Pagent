@@ -49,16 +49,30 @@ class Retriever(Protocol):
         支持按 query 和 top_k 返回检索结果的检索器。
     """
 
-    def search(self, query: str, top_k: int = 3, as_of: str | None = None) -> list[RetrievalResult]:
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None, fetch_k: int | None = None) -> list[RetrievalResult]:
         """检索与 query 相关的知识片段。
 
         Args:
             query: 检索查询文本。
             top_k: 最多返回结果数。
             as_of: 可选历史追溯日期。
+            fetch_k: 可选候选召回数量,供重排或融合使用。
 
         Returns:
             检索结果列表。
+        """
+        ...
+
+    def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:
+        """召回候选结果供后续排序层使用。
+
+        Args:
+            query: 检索查询文本。
+            fetch_k: 候选召回数量。
+            as_of: 可选历史追溯日期。
+
+        Returns:
+            候选检索结果列表。
         """
         ...
 
@@ -219,15 +233,30 @@ class QdrantRetriever:
         self.qdrant_client = qdrant_client
         self.settings = settings or get_settings()
 
-    def search(self, query: str, top_k: int = 3, as_of: str | None = None) -> list[RetrievalResult]:
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None, fetch_k: int | None = None) -> list[RetrievalResult]:
         """执行单轮 Qdrant 向量检索。
 
         Args:
             query: 检索查询文本。
             top_k: 最多返回结果数。
+            as_of: 可选历史追溯日期。
+            fetch_k: 可选候选召回数量,未配置时等于 top_k。
 
         Returns:
             按 Qdrant 相似度排序的检索结果;依赖失败时返回空列表。
+        """
+        return self.recall(query, fetch_k or top_k, as_of)[:top_k]
+
+    def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:
+        """执行 Qdrant 候选召回。
+
+        Args:
+            query: 检索查询文本。
+            fetch_k: 候选召回数量。
+            as_of: 可选历史追溯日期。
+
+        Returns:
+            按 Qdrant 相似度排序的候选结果;依赖失败时返回空列表。
         """
         try:
             query_vector = self.embedding_client.embed(query)
@@ -237,7 +266,7 @@ class QdrantRetriever:
             hits = self.qdrant_client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
-                limit=top_k,
+                limit=fetch_k,
                 query_filter=query_filter,
             )
         except Exception:
@@ -264,7 +293,7 @@ class QdrantRetriever:
                     **_result_time_fields(payload),
                 )
             )
-        return results[:top_k]
+        return results[:fetch_k]
 
 
 class LocalRetrievalTool:
@@ -281,16 +310,30 @@ class LocalRetrievalTool:
         self.documents = documents or []
         self.settings = settings or get_settings()
 
-    def search(self, query: str, top_k: int = 3, as_of: str | None = None) -> list[RetrievalResult]:
+    def search(self, query: str, top_k: int = 3, as_of: str | None = None, fetch_k: int | None = None) -> list[RetrievalResult]:
         """按关键词检索本地文档。
 
         Args:
             query: 检索查询文本。
             top_k: 最多返回结果数。
             as_of: 可选历史追溯日期。
+            fetch_k: 可选候选召回数量,未配置时等于 top_k。
 
         Returns:
             按命中分数降序排列的检索结果列表。
+        """
+        return self.recall(query, fetch_k or top_k, as_of)[:top_k]
+
+    def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:
+        """按关键词召回本地候选文档。
+
+        Args:
+            query: 检索查询文本。
+            fetch_k: 候选召回数量。
+            as_of: 可选历史追溯日期。
+
+        Returns:
+            按命中分数降序排列的候选结果列表。
         """
         keywords = [keyword for keyword in query.split() if keyword]
         results = []
@@ -317,7 +360,7 @@ class LocalRetrievalTool:
                     **_result_time_fields(payload),
                 )
             )
-        return sorted(results, key=lambda result: result.score, reverse=True)[:top_k]
+        return sorted(results, key=lambda result: result.score, reverse=True)[:fetch_k]
 
 
 def build_retriever(

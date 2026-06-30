@@ -30,14 +30,14 @@
 
 ## 5. 建立宽召回测试
 
-- [ ] 目标：补充 `tests/test_retrieval_tool.py` 和 `tests/test_qa_node.py`，锁定宽召回接口与默认行为。
+- [x] 目标：补充 `tests/test_retrieval_tool.py` 和 `tests/test_qa_node.py`，锁定宽召回接口与默认行为。
 - 依赖：任务 4。
 - 验收标准：覆盖 `fetch_k`、`recall`、Qdrant `limit = fetch_k or top_k`、Local 候选截断、`as_of` 和 Qdrant time filter 透传；确认 `QANode` 主流程不改。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`
 
 ## 6. 实现宽召回闭环
 
-- [ ] 目标：扩展 `Retriever.search(..., fetch_k=None)`，并为 Qdrant / Local 检索实现 `recall(query, fetch_k, as_of)`。
+- [x] 目标：扩展 `Retriever.search(..., fetch_k=None)`，并为 Qdrant / Local 检索实现 `recall(query, fetch_k, as_of)`。
 - 依赖：任务 5。
 - 验收标准：默认行为不变；`fetch_k` 仅扩大候选池；时间过滤继续生效；`QANode` 仍只调用 `search(question, top_k=self.top_k)`。
 - 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`

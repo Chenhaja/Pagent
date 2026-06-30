@@ -1,99 +1,85 @@
-# R4.3 Todo
+# R4.6 Todo
 
-## 1. 写入 R4.3 计划文档
+## 1. 建立 FastEmbed 适配器测试
 
-- [x] 目标：生成 `tasks/plan.md`，说明 R4.3 检索质量增强的背景、依赖图、关键文件、实施阶段、checkpoint、风险边界和最终验收命令。
-- 依赖：`SPEC.md`。
-- 验收标准：`tasks/plan.md` 标题为 `R4.3 检索质量增强实施计划`；内容包含依赖图、阶段、checkpoint、风险边界和验收命令。
-- 验证命令：人工读取 `tasks/plan.md`。
+- [ ] 目标：新增 `tests/test_sparse_encoders.py`，用 fake model / monkeypatch 锁定 FastEmbed 适配器输出、默认模型和失败降级行为。
+- 依赖：`SPEC.md`、`tasks/plan.md`。
+- 验收标准：覆盖 fake 正常输出、默认 `Qdrant/bm25`、模型加载异常、编码异常、输出格式 `indices` / `values`；测试不触网、不下载模型。
+- 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py`
 
-## 2. 写入 R4.3 任务清单
+## 2. 实现 FastEmbed 适配器
 
-- [x] 目标：生成 `tasks/todo.md`，按依赖顺序列出可勾选任务。
+- [ ] 目标：新增 `app/tools/adapters/fastembed_sparse.py`，实现 `FastEmbedSparseEncoder`。
 - 依赖：任务 1。
-- 验收标准：`tasks/todo.md` 标题为 `R4.3 Todo`；每项任务包含目标、依赖、验收标准、验证命令。
-- 验证命令：人工读取 `tasks/todo.md`。
+- 验收标准：公共类/方法有中文 Google 风格 docstring；`fastembed` 只在适配器初始化路径延迟导入；`encode()` 返回 `{"indices": list[int], "values": list[float]}`；加载/编码失败返回空向量。
+- 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py`
 
-## 3. 建立配置测试
+## 3. 建立工厂分发测试
 
-- [x] 目标：补充配置与安全测试，先锁定 R4.3 配置默认关闭、环境变量覆盖和敏感项不公开的预期行为。
+- [ ] 目标：扩充 `tests/test_retrieval_tool.py`，锁定 `_build_sparse_encoder()` 对 `fastembed` 的分发和默认路径隔离。
 - 依赖：任务 2。
-- 验收标准：覆盖 `retrieval_fetch_k`、`retrieval_use_rerank`、`rerank_*`、`retrieval_use_hybrid`、`sparse_*`、`hybrid_fusion`、`retrieval_use_query_rewrite`、`query_rewrite_*`；验证默认关闭、env 覆盖、`rerank_api_key` 等敏感项不进入 `to_public_dict()`。
-- 验证命令：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
+- 验收标准：`retrieval_use_hybrid=false` 返回 `None`；`local` / 未知值走 `LocalLexicalSparseEncoder`；`service` 走 `ServiceSparseEncoder`；`fastembed` 走 `FastEmbedSparseEncoder`；local/service/dense-only 路径不要求安装 fastembed。
+- 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_retrieval_tool.py`
 
-## 4. 实现配置基线
+## 4. 接入 `_build_sparse_encoder()` fastembed 分支
 
-- [x] 目标：在 `app/core/config.py` 实现 R4.3 配置项、环境变量读取和公开配置输出。
+- [ ] 目标：在 `app/tools/retrieval.py` 为 `_build_sparse_encoder()` 增加 `sparse_encoder == "fastembed"` 分支。
 - 依赖：任务 3。
-- 验收标准：SPEC 配置项齐全；所有增强默认关闭；`to_public_dict()` 只包含非敏感项；敏感项不进入日志或 trace。
-- 验证命令：`pytest tests/test_core_config_logging.py tests/test_security_compliance.py`
+- 验收标准：`build_retriever()` 在 hybrid + fastembed 配置下可装配 FastEmbed sparse encoder；`local` / `service` 行为不变；`retrieval.py` 不顶层导入 `fastembed`。
+- 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_retrieval_tool.py`
 
-## 5. 建立宽召回测试
+## 5. 建立配置与公开配置测试
 
-- [x] 目标：补充 `tests/test_retrieval_tool.py` 和 `tests/test_qa_node.py`，锁定宽召回接口与默认行为。
+- [ ] 目标：扩充 `tests/test_core_config_logging.py`，验证 `PAGENT_SPARSE_ENCODER=fastembed` 与 `PAGENT_SPARSE_MODEL` 覆盖行为。
 - 依赖：任务 4。
-- 验收标准：覆盖 `fetch_k`、`recall`、Qdrant `limit = fetch_k or top_k`、Local 候选截断、`as_of` 和 Qdrant time filter 透传；确认 `QANode` 主流程不改。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`
+- 验收标准：环境变量可读到 `fastembed`；`sparse_model` 可读到 FastEmbed 模型名；`to_public_dict()` 包含非敏感 sparse 配置；无新增敏感字段暴露。
+- 验证命令：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
 
-## 6. 实现宽召回闭环
+## 6. 标注 FastEmbed 可选依赖
 
-- [x] 目标：扩展 `Retriever.search(..., fetch_k=None)`，并为 Qdrant / Local 检索实现 `recall(query, fetch_k, as_of)`。
+- [ ] 目标：更新 `requirements.txt`，以注释形式标注 `fastembed` 为可选依赖。
 - 依赖：任务 5。
-- 验收标准：默认行为不变；`fetch_k` 仅扩大候选池；时间过滤继续生效；`QANode` 仍只调用 `search(question, top_k=self.top_k)`。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`
+- 验收标准：默认安装/测试不强制安装 fastembed；说明仅启用 `PAGENT_SPARSE_ENCODER=fastembed` 时需要安装；不提交模型权重。
+- 验证命令：人工读取 `requirements.txt`；`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_core_config_logging.py`
 
-## 7. 建立重排测试
+## 7. 建立 hybrid 空 sparse 降级测试
 
-- [x] 目标：补充重排相关单测和安全测试。
-- 依赖：任务 6。
-- 验收标准：覆盖 fake 排序、HTTP 请求体、异常降级、外发 documents 脱敏、外部错误日志脱敏。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_security_compliance.py`
+- [ ] 目标：扩充 `tests/test_retrieval_tool.py`，证明 FastEmbed 编码失败或返回空 sparse 时检索不抛异常。
+- 依赖：任务 4。
+- 验收标准：hybrid 请求可携带 `{"indices": [], "values": []}`；`as_of` time filter 仍透传；Qdrant 异常时保持安全返回；dense-only 路径不受影响。
+- 验证命令：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
 
-## 8. 实现重排闭环
+## 8. 补齐 hybrid 查询降级实现
 
-- [x] 目标：新增 `Reranker` 协议、`FakeReranker`、`HTTPReranker` 与 `RerankingRetriever`。
+- [ ] 目标：如任务 7 暴露缺口，最小调整 `QdrantRetriever` 或相关逻辑以满足降级要求。
 - 依赖：任务 7。
-- 验收标准：`RerankingRetriever` 在宽召回候选池上重排并截断为 `top_k`；reranker 失败时返回宽召回前 `top_k`；外发文本复用 `redact_sensitive_text()`。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_security_compliance.py`
+- 验收标准：sparse 编码失败不抛到 QA；hybrid 请求格式不变；`query_hybrid` RRF 契约不变；已有 hybrid 测试继续通过。
+- 验证命令：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
 
-## 9. 建立混合检索测试
+## 9. 建立入库一致性测试
 
-- [x] 目标：补充 hybrid schema、双向量 point 和 hybrid query 测试。
-- 依赖：任务 6。
-- 验收标准：覆盖 named dense + sparse schema、`{"dense": ..., "sparse": ...}` 双向量 point、`query_hybrid()` 请求体、dense + sparse prefetch、RRF、time filter 透传；默认 dense-only 路径不变。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py`
+- [ ] 目标：扩充 `tests/test_ingest_knowledge.py`，锁定 ingest 默认 sparse encoder 与 query 工厂同源。
+- 依赖：任务 4。
+- 验收标准：hybrid + `sparse_encoder="fastembed"` 且未显式注入 sparse encoder 时，通过 monkeypatch fake 工厂确认 ingest 使用 `_build_sparse_encoder()`；显式注入 `FakeSparseEncoder` 时仍优先使用注入对象；point vector 格式不变。
+- 验证命令：`conda run -n autoGLM pytest tests/test_ingest_knowledge.py`
 
-## 10. 实现混合检索闭环
+## 10. 实现入库同源 sparse encoder 与配置记录
 
-- [x] 目标：新增 sparse encoder 体系，扩展 Qdrant hybrid 查询与入库 schema / point 写入。
+- [ ] 目标：调整 `scripts/ingest_knowledge.py`，hybrid 默认 sparse encoder 使用与检索侧同源的工厂，并记录 sparse 配置。
 - 依赖：任务 9。
-- 验收标准：默认 dense-only 不变；hybrid 开启时支持新集合使用 named dense + sparse schema；不污染现有未命名稠密集合；hybrid 查询继续透传 `as_of` 与 filter。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py`
+- 验收标准：默认 hybrid 入库不再固定使用 `LocalLexicalSparseEncoder()`；`sparse_encoder` 显式注入优先级不变；入库日志或可测试记录体现 `sparse_encoder` / `sparse_model`；不改变业务 payload schema。
+- 验证命令：`conda run -n autoGLM pytest tests/test_ingest_knowledge.py tests/test_retrieval_tool.py`
 
-## 11. 建立查询改写测试
+## 11. 运行目标回归
 
-- [x] 目标：补充 query rewrite 与 multi-query 合并测试。
-- 依赖：任务 6。
-- 验收标准：覆盖 expand 失败降级为 `[query]`、多查询结果合并、按 `(document_id, locator, content[:64])` 去重、与重排组合时先改写合并再重排。
-- 验证命令：`pytest tests/test_retrieval_tool.py`
+- [ ] 目标：运行 R4.6 目标测试，确认适配器、工厂、配置和入库一致性闭环通过。
+- 依赖：任务 10。
+- 验收标准：目标测试全部通过；无真实网络、无模型下载、无 fastembed 强依赖。
+- 验证命令：`conda run -n autoGLM pytest tests/test_sparse_encoders.py tests/test_retrieval_tool.py tests/test_ingest_knowledge.py tests/test_core_config_logging.py`
 
-## 12. 实现查询改写闭环
+## 12. 运行项目级验收
 
-- [x] 目标：新增 `QueryRewriter` 协议、fake / HTTP 或 LLM 兼容实现与 `MultiQueryRetriever`。
+- [ ] 目标：运行全量测试与编译检查。
 - 依赖：任务 11。
-- 验收标准：`MultiQueryRetriever` 可独立启用；未配置或失败时降级为原始 query；不改变 `QANode` 调用方式。
-- 验证命令：`pytest tests/test_retrieval_tool.py`
-
-## 13. 装配 build_retriever
-
-- [x] 目标：扩展 `build_retriever(settings=None, embedding_client=None, qdrant_client=None, reranker=None, sparse_encoder=None, query_rewriter=None)` 并完成组合装配。
-- 依赖：任务 8、任务 10、任务 12。
-- 验收标准：装配顺序为 base/hybrid -> multi-query -> rerank；关闭态与当前行为一致；组合测试可使用 fake 组件，不连接真实外部服务。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_qa_node.py`
-
-## 14. 运行项目级验收
-
-- [x] 目标：运行 R4.3 目标测试、全量回归、编译检查和 ragas 评估入口。
-- 依赖：任务 13。
-- 验收标准：目标测试通过；全量 `pytest` 通过；`compileall` 通过；`python -m scripts.eval.ragas_eval` 可运行；未引入真实网络依赖、真实 API Key 或敏感内容。
-- 验证命令：`pytest tests/test_retrieval_tool.py tests/test_ingest_knowledge.py tests/test_core_config_logging.py tests/test_security_compliance.py tests/test_qa_node.py && pytest && python -m compileall app tests scripts && python -m scripts.eval.ragas_eval`
+- 验收标准：全量 `pytest` 通过；`compileall` 通过；未引入敏感信息、真实服务调用或模型权重。
+- 验证命令：`conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests scripts`

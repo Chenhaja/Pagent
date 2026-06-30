@@ -21,6 +21,20 @@
       "justMyCode": true
     },
     {
+      "name": "Debug clean_procedure",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/clean_procedure.py",
+      "args": [
+        "${workspaceFolder}/scripts/raw.md",
+        "${workspaceFolder}/scripts/专利.md",
+        "--strip-contact"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
       "name": "Debug Pagent App",
       "type": "python",
       "request": "launch",

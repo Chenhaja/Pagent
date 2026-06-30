@@ -35,9 +35,12 @@ class Settings(BaseModel):
         retrieval_max_steps: 检索最大步数。
         retrieval_token_budget: 检索 evidence token 预算。
         retrieval_timeout_seconds: 检索超时时间。
-        retrieval_react_min_results: QA ReAct 判定 evidence 充分的最少结果数。
-        retrieval_react_min_score: QA ReAct 判定 evidence 充分的最低分数。
-        retrieval_react_use_llm_judge: QA ReAct 是否启用 LLM evidence 充分性评估。
+        agentic_enabled: 是否启用 R7 agentic 主循环。
+        agentic_external_tools_enabled: 是否允许外部工具进入白名单。
+        agentic_default_tools: 默认 agentic 工具列表。
+        websearch_enabled: 是否启用 websearch 工具。
+        legal_status_enabled: 是否启用法律状态查询工具。
+        official_fee_enabled: 是否启用官费查询工具。
         retrieval_default_status: 默认法规版本状态。
         retrieval_enable_time_filter: 是否启用法规时间过滤。
         retrieval_fetch_k: 重排、融合和改写前候选数。
@@ -93,9 +96,12 @@ class Settings(BaseModel):
     retrieval_max_steps: int = 1
     retrieval_token_budget: int = 1000
     retrieval_timeout_seconds: int = 10
-    retrieval_react_min_results: int = 1
-    retrieval_react_min_score: float = 0.3
-    retrieval_react_use_llm_judge: bool = False
+    agentic_enabled: bool = True
+    agentic_external_tools_enabled: bool = False
+    agentic_default_tools: str = "kb_retrieval"
+    websearch_enabled: bool = False
+    legal_status_enabled: bool = False
+    official_fee_enabled: bool = False
     retrieval_default_status: str = "current"
     retrieval_enable_time_filter: bool = True
     retrieval_fetch_k: int = 30
@@ -153,9 +159,12 @@ class Settings(BaseModel):
             "retrieval_max_steps": str(self.retrieval_max_steps),
             "retrieval_token_budget": str(self.retrieval_token_budget),
             "retrieval_timeout_seconds": str(self.retrieval_timeout_seconds),
-            "retrieval_react_min_results": str(self.retrieval_react_min_results),
-            "retrieval_react_min_score": str(self.retrieval_react_min_score),
-            "retrieval_react_use_llm_judge": str(self.retrieval_react_use_llm_judge),
+            "agentic_enabled": str(self.agentic_enabled),
+            "agentic_external_tools_enabled": str(self.agentic_external_tools_enabled),
+            "agentic_default_tools": self.agentic_default_tools,
+            "websearch_enabled": str(self.websearch_enabled),
+            "legal_status_enabled": str(self.legal_status_enabled),
+            "official_fee_enabled": str(self.official_fee_enabled),
             "retrieval_default_status": self.retrieval_default_status,
             "retrieval_enable_time_filter": str(self.retrieval_enable_time_filter),
             "retrieval_fetch_k": str(self.retrieval_fetch_k),
@@ -262,9 +271,12 @@ def get_settings() -> Settings:
         retrieval_max_steps=int(os.getenv("PAGENT_RETRIEVAL_MAX_STEPS", "1")),
         retrieval_token_budget=int(os.getenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "1000")),
         retrieval_timeout_seconds=int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10")),
-        retrieval_react_min_results=int(os.getenv("PAGENT_RETRIEVAL_REACT_MIN_RESULTS", "1")),
-        retrieval_react_min_score=float(os.getenv("PAGENT_RETRIEVAL_REACT_MIN_SCORE", "0.3")),
-        retrieval_react_use_llm_judge=_get_bool_env("PAGENT_RETRIEVAL_REACT_USE_LLM_JUDGE", False),
+        agentic_enabled=_get_bool_env("PAGENT_AGENTIC_ENABLED", True),
+        agentic_external_tools_enabled=_get_bool_env("PAGENT_AGENTIC_EXTERNAL_TOOLS_ENABLED", False),
+        agentic_default_tools=os.getenv("PAGENT_AGENTIC_DEFAULT_TOOLS", "kb_retrieval"),
+        websearch_enabled=_get_bool_env("PAGENT_WEBSEARCH_ENABLED", False),
+        legal_status_enabled=_get_bool_env("PAGENT_LEGAL_STATUS_ENABLED", False),
+        official_fee_enabled=_get_bool_env("PAGENT_OFFICIAL_FEE_ENABLED", False),
         retrieval_default_status=os.getenv("PAGENT_RETRIEVAL_DEFAULT_STATUS", "current"),
         retrieval_enable_time_filter=_get_bool_env("PAGENT_RETRIEVAL_ENABLE_TIME_FILTER", True),
         retrieval_fetch_k=int(os.getenv("PAGENT_RETRIEVAL_FETCH_K", "30")),

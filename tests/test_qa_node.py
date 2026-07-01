@@ -159,7 +159,42 @@ def test_qa_node_writes_structured_answer_to_state() -> None:
     assert result.output["qa_result"]["answer"] == "依据不足,请补充权利要求文本或相关材料。"
     assert state.dialog_context["qa_result"]["next_steps"] == ["补充材料"]
     assert loop.calls == [{"task_input": "这个权利要求有什么风险？", "allowed_tools": ["kb_retrieval"]}]
-    assert trace_event(result, "qa_completed")["data"] == {"basis_count": 1, "has_retrieval": False, "evidence_versions": []}
+    assert trace_event(result, "qa_completed")["data"] == {
+        "basis_count": 1,
+        "has_retrieval": False,
+        "evidence_versions": [],
+        "history_msg_count": 0,
+    }
+
+
+def test_qa_node_passes_history_to_skill_and_trace() -> None:
+    """QA node 应把 dialog_context 中的历史传给 skill 并记录计数。"""
+    skill = RecordingQASkill()
+    node = QANode(skill=skill, react_loop=FakeReactLoop(make_outcome([], reason="max_steps")), max_steps=0)
+    history = [
+        {"role": "user", "content": "上一轮问题"},
+        {"role": "assistant", "content": "上一轮回答"},
+        {"role": "assistant", "content": "  "},
+    ]
+    state = WorkflowState(raw_input="继续解释", normalized_input="继续解释", dialog_context={"history": history, "session_summary": "摘要"})
+
+    result = node.run(state)
+
+    assert skill.contexts[0].state_snapshot["history"] == history
+    assert "session_summary" not in skill.contexts[0].state_snapshot
+    assert trace_event(result, "qa_completed")["data"]["history_msg_count"] == 2
+    assert "上一轮回答" not in str(trace_event(result, "qa_completed"))
+
+
+def test_qa_node_defaults_missing_history_to_empty_list() -> None:
+    """QA node 在缺少历史时应向 skill 传空列表。"""
+    skill = RecordingQASkill()
+    node = QANode(skill=skill, react_loop=FakeReactLoop(make_outcome([], reason="max_steps")), max_steps=0)
+
+    result = node.run(WorkflowState(raw_input="问题", normalized_input="问题", dialog_context={"history": None}))
+
+    assert skill.contexts[0].state_snapshot["history"] == []
+    assert trace_event(result, "qa_completed")["data"]["history_msg_count"] == 0
 
 
 def test_qa_node_preserves_explicit_zero_budget_over_settings(monkeypatch) -> None:
@@ -222,7 +257,12 @@ def test_qa_node_passes_provenance_evidence_to_skill() -> None:
         "token_budget": 200,
         "timeout_seconds": 5,
     }
-    assert trace_event(result, "qa_completed")["data"] == {"basis_count": 1, "has_retrieval": True, "evidence_versions": []}
+    assert trace_event(result, "qa_completed")["data"] == {
+        "basis_count": 1,
+        "has_retrieval": True,
+        "evidence_versions": [],
+        "history_msg_count": 0,
+    }
 
 
 def test_qa_node_formats_law_evidence_and_records_versions() -> None:

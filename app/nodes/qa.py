@@ -102,6 +102,7 @@ class QANode(Node):
         question = state.normalized_input or state.raw_input
         outcome = self.react_loop.run(question, allowed_tools=self._allowed_tools())
         evidence = self._build_evidence(outcome.evidence)
+        history = state.dialog_context.get("history") or []
         state.dialog_context["qa_retrieval_results"] = evidence
         context = SkillContext(
             task_type="patent_qa",
@@ -110,6 +111,7 @@ class QANode(Node):
                 "claims_draft": state.claims_draft,
                 "validation_report": state.validation_report,
                 "retrieval_results": evidence,
+                "history": history,
             },
         )
         try:
@@ -140,6 +142,7 @@ class QANode(Node):
                         "basis_count": len(qa_result.basis),
                         "has_retrieval": bool(evidence),
                         "evidence_versions": self._build_evidence_versions(evidence),
+                        "history_msg_count": self._count_history_messages(history),
                     },
                 },
             ],
@@ -148,6 +151,10 @@ class QANode(Node):
     def _allowed_tools(self) -> list[str]:
         """返回 QA 默认允许使用的 agentic 工具。"""
         return [item.strip() for item in self.settings.agentic_default_tools.split(",") if item.strip()]
+
+    def _count_history_messages(self, history: list[dict]) -> int:
+        """统计会注入回答模型的有效历史消息数。"""
+        return sum(1 for turn in history if str(turn.get("content", "")).strip())
 
     def _apply_insufficient_evidence_warning(self, qa_result: Any, outcome: ReActOutcome) -> Any:
         """在非充分收敛时追加 evidence 不足风险提示。"""

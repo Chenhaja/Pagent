@@ -1,138 +1,168 @@
-# 查询改写 LLM 化 Todo
+# 日志与可观测性 Todo
 
 ## Phase 0 — 口径确认与基线锁定
 
-- [ ] 确认本需求只处理检索层查询改写 LLM 化。
-  - 验收：计划不包含 ReAct、QANode、rerank、embedding、Qdrant 或检索合并逻辑重写。
+- [ ] 确认本需求只做日志与可观测性增强。
+  - 验收：计划不包含检索、ReAct、QA、编排业务语义重写。
   - 验证：review `tasks/plan.md`。
-- [ ] 确认 `retrieval_use_query_rewrite` 默认仍关闭。
-  - 验收：默认配置仍为 `False`。
+- [ ] 确认不引入第三方观测依赖。
+  - 验收：实现阶段仅使用标准库 `logging` / `contextvars` 和现有项目能力。
+  - 验证：review diff / `requirements.txt` 不变。
+- [ ] 确认不新增日志存储、队列或远程上报。
+  - 验收：日志仍输出到现有 stream handler。
+  - 验证：review `app/core/logging.py`。
+- [ ] 确认 `log_sample_llm_call` 本轮只占位。
+  - 验收：配置存在但不丢弃日志。
   - 验证：配置测试 / review。
-- [ ] 确认开启查询改写后的默认 backend 为 `llm`。
-  - 验收：`query_rewrite_backend` 默认值为 `llm`。
-  - 验证：配置测试。
-- [ ] 确认保留 legacy `HTTPQueryRewriter`。
-  - 验收：`query_rewrite_backend=service` 时仍可构造 `HTTPQueryRewriter`。
-  - 验证：backend 选择测试。
 - [ ] 确认默认测试不触网、不调用真实 LLM。
-  - 验收：新增测试全部使用 fake / stub。
+  - 验收：新增测试使用 fake/stub/caplog。
   - 验证：review 测试实现。
 
-## Phase 1 — Prompt/schema 与配置垂直切片
+## Phase 1 — 配置与脱敏基础闭环
 
-- [ ] 新增 `app/prompts/query_expand.py`。
-  - 验收：模块可 import，导出 schema、system prompt、user prompt 构造函数。
-  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
-- [ ] 定义 `QUERY_EXPAND_OUTPUT_SCHEMA`。
-  - 验收：包含 required `queries`，`queries` 为 string array，`additionalProperties=False`。
-  - 验证：prompt/schema 单测。
-- [ ] 定义 `QUERY_EXPAND_SYSTEM_PROMPT`。
-  - 验收：包含 `multi` 与 `hyde` 两种模式；覆盖任务目标、规则、角色、受众、样例、输出格式。
-  - 验证：prompt 单测 / review。
-- [ ] 实现 `build_query_expand_user_prompt(...)`。
-  - 验收：原 query、mode、count 位于 `<data>...</data>`；声明数据区不作为指令。
-  - 验证：prompt 单测。
-- [ ] 在 prompt 中加入专利域安全约束。
-  - 验收：禁止臆造法条、专利号、检索结果、引用、IPC 或技术事实；要求仅输出 JSON。
-  - 验证：prompt 单测 / review。
-- [ ] 新增 `Settings.query_rewrite_backend`。
-  - 验收：默认 `llm`；`PAGENT_QUERY_REWRITE_BACKEND` 可覆盖。
+- [ ] 新增 `Settings.log_format`。
+  - 验收：默认 `auto`；`PAGENT_LOG_FORMAT` 可覆盖为 `pretty` / `json`。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] 新增 `Settings.query_rewrite_model`。
-  - 验收：默认 `None`；`PAGENT_QUERY_REWRITE_MODEL` 可覆盖。
+- [ ] 新增 `Settings.log_include_context`。
+  - 验收：默认 `True`；`PAGENT_LOG_INCLUDE_CONTEXT=false` 可读取为 `False`。
   - 验证：配置测试。
-- [ ] 新增 `Settings.query_rewrite_temperature`。
-  - 验收：默认 `0.3`；`PAGENT_QUERY_REWRITE_TEMPERATURE` 可覆盖为 float。
+- [ ] 新增 `Settings.log_max_field_length`。
+  - 验收：默认 `205`；`PAGENT_LOG_MAX_FIELD_LENGTH` 可读取为整数。
+  - 验证：配置测试。
+- [ ] 新增 `Settings.log_sample_llm_call`。
+  - 验收：默认 `False`；`PAGENT_LOG_SAMPLE_LLM_CALL=true` 可读取为 `True`。
   - 验证：配置测试。
 - [ ] 更新 `Settings` docstring。
-  - 验收：新增配置在 docstring 中说明用途。
+  - 验收：新增日志配置均说明用途。
   - 验证：review。
-- [ ] 更新 `to_public_dict()`。
-  - 验收：新增非敏感查询改写配置进入 public dict；不包含 key / token / secret。
+- [ ] 更新 `get_settings()` 环境变量读取。
+  - 验收：四个 `PAGENT_LOG_*` 环境变量生效。
   - 验证：配置测试。
+- [ ] 更新 `to_public_dict()`。
+  - 验收：新增日志配置进入 public dict；不包含 key/token/secret/password。
+  - 验证：配置测试。
+- [ ] 扩展 `redact_sensitive_text()` 脱敏模式。
+  - 验收：`sk-...`、`Bearer ...`、`password=...`、`token=...`、`api_key=...` 均被脱敏。
+  - 验证：`conda run -n autoGLM pytest tests/test_security_compliance.py`
+- [ ] 保持脱敏后截断能力。
+  - 验收：超过 `max_length` 的文本追加稳定截断标记。
+  - 验证：安全测试。
 
-## Phase 2 — LLMQueryRewriter 单组件闭环
+## Phase 2 — 上下文与双模式 formatter 闭环
 
-- [ ] 在 `retrieval.py` 引入 LLM 与 query expand prompt 依赖。
-  - 验收：复用 `LLMClient`、`LLMMessage`、`build_llm_client`，不新增 LLM SDK。
-  - 验证：import 测试 / pytest。
-- [ ] 新增 `LLMQueryRewriter` 类。
-  - 验收：构造函数接收 `Settings` 与可选 `LLMClient`；公共类有中文 Google 风格 docstring。
-  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
-- [ ] 实现空 query 直接返回 `[]`。
-  - 验收：空字符串或空白字符串不调用 LLM。
-  - 验证：单测断言 fake trace / calls 为空。
-- [ ] 实现 `LLMClient.generate(...)` 调用。
-  - 验收：传入 messages、`QUERY_EXPAND_OUTPUT_SCHEMA`、model、temperature、timeout、trace_context。
-  - 验证：FakeLLMClient trace 断言。
-- [ ] 实现模型回退顺序。
-  - 验收：`query_rewrite_model or llm_cheap_model or llm_model`。
-  - 验证：单测覆盖三种配置。
-- [ ] 实现成功响应解析。
-  - 验收：从 `response.content["queries"]` 读取字符串列表。
-  - 验证：FakeLLMClient 成功响应测试。
-- [ ] 实现原 query 首位、去重保序、过滤空白、截断。
-  - 验收：返回最多 `query_rewrite_count + 1` 条，首项为原 query。
+- [ ] 新增 `app/core/log_context.py`。
+  - 验收：模块可 import；公共函数/类有中文 Google 风格 docstring。
+  - 验证：`conda run -n autoGLM pytest tests/test_log_context.py`
+- [ ] 定义上下文变量。
+  - 验收：包含 `request_id`、`session_id`、`trace_id`、`node_name`、`task_type`。
+  - 验证：上下文测试。
+- [ ] 实现 `new_request_id()`。
+  - 验收：返回非空短 ID，连续调用不相同。
   - 验证：单测。
-- [ ] 实现错误响应返回 `[]`。
-  - 验收：`response.errors` 非空时返回 `[]`。
-  - 验证：FakeLLMClient(error=...) 测试。
-- [ ] 实现非法结构返回 `[]`。
-  - 验收：content 非 dict、缺 `queries`、queries 空或不可用时返回 `[]`。
+- [ ] 实现 `bind_context()` / `reset_context()`。
+  - 验收：可绑定多个字段并按 token 回滚。
   - 验证：单测。
-- [ ] 确认 `LLMQueryRewriter` 不自建 HTTP 调用。
-  - 验收：实现中不使用 `urllib` / `requests` 调用 LLM，只调用 `llm_client.generate`。
-  - 验证：review。
-
-## Phase 3 — build_retriever backend 切换闭环
-
-- [ ] 新增 `_build_query_rewriter(settings)`。
-  - 验收：函数有中文 docstring；根据 `query_rewrite_backend` 构造 rewriter。
-  - 验证：backend 单测。
-- [ ] 支持 `query_rewrite_backend=llm`。
-  - 验收：返回 `LLMQueryRewriter`。
-  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
-- [ ] 支持 `query_rewrite_backend=service`。
-  - 验收：返回 legacy `HTTPQueryRewriter`。
-  - 验证：backend 单测。
-- [ ] 调整未知 backend 的安全默认。
-  - 验收：未知值不导致检索工厂崩溃，按 spec 默认到 LLM 或现有配置风格处理。
+- [ ] 实现 `current_context()`。
+  - 验收：返回当前上下文字段快照；未绑定时字段为 `None`。
+  - 验证：单测。
+- [ ] 实现 `ContextFilter`。
+  - 验收：向 `LogRecord` 注入上下文字段；未绑定不抛异常。
+  - 验证：单测。
+- [ ] 扩展 `JsonLineFormatter` 支持结构化 fields。
+  - 验收：`extra={"event": ..., "fields": {...}}` 被平铺到 JSON payload。
+  - 验证：formatter 测试。
+- [ ] 扩展 `JsonLineFormatter` 支持上下文字段。
+  - 验收：JSON 包含 request/session/trace/node/task 字段或按配置省略。
+  - 验证：上下文日志测试。
+- [ ] 新增 `PrettyFormatter`。
+  - 验收：输出人类可读单行，包含 event、message、request_id 前缀、node_name 和关键 fields。
+  - 验证：formatter 测试。
+- [ ] 实现 formatter 选择逻辑。
+  - 验收：`json` 固定 JSON；`pretty` 固定 pretty；`auto + local` 为 pretty；`auto + 非 local` 为 JSON。
+  - 验证：formatter 测试。
+- [ ] 在 `configure_logging()` 挂载 `ContextFilter`。
+  - 验收：`log_include_context=True` 时挂载；为 false 时不注入但日志不崩溃。
+  - 验证：上下文测试。
+- [ ] 新增或实现结构化事件 helper。
+  - 验收：可统一输出 `event/message/fields`，不强制业务方字符串拼接复杂对象。
+  - 验证：formatter/helper 测试。
+- [ ] 对 message 与 fields 应用脱敏截断。
+  - 验收：结构化字段中敏感值被脱敏、长字段被截断。
+  - 验证：安全与 formatter 测试。
+- [ ] 确认 formatter/filter 异常不影响业务。
+  - 验收：异常场景降级输出或吞掉，不向业务抛出。
   - 验证：单测 / review。
-- [ ] 修改 `build_retriever()` 默认查询改写构造。
-  - 验收：开启 `retrieval_use_query_rewrite` 且未注入 rewriter 时使用 `_build_query_rewriter(...)`。
-  - 验证：工厂测试。
-- [ ] 保持显式注入 `query_rewriter` 优先。
-  - 验收：传入 fake rewriter 时不构造默认 LLM / HTTP rewriter。
-  - 验证：工厂测试。
-- [ ] 保持关闭查询改写行为不变。
-  - 验收：`retrieval_use_query_rewrite=false` 时不包裹 `MultiQueryRetriever`。
-  - 验证：工厂回归测试。
-- [ ] 保持装配顺序 base/hybrid → multi-query → rerank。
-  - 验收：既有 hybrid + rewrite + rerank 测试继续通过。
+
+## Phase 3 — LLM trace 日志闭环
+
+- [ ] 新增 `LoggingLLMTraceSink`。
+  - 验收：实现 `LLMTraceSink.write(trace)` 协议；公共类有中文 docstring。
+  - 验证：`conda run -n autoGLM pytest tests/test_log_context.py tests/test_llm_tool.py`
+- [ ] 输出 `llm_call` 事件。
+  - 验收：trace 写入日志时 `event=llm_call`。
+  - 验证：caplog / formatter 测试。
+- [ ] 实现 fallback 日志级别升级。
+  - 验收：`fallback_used=False` 为 INFO；`fallback_used=True` 为 WARNING。
+  - 验证：单测。
+- [ ] 保留 trace 字段契约。
+  - 验收：不修改 `LLMResponse.trace` 现有字段结构。
+  - 验证：既有 `test_llm_tool.py` 继续通过。
+- [ ] 确认 trace 不含敏感正文。
+  - 验收：不输出 `api_key`、`raw_input`、完整 prompt、完整 response。
+  - 验证：单测 / review。
+- [ ] 确认 sink 异常不影响 LLM 调用。
+  - 验收：logger 抛错或格式化失败时 `write()` 不向外抛。
+  - 验证：单测。
+- [ ] 明确默认接入策略。
+  - 验收：如默认接入真实 client，仍不触网；如仅提供 sink，也在计划和测试中明确。
+  - 验证：review / 测试。
+
+## Phase 4 — 运行链路事件埋点闭环
+
+- [ ] API 请求入口绑定 `request_id`。
+  - 验收：每个 API 请求有 request_id；请求结束后上下文回滚。
+  - 验证：API 日志测试。
+- [ ] `/agent` 绑定 `session_id`。
+  - 验收：有 `request.session_id` 时日志带 session_id；不记录 raw_input。
+  - 验证：API 测试。
+- [ ] 输出 `request_start` / `request_end`。
+  - 验收：包含 `duration_ms`、`outcome`；异常路径保留现有 HTTPException 行为。
+  - 验证：API 测试。
+- [ ] `Orchestrator.run()` 绑定 `node_name`。
+  - 验收：每个 node 执行期间日志带 node_name，退出后回滚。
+  - 验证：orchestrator 测试。
+- [ ] 输出 `node_start` / `node_end`。
+  - 验收：包含 `duration_ms`、`outcome`、`error_count`、`trace_event_count` 等统计。
+  - 验证：orchestrator 测试。
+- [ ] 输出 `node_error`。
+  - 验收：未知 node、非法 next_node、loop limit、节点非 success 或异常路径有错误事件。
+  - 验证：orchestrator 测试。
+- [ ] ReAct 每步输出 `react_step`。
+  - 验收：包含 `step`、`tool`、`duration_ms` 或可获得的步骤统计；不含 task_input 原文。
+  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
+- [ ] ReAct 收敛输出 `react_converged`。
+  - 验收：包含 `reason`、`steps`、`tool_calls`、`fallback_used`。
+  - 验证：ReAct 测试。
+- [ ] 工具异常输出 `tool_error`。
+  - 验收：异常路径含工具名、错误码/原因，不含输入正文。
+  - 验证：ReAct 工具异常测试。
+- [ ] 收编 `query_rewrite_failed` 字段。
+  - 验收：异常降级日志使用 `fields.degrade_reason`，不记录完整 query。
   - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
-
-## Phase 4 — MultiQueryRetriever 降级可观测闭环
-
-- [ ] 调整 `_expand_queries()` 异常路径日志。
-  - 验收：rewriter 抛异常时 `logger.warning`，extra event 为 `query_rewrite_failed`，返回 `[query]`。
-  - 验证：caplog 单测。
-- [ ] 调整 `_expand_queries()` 空结果日志。
-  - 验收：过滤后无 query 时 `logger.info`，extra event 为 `query_rewrite_empty`，返回 `[query]`。
-  - 验证：caplog 单测。
-- [ ] 保持正常结果顺序。
-  - 验收：正常扩展时过滤空白字符串，保留 rewriter 返回顺序。
-  - 验证：MultiQueryRetriever 单测。
-- [ ] 确认降级后仍执行单查询召回。
-  - 验收：inner retriever 收到原 query。
-  - 验证：既有 / 新增 fallback 测试。
-- [ ] 确认日志不泄露敏感信息。
-  - 验收：日志不包含完整 query、扩展式、prompt、API key。
-  - 验证：review / 日志断言。
+- [ ] 收编 `query_rewrite_empty` 字段。
+  - 验收：空结果降级日志使用 `fields.degrade_reason`，不记录完整 query。
+  - 验证：检索测试。
+- [ ] 确认业务结果不变。
+  - 验收：既有 API、orchestrator、ReAct、retrieval 测试继续通过。
+  - 验证：相关测试 + 全量测试。
 
 ## Phase 5 — 总体验收与提交准备
 
-- [ ] 运行目标测试。
-  - 命令：`conda run -n autoGLM pytest tests/test_retrieval_tool.py tests/test_core_config_logging.py`
+- [ ] 运行日志目标测试。
+  - 命令：`conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_log_context.py tests/test_security_compliance.py`
+  - 验收：全部通过。
+- [ ] 运行关键链路回归测试。
+  - 命令：`conda run -n autoGLM pytest tests/test_agent_api.py tests/test_orchestrator_engine.py tests/test_agentic_loop.py tests/test_retrieval_tool.py tests/test_llm_tool.py`
   - 验收：全部通过。
 - [ ] 运行全量测试。
   - 命令：`conda run -n autoGLM pytest`
@@ -140,15 +170,15 @@
 - [ ] 运行编译检查。
   - 命令：`conda run -n autoGLM python -m compileall app tests scripts`
   - 验收：无语法错误。
-- [ ] 检查默认 backend 不依赖 `/query-rewrite`。
-  - 验收：`retrieval_use_query_rewrite=true` 默认构造 `LLMQueryRewriter`。
-  - 验证：单测 / review。
-- [ ] 检查 legacy service backend 仍可用。
-  - 验收：`query_rewrite_backend=service` 构造 `HTTPQueryRewriter`，旧 HTTP 单测通过。
-  - 验证：单测。
-- [ ] 检查关闭态完全一致。
-  - 验收：`retrieval_use_query_rewrite=false` 时工厂返回原有 base / rerank 组合，不新增 LLM 调用。
-  - 验证：工厂测试。
+- [ ] 检查本地 pretty 默认行为。
+  - 验收：`environment=local` 且 `log_format=auto` 输出 pretty。
+  - 验证：formatter 测试。
+- [ ] 检查生产 JSON 默认行为。
+  - 验收：非 local 且 `log_format=auto` 输出 JSON Lines。
+  - 验证：formatter 测试。
+- [ ] 检查日志脱敏。
+  - 验收：日志不含密钥、完整 query、prompt、检索正文、原始 LLM 输入输出。
+  - 验证：安全测试 / review。
 - [ ] 检查 diff 范围。
   - 验收：只包含本需求相关文件；无密钥、临时文件、调试代码。
   - 验证：`git status` / `git diff`。
@@ -158,11 +188,13 @@
 
 ## 需用户另行确认的可选项
 
-- [ ] 是否运行真实 LLM 网关 smoke test。
+- [ ] 是否引入 OpenTelemetry / Prometheus / Jaeger / structlog。
+  - 默认：不引入。
+- [ ] 是否把日志写入文件、队列或远程服务。
+  - 默认：不写入，仅沿用 stream handler。
+- [ ] 是否真正实现 `llm_call` 采样丢弃。
+  - 默认：不实现，只保留配置占位。
+- [ ] 是否记录完整 query / prompt / 检索正文 / LLM 输入输出用于排障。
+  - 默认：不记录。
+- [ ] 是否运行真实 LLM 或真实 API smoke test。
   - 默认：不运行。
-- [ ] 是否运行 ragas baseline / multi / hyde 对比。
-  - 默认：不运行。
-- [ ] 是否删除 legacy `HTTPQueryRewriter`。
-  - 默认：不删除。
-- [ ] 是否把 `retrieval_use_query_rewrite` 默认改为开启。
-  - 默认：不改，仍为关闭。

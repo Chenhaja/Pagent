@@ -18,7 +18,7 @@ class RetrievalResult(BaseModel):
     Args:
         content: 命中的文本片段。
         provenance: 来源信息,包含 source、document_id、doc_type、locator 等字段。
-        score: 简单关键词命中分数。
+        score: MOCK中有效，实际检索中通常为 0。简单关键词命中分数。
         similarity: 向量相似度,本地后端默认为 0。
         law_name: 法规名称。
         version: 法规版本。

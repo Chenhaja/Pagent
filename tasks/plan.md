@@ -1,82 +1,68 @@
-# R7.2 ReAct Observe/Reflect 观察-反思分离实施计划
+# 查询改写 LLM 化实施计划
 
 ## 背景
 
-R7.1 已把 ReAct 的 Act 侧接入 `LLMReActPolicy` 和 `ToolCard`，但当前主循环仍在 `tool.run()` 前由 `ReActDecision.sufficient` 预判充分性，并在 `tool.run()` 后用 `decision.sufficient or observation.sufficient` 收敛。`ToolObservation.sufficient` 目前常由“有 evidence 即 true”的启发式给出，导致 Observation / 充分性判断没有真正被 LLM 读到 observation 正文后判断。
+当前检索层查询改写由 `app/tools/retrieval.py::HTTPQueryRewriter` 调用自定义 `{llm_base_url}/query-rewrite` 端点。大多数 OpenAI 兼容网关只提供标准 `/chat/completions`，因此开启 `retrieval_use_query_rewrite` 后常因端点不存在而被 `MultiQueryRetriever._expand_queries()` 吞掉异常，最终退回单查询。
 
-R7.2 目标是把 Act 与 Observe/Reflect 拆开：每步先 `policy.decide` 选工具和 query，再执行 `tool.run`，然后把 observation 正文摘要交给 `policy.reflect`，由 reflect 产出 `{sufficient, reason, next_query_hint}`。开启 `react_use_llm_judge` 时以 reflect 结果收敛；关闭或 reflect 失败时，用 top_score 阈值兜底。
+本阶段目标是新增 `LLMQueryRewriter`，复用 `app/tools/llm.py::LLMClient.generate(...)` 与 `OpenAICompatibleClient` 的 `/chat/completions` 通道；保留旧 `HTTPQueryRewriter` 为 `query_rewrite_backend=service` 的 legacy backend；不改检索合并去重语义、不改 ReAct / QA / rerank / embedding。
 
 本计划只拆解实现路径与验收任务；实现阶段再修改业务代码。
 
 ## 当前代码基线
 
-- `app/orchestrator/react_loop.py`
-  - `BoundedReActLoop.__init__` 已有 `use_llm_judge` 参数但 `run()` 未真正使用。
-  - `run()` 当前顺序为 decide → tool.run → scratchpad → `decision.sufficient or observation.sufficient` 收敛。
-  - `decision.stop` 时会按 `decision.sufficient` 返回 `sufficient` 或 `policy_stop`。
-  - `_build_scratchpad_item` 仅记录 count / top_score / error / external，不含 observation 正文摘要。
-  - trace 有 `react_policy_step`、`react_main_step`、`react_main_converged`，无 `react_reflect_step`。
-- `app/orchestrator/react_policy.py`
-  - `ReActDecision` 包含 `sufficient` 权威字段。
-  - `ReActPolicy` 只有 `decide(...)`。
-  - `HeuristicReActPolicy` 只做按顺序选工具。
-  - `LLMReActPolicy.decide` 使用 `REACT_DECISION_SCHEMA` 和 `build_react_policy_messages`。
-- `app/prompts/react_policy.py`
-  - `REACT_DECISION_SCHEMA` 要求 `sufficient`。
-  - 决策 prompt 将 Act 与充分性判断混在同一次输出。
-  - 已使用 `<data>` 包裹 task / tools / scratchpad。
+- `app/tools/retrieval.py`
+  - `QueryRewriter` 协议已存在，契约为 `expand(query) -> list[str]`。
+  - `FakeQueryRewriter` 已用于测试注入。
+  - `HTTPQueryRewriter` 当前直接用 `urllib` POST 到 `{llm_base_url}/query-rewrite`，body 包含 `model/query/mode/count`。
+  - `MultiQueryRetriever.recall()` 先 `_expand_queries(query)`，再对每个 query 调用 `inner.recall(...)` 并按 `(document_id, locator, content[:64])` 去重。
+  - `_expand_queries()` 当前异常静默返回 `[query]`，空结果也返回 `[query]`，但没有日志。
+  - `build_retriever()` 当前在 `retrieval_use_query_rewrite=true` 时默认使用 `HTTPQueryRewriter(resolved_settings)`。
+- `app/tools/llm.py`
+  - 已有 `LLMClient` 协议、`LLMMessage`、`LLMResponse`、`FakeLLMClient`、`OpenAICompatibleClient`。
+  - `FakeLLMClient.generate(...)` 会记录 `model/temperature/timeout/trace_context` 到 trace，适合不触网测试。
+  - `OpenAICompatibleClient.generate(...)` 已支持 `messages`、`output_schema`、`trace_context`。
 - `app/core/config.py`
-  - 已有 `react_use_llm_judge`、`react_policy_model`、`react_token_budget` 等。
-  - 缺 `react_sufficient_score_threshold`、`react_observation_digest_chars`、`react_reflect_model`。
-  - `to_public_dict()` 已公开 `react_use_llm_judge`，但缺新增配置。
-- `app/nodes/qa.py`
-  - `_build_react_loop()` 已把 `settings.react_use_llm_judge` 传入 loop。
-  - `_build_react_policy()` 只按 `react_policy_model or llm_cheap_model or llm_model` 构建 policy，未区分 reflect model。
-- `tests/test_agentic_loop.py`
-  - 当前测试依赖 `observation.sufficient` 或 `decision.sufficient` 收敛，需要改为 reflect / 阈值口径。
-  - `ScriptedPolicy` 只有 `decide`，需扩展 reflect 支持。
-- `tests/test_react_policy.py`
-  - 只覆盖 decide 解析和 heuristic decide。
-  - 需要增加 reflect schema、LLM reflect、heuristic reflect 测试。
+  - 已有 `retrieval_use_query_rewrite`、`query_rewrite_mode`、`query_rewrite_count`。
+  - 缺 `query_rewrite_backend`、`query_rewrite_model`、`query_rewrite_temperature`。
+  - `to_public_dict()` 已公开 mode/count/use_query_rewrite，但缺新增非敏感字段。
+  - `get_settings()` 已读取 mode/count/use_query_rewrite 环境变量。
+- `app/prompts/`
+  - 已有 `query_rewrite.py`，用于入口历史指代消解，不是检索层多查询扩展。
+  - 缺 `query_expand.py`。
+- `tests/test_retrieval_tool.py`
+  - 已覆盖 `FakeQueryRewriter`、`MultiQueryRetriever`、`HTTPQueryRewriter`、`build_retriever` 装配顺序。
+  - 需要补 `LLMQueryRewriter`、backend 选择、日志降级、prompt schema。
 - `tests/test_core_config_logging.py`
-  - 需补新增配置默认值、环境变量和 public dict 断言。
-- `tests/test_react_reflect.py`
-  - 尚不存在，需要新增。
+  - 需要补新增查询改写配置默认值、环境变量读取、public dict。
 
 ## 依赖图
 
 ```text
 SPEC.md
-  -> Config contract
-      -> app/core/config.py
-      -> tests/test_core_config_logging.py
-      -> app/nodes/qa.py                         # 默认 loop/model 读取新配置
-
   -> Prompt / schema contract
-      -> app/prompts/react_policy.py             # REACT_DECISION_SCHEMA 调整 + REACT_REFLECT_SCHEMA + reflect prompt
-      -> tests/test_react_policy.py
-      -> tests/test_react_reflect.py
+      -> app/prompts/query_expand.py
+      -> tests/test_retrieval_tool.py          # prompt/schema 断言
 
-  -> Policy contract
-      -> app/orchestrator/react_policy.py         # ReflectResult, ReActPolicy.reflect, parse reflect, LLM/Heuristic reflect
-      -> app/tools/llm.py                         # 复用 LLMClient.generate / LLMMessage
-      -> tests/test_react_policy.py
-      -> tests/test_react_reflect.py
+  -> Config contract
+      -> app/core/config.py                    # Settings 字段、env 读取、to_public_dict
+      -> tests/test_core_config_logging.py
+      -> app/tools/retrieval.py                # LLMQueryRewriter 读取 backend/model/temperature
 
-  -> Loop contract
-      -> app/orchestrator/react_loop.py           # tool.run 后 reflect、digest、threshold、hint 回灌、trace
-      -> app/orchestrator/tool_registry.py        # 保持工具卡片和白名单机制不变
-      -> tests/test_agentic_loop.py
+  -> LLM query rewriter contract
+      -> app/tools/llm.py                      # 复用 LLMClient / LLMMessage / FakeLLMClient
+      -> app/tools/retrieval.py                # LLMQueryRewriter
+      -> tests/test_retrieval_tool.py
 
-  -> QA integration
-      -> app/nodes/qa.py                          # 注入 react_* 配置，reflect model 回退策略
-      -> tests/test_qa_node.py
+  -> Retriever factory contract
+      -> app/tools/retrieval.py                # _build_query_rewriter + build_retriever 默认 backend
+      -> tests/test_retrieval_tool.py
+
+  -> Observability / fallback contract
+      -> app/tools/retrieval.py                # _expand_queries warning/info
+      -> tests/test_retrieval_tool.py          # caplog + fallback 行为
 
   -> final verification
-      -> tests/test_react_reflect.py
-      -> tests/test_react_policy.py
-      -> tests/test_agentic_loop.py
-      -> tests/test_qa_node.py
+      -> tests/test_retrieval_tool.py
       -> tests/test_core_config_logging.py
       -> pytest / compileall
 ```
@@ -85,11 +71,11 @@ SPEC.md
 
 每个阶段都交付一条可验证路径，而不是只改一层：
 
-1. 先补配置和 prompt/schema 的最小契约，让后续 policy / loop 有稳定输入输出。
-2. 再实现 reflect policy：从 Fake LLM 到 `ReflectResult`，含错误可降级信号。
-3. 再改主循环单步路径：`decide → tool.run → digest → reflect → 收敛/继续`，证明 `decision.sufficient` 不再收敛。
-4. 再补多步路径：`next_query_hint` 回灌、scratchpad digest、预算和 fallback。
-5. 最后接 QA 默认构建和回归验收。
+1. 先补 prompt/schema 和配置，让后续 LLM rewriter 有稳定输入输出与可配置 backend。
+2. 再实现 `LLMQueryRewriter` 的单组件闭环：Fake LLM → schema 输出 → 去重截断 → 错误返回空。
+3. 再接 `build_retriever` 默认 backend：开关开启时默认走 LLM，显式 `service` 才走旧 HTTP。
+4. 再补 `MultiQueryRetriever` 降级日志，保证失败可观测且不影响召回。
+5. 最后跑目标测试、全量测试、编译检查，并按项目规范提交。
 
 ---
 
@@ -97,20 +83,21 @@ SPEC.md
 
 ### 目标
 
-确认 R7.2 只补 Observe/Reflect，不扩大到检索算法、工具注册、QA 会话记忆或多智能体。
+确认本需求只处理检索层查询改写 LLM 化，不扩大到检索算法、rerank、ReAct、QANode、embedding 或真实评测。
 
 ### 实施要点
 
-- 保持 `ToolObservation` / `ReActOutcome` 外部结构基本兼容；如需扩展只做最小字段或构造参数。
-- `ReActDecision.sufficient` 优先保留为 planning-only 兼容字段，先从主循环收敛路径摘除；是否彻底删除另行确认。
-- `ToolObservation.sufficient` 不再单独触发收敛，只作为兼容字段或阈值兜底参考。
-- 默认测试全部使用 fake / stub LLM，不触网、不调用真实模型。
+- 保留 `HTTPQueryRewriter`，仅改为 legacy `service` backend。
+- `retrieval_use_query_rewrite` 默认仍为 `false`。
+- 开启查询改写后的默认 backend 为 `llm`。
+- `MultiQueryRetriever` 的 recall、合并、去重语义不变。
+- 默认测试使用 `FakeLLMClient` / fake rewriter，不触网。
 - 不新增依赖。
 
 ### 验收标准
 
 - plan / todo 明确上述边界。
-- 后续任务不包含检索算法重写、工具注册重写、外部工具默认启用、并行多工具或持久化 reason。
+- 后续任务不包含检索算法重写、rerank 重写、ReAct / QA 改造、真实 LLM 调用或 ragas 评测。
 
 ### Checkpoint 0
 
@@ -118,318 +105,246 @@ SPEC.md
 
 ---
 
-## Phase 1 — 配置与 prompt/schema 契约
+## Phase 1 — Prompt/schema 与配置垂直切片
 
 ### 目标
 
-先建立 reflect 所需的稳定配置、schema 和 prompt，使 policy / loop 后续有明确契约。
+建立 `LLMQueryRewriter` 所需的 prompt/schema 与配置契约，并通过单测锁定默认值和公开字段。
 
-### 涉及文件
+### 任务
 
-- `app/core/config.py`
-- `app/prompts/react_policy.py`
-- `tests/test_core_config_logging.py`
-- `tests/test_react_policy.py`
-- `tests/test_react_reflect.py`
-
-### 实施要点
-
-- 在 `Settings` 增加：
-  - `react_sufficient_score_threshold: float = 0.5`
-  - `react_observation_digest_chars: int = 600`
-  - `react_reflect_model: str | None = None`
-- 在 `get_settings()` 读取：
-  - `PAGENT_REACT_SUFFICIENT_SCORE_THRESHOLD`
-  - `PAGENT_REACT_OBSERVATION_DIGEST_CHARS`
-  - `PAGENT_REACT_REFLECT_MODEL`
-- 在 `to_public_dict()` 公开新增非敏感配置。
-- 调整 `REACT_DECISION_SCHEMA`：`sufficient` 不再 required；如保留字段，标注 planning-only。
-- 新增 `REACT_REFLECT_SCHEMA`，包含 `sufficient`、`reason`、`next_query_hint`，`additionalProperties=False`。
-- 新增 `build_react_reflect_messages(task_input, observation_digest, scratchpad, step_index)`：
-  - system prompt 覆盖六要素。
-  - user prompt 用 `<data>` 包裹任务、digest、scratchpad。
-  - 明确数据区指令无效、禁止臆造、不确定时保守 `sufficient=false`。
+1. 新增 `app/prompts/query_expand.py`。
+   - 定义 `QUERY_EXPAND_OUTPUT_SCHEMA`，要求 `queries`，`additionalProperties=False`。
+   - 定义 `QUERY_EXPAND_SYSTEM_PROMPT`，包含 `multi` 与 `hyde`。
+   - 定义 `build_query_expand_user_prompt(query, mode, count)`。
+2. 补 prompt/schema 测试。
+   - 断言 schema 非空、`additionalProperties=False`。
+   - 断言 system prompt 覆盖 `multi` / `hyde`。
+   - 断言 user prompt 包含 `<data>`、`</data>`，并声明数据区不作为指令。
+   - 断言 prompt 含“仅输出 JSON”和禁止臆造约束。
+3. 扩展 `Settings` 查询改写配置。
+   - 新增 `query_rewrite_backend: str = "llm"`。
+   - 新增 `query_rewrite_model: str | None = None`。
+   - 新增 `query_rewrite_temperature: float = 0.3`。
+   - 更新 `Settings` docstring、`get_settings()` 环境变量读取、`to_public_dict()`。
+4. 补配置测试。
+   - 默认值、`PAGENT_QUERY_REWRITE_BACKEND`、`PAGENT_QUERY_REWRITE_MODEL`、`PAGENT_QUERY_REWRITE_TEMPERATURE`。
+   - 既有 `PAGENT_QUERY_REWRITE_MODE`、`PAGENT_QUERY_REWRITE_COUNT` 回归。
+   - public dict 包含新增非敏感字段，不包含 key / token / secret。
 
 ### 验收标准
 
-- 新增配置默认值、环境变量覆盖、public dict 均有测试。
-- `REACT_REFLECT_SCHEMA` required 与 additionalProperties 符合 SPEC。
-- reflect prompt 含 observation digest、scratchpad、数据分隔符和安全约束。
-- 决策 schema / parser 不再强制权威 sufficient。
+- `query_expand.py` 不依赖业务运行状态，可单独 import。
+- 新增配置通过 env 覆盖且进入 public dict。
+- 不触网、不创建真实 LLM client。
 
-### 验证命令
+### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_react_policy.py tests/test_react_reflect.py
+conda run -n autoGLM pytest tests/test_retrieval_tool.py tests/test_core_config_logging.py
 ```
 
 ### Checkpoint 1
 
-配置和 schema 通过后，再实现 policy reflect，避免 loop 先依赖未稳定契约。
+确认 prompt/schema 和配置测试通过后，再实现 LLM rewriter。
 
 ---
 
-## Phase 2 — Policy reflect 能力
+## Phase 2 — LLMQueryRewriter 单组件闭环
 
 ### 目标
 
-让 `ReActPolicy` 支持独立 reflect，并提供 LLM 与 heuristic 两套实现。
+实现可注入 fake LLM 的 `LLMQueryRewriter`，证明检索层查询扩展可以只通过 `LLMClient.generate(...)` 完成。
 
-### 涉及文件
+### 任务
 
-- `app/orchestrator/react_policy.py`
-- `app/prompts/react_policy.py`
-- `tests/test_react_policy.py`
-- `tests/test_react_reflect.py`
-
-### 实施要点
-
-- 新增 `ReflectResult` dataclass：`sufficient`、`reason`、`next_query_hint`。
-- 扩展 `ReActPolicy` Protocol：增加 `reflect(...) -> ReflectResult`。
-- `LLMReActPolicy.__init__` 增加可选 `reflect_model`，为空时回退 `model`。
-- `LLMReActPolicy.reflect`：
-  - 调用 `LLMClient.generate(messages=build_react_reflect_messages(...), output_schema=REACT_REFLECT_SCHEMA, model=reflect_model or model, temperature=0.0, timeout=...)`。
-  - trace_context 使用 `task_type="react_reflect"` 和 `node_name`。
-  - response errors / 输出非法时抛 `ReActPolicyError`。
-- 新增 `_parse_reflection(payload)`，校验类型和 required 字段。
-- `HeuristicReActPolicy` 增加阈值构造参数，并实现 `reflect(...)`：
-  - 从 `observation_digest` 中读取由 loop 提供的 `evidence_count` / `top_score` / `has_error` 等摘要字段；若采用字符串 digest，则需要 loop 另传结构化摘要或在 digest 中保留结构化字段。实现时优先让 digest 是 dict，prompt 层再序列化。
-  - `sufficient = evidence_count > 0 and top_score >= threshold and not has_error`。
-  - reason 返回短中文原因；`next_query_hint` 默认为 None。
-- 保持 `HeuristicReActPolicy.decide` 旧行为。
+1. 在 `app/tools/retrieval.py` 引入 LLM 相关依赖。
+   - `LLMClient`、`LLMMessage`、`build_llm_client`。
+   - `QUERY_EXPAND_OUTPUT_SCHEMA`、`QUERY_EXPAND_SYSTEM_PROMPT`、`build_query_expand_user_prompt`。
+2. 新增 `LLMQueryRewriter`。
+   - 构造函数接收 `settings` 和可选 `llm_client`。
+   - 空 query 直接返回 `[]`，不调用 LLM。
+   - mode 从 `settings.query_rewrite_mode` 读取。
+   - count 使用 `max(1, int(settings.query_rewrite_count))`。
+   - model 使用 `query_rewrite_model or llm_cheap_model or llm_model`。
+   - 调用 `llm_client.generate(messages=..., output_schema=..., temperature=..., timeout=..., trace_context=...)`。
+   - `response.errors` 或 content 非 dict 时返回 `[]`。
+   - 正常解析 `queries`，原 query 首位、去重保序、截断到 `count + 1`。
+3. 补 `LLMQueryRewriter` 测试。
+   - Fake LLM 成功返回时原 query 首位。
+   - 去重保序、过滤空白、截断。
+   - model 回退顺序。
+   - trace context 包含 `node_name=retrieval`、`task_type=query_expand`。
+   - temperature / timeout 传入 Fake trace。
+   - LLM error、非 dict、缺 `queries`、空 queries 返回 `[]`。
+   - 空 query 不调用 LLM。
 
 ### 验收标准
 
-- Fake LLM 合法 reflect 输出能解析为 `ReflectResult`。
-- Fake LLM 缺字段、类型错误、errors 时抛 `ReActPolicyError`。
-- `LLMReActPolicy.reflect` trace task_type 为 `react_reflect`，不暴露原始输入。
-- `HeuristicReActPolicy.reflect` 使用 top_score 阈值，不是 `bool(evidence)`。
-- `ReActDecision.sufficient` 不再是 parser 必填权威字段。
+- `LLMQueryRewriter` 不使用 `urllib` / `requests` 直接调用 LLM。
+- 默认测试完全通过 `FakeLLMClient` 验证。
+- 失败统一返回 `[]`，交给 `MultiQueryRetriever` 兜底。
 
-### 验证命令
+### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_react_policy.py tests/test_react_reflect.py
+conda run -n autoGLM pytest tests/test_retrieval_tool.py
 ```
 
 ### Checkpoint 2
 
-policy reflect 单元测试通过后，再接主循环。
+确认单组件成功 / 失败路径稳定后，再接工厂默认 backend。
 
 ---
 
-## Phase 3 — 主循环三段式单步收敛
+## Phase 3 — build_retriever backend 切换闭环
 
 ### 目标
 
-将 `BoundedReActLoop.run` 改为每步 `decide → tool.run → observation_digest → reflect → sufficient 判断`，并移除 `decision.sufficient` / `observation.sufficient` 的直接收敛。
+将开启查询改写后的默认构造器从 `HTTPQueryRewriter` 切为 `LLMQueryRewriter`，同时保留 service backend 与显式注入点。
 
-### 涉及文件
+### 任务
 
-- `app/orchestrator/react_loop.py`
-- `tests/test_agentic_loop.py`
-
-### 实施要点
-
-- `BoundedReActLoop.__init__` 增加：
-  - `sufficient_score_threshold: float = 0.5`
-  - `observation_digest_chars: int = 600`
-- 构造默认 `HeuristicReActPolicy(threshold=sufficient_score_threshold)`。
-- 新增 `_build_observation_digest(observation)`，建议返回结构化 dict：
-  - `evidence_count`
-  - `top_score`
-  - `error`
-  - `external`
-  - `items`: 每条含截断 `content` 与 provenance 摘要
-  - `text`: 总体截断后的可读摘要（或只在 prompt build 时序列化）
-- 新增 `_reflect(task_input, observation_digest, scratchpad, step_index)`：
-  - `use_llm_judge=True` 时优先调用 `self.policy.reflect`。
-  - 禁用 judge 或 reflect 异常时调用 `self.heuristic_policy.reflect`。
-  - 返回 `(reflection, driver, fallback_used)`。
-- `decision.stop or action is None` 固定以 `policy_stop` 收敛，不再看 `decision.sufficient`。
-- `tool.run()` 成功后先构造 digest，再 reflect，再写 trace 和 scratchpad。
-- sufficient 收敛只看：
-  - judge 开启且 reflect 成功：`reflection.sufficient`
-  - judge 关闭或 reflect 失败：heuristic threshold reflection 的 `sufficient`
-- 新增 `react_reflect_step` trace，仅记录：`node_name`、`step_index`、`sufficient`、`reason_len`、`next_query_hint_present`、`driver`。
-- `_build_policy_trace` 可保留 `sufficient` 字段但标记 planning-only；更推荐移除该 trace 字段以降低误导，测试按最终实现调整。
+1. 新增 `_build_query_rewriter(settings)`。
+   - `query_rewrite_backend=service` 返回 `HTTPQueryRewriter(settings)`。
+   - 默认或 `llm` 返回 `LLMQueryRewriter(settings)`。
+   - 非预期 backend 按 spec 采用安全默认，不让检索链路崩溃。
+2. 修改 `build_retriever()` 查询改写装配。
+   - `retrieval_use_query_rewrite=false` 时不变。
+   - `retrieval_use_query_rewrite=true` 且未注入时使用 `_build_query_rewriter(resolved_settings)`。
+   - 显式传入 `query_rewriter` 时仍优先使用注入对象。
+   - 仍保持 base/hybrid → multi-query → rerank 的装配顺序。
+3. 补 backend / 工厂测试。
+   - `_build_query_rewriter(llm)` 返回 `LLMQueryRewriter`。
+   - `_build_query_rewriter(service)` 返回 `HTTPQueryRewriter`。
+   - 开启 rewrite 默认使用 LLM backend。
+   - service backend 使用 legacy HTTP rewriter。
+   - 关闭 rewrite 时仍返回原 base，不包 `MultiQueryRetriever`。
+   - 注入 fake rewriter 时仍使用 fake。
+   - hybrid + rewrite + rerank 既有装配顺序保持。
 
 ### 验收标准
 
-- 首轮 observation 有 evidence 但 reflect 返回 false 时不收敛。
-- reflect 返回 true 时以 `reason=sufficient` 收敛。
-- `react_reflect_step` 出现在 `react_main_step` 后、`react_main_converged` 前。
-- `use_llm_judge=false` 时即使 policy reflect 可用，也走 threshold 兜底。
-- evidence 非空但 top_score 低于阈值时不收敛。
-- `decision.sufficient=True` 不会让主循环直接收敛。
-- trace 不包含完整 task_input、完整 evidence content、完整 reflect reason。
+- 默认开启查询改写不再依赖 `/query-rewrite`。
+- 旧 HTTP 行为只在 `query_rewrite_backend=service` 时出现。
+- 外部注入测试口保持兼容。
 
-### 验证命令
+### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_agentic_loop.py
+conda run -n autoGLM pytest tests/test_retrieval_tool.py
 ```
 
 ### Checkpoint 3
 
-单步三段式和收敛口径通过后，再做多步 hint、scratchpad 和失败降级。
+确认工厂装配正确后，再补降级日志与可观测性。
 
 ---
 
-## Phase 4 — 多步闭环、scratchpad digest 与失败降级
+## Phase 4 — MultiQueryRetriever 降级可观测闭环
 
 ### 目标
 
-补齐 observation-driven query 改写闭环、scratchpad 内容摘要和 reflect 失败兜底。
+保留现有安全降级行为，但让失败和空结果可观测。
 
-### 涉及文件
+### 任务
 
-- `app/orchestrator/react_loop.py`
-- `tests/test_agentic_loop.py`
-- `tests/test_react_reflect.py`
-
-### 实施要点
-
-- 将 `observation_digest` 写入 scratchpad item，确保长度不超过 `observation_digest_chars`。
-- 若 `reflection.next_query_hint` 非空且未收敛，更新下一步 Act 的 `task_input` 或 query 上下文。
-  - 推荐最小实现：维护 `current_task_input`，下一轮 `_decide(current_task_input, ...)` 使用 hint。
-  - 原始问题如需保留，可在 scratchpad 中通过上一步摘要提供，不新增复杂结构。
-- reflect 失败时：
-  - `fallback_used=True`
-  - driver 标记为 `fallback` 或 `heuristic`
-  - 继续用 threshold 判断，不崩溃。
-- 工具异常路径也应构造最小 digest / scratchpad，并避免完整原文 trace。
-- token / timeout / max_steps 预算检查保持硬约束。
+1. 调整 `MultiQueryRetriever._expand_queries()`。
+   - 对 `query_rewriter.expand(query)` 抛异常：`logger.warning(...)`，`extra={"event": "query_rewrite_failed"}`，返回 `[query]`。
+   - 对过滤后空结果：`logger.info(...)`，`extra={"event": "query_rewrite_empty"}`，返回 `[query]`。
+   - 正常结果过滤空白字符串，保持 rewriter 顺序。
+2. 补降级日志测试。
+   - 异常路径返回 `[query]` 并记录 `query_rewrite_failed`。
+   - 空结果路径返回 `[query]` 并记录 `query_rewrite_empty`。
+   - 空白字符串被过滤。
+   - 降级后仍调用 inner retriever 的单查询 recall。
+3. 安全 review。
+   - 日志不包含完整 query、完整扩展式、API key、prompt。
+   - 不新增 retry，不触发额外网络调用。
 
 ### 验收标准
 
-- 多步测试中第一步 reflect 返回 `sufficient=false` + `next_query_hint="缩小后的问题"`，第二步工具收到新 query。
-- 第二轮 policy 的 scratchpad 中包含第一步 `observation_digest`。
-- digest 长度不超过配置上限。
-- reflect 抛异常时 outcome `fallback_used=True`，trace 有 fallback driver，循环不崩。
-- token_budget、timeout、max_steps 旧测试继续通过。
+- 失败 / 空结果不再完全静默。
+- 检索主流程不因查询改写失败而中断。
+- 日志字段稳定，敏感信息不落日志。
 
-### 验证命令
+### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_react_reflect.py
+conda run -n autoGLM pytest tests/test_retrieval_tool.py
 ```
 
 ### Checkpoint 4
 
-多步闭环和降级通过后，再接 QA 默认构建配置。
+确认降级路径可观测后，进入总体验收。
 
 ---
 
-## Phase 5 — QA 默认接线与集成回归
+## Phase 5 — 总体验收与提交准备
 
 ### 目标
 
-让 QA 默认 `BoundedReActLoop` 使用新增 reflect 配置，并用 QA 测试验证 LLM reflect 序列可驱动收敛。
+跑完目标测试、全量测试和编译检查，确认本阶段可以独立提交。
 
-### 涉及文件
+### 任务
 
-- `app/nodes/qa.py`
-- `tests/test_qa_node.py`
-- `tests/test_core_config_logging.py`
-
-### 实施要点
-
-- `_build_react_loop()` 传入：
-  - `use_llm_judge=self.settings.react_use_llm_judge`
-  - `sufficient_score_threshold=self.settings.react_sufficient_score_threshold`
-  - `observation_digest_chars=self.settings.react_observation_digest_chars`
-- `_build_react_policy()` 构建 `LLMReActPolicy` 时传入：
-  - `model=self.settings.react_policy_model or self.settings.llm_cheap_model or self.settings.llm_model`
-  - `reflect_model=self.settings.react_reflect_model or self.settings.react_policy_model or self.settings.llm_cheap_model or self.settings.llm_model`
-- 不改 QA 会话 history 注入链路。
-- 在 `tests/test_qa_node.py` 使用 FakeLLM / fake policy 验证：
-  - reflect false 后继续。
-  - reflect true 后 `react_main_converged.reason=sufficient`。
-  - reflect reason 不进入最终 QA 输出。
-
-### 验收标准
-
-- QA 默认 loop 构造读取新增配置。
-- 无真实 LLM 配置时仍安全降级 heuristic。
-- `react_reflect_step` 可在 QA trace 中观测。
-- QA 原有 history、basis、风险提示测试不回归。
-
-### 验证命令
-
-```bash
-conda run -n autoGLM pytest tests/test_qa_node.py tests/test_core_config_logging.py
-```
-
-### Checkpoint 5
-
-QA 接线通过后进入总体验收。
-
----
-
-## Phase 6 — 总体验收与提交准备
-
-### 目标
-
-运行 SPEC 要求的目标测试、全量测试和编译检查，确认无触网、无真实 LLM、无敏感 trace、无无关改动。
-
-### 涉及文件
-
-- `app/core/config.py`
-- `app/prompts/react_policy.py`
-- `app/orchestrator/react_policy.py`
-- `app/orchestrator/react_loop.py`
-- `app/nodes/qa.py`
-- `tests/test_react_reflect.py`
-- `tests/test_react_policy.py`
-- `tests/test_agentic_loop.py`
-- `tests/test_qa_node.py`
-- `tests/test_core_config_logging.py`
-- `tasks/plan.md`
-- `tasks/todo.md`
-
-### 实施要点
-
-- 先跑目标测试，修复与本需求相关失败。
-- 再跑全量 pytest，确认旧流程不回归。
-- 最后跑 compileall。
-- 检查 diff，确认未夹带无关改动。
-- 按项目规范：完成可独立验证阶段后立即 commit；提交前只 stage 相关文件。
+1. 运行目标测试。
+2. 运行全量测试。
+3. 运行 compileall。
+4. 检查 git diff，确认只包含本需求相关文件。
+5. 如实现阶段形成可独立验证改动，按项目规范单独 commit。
 
 ### 验收标准
 
 - 目标测试通过。
 - 全量测试通过。
-- compileall 通过。
-- 默认测试未调用真实 LLM / 外部服务。
-- `grep` 确认主循环不再通过 `decision.sufficient` 收敛。
-- trace 中无完整 observation 正文、完整 query、完整 reflect reason 或密钥。
+- 编译检查通过。
+- 默认测试无真实 LLM / 网络调用。
+- `retrieval_use_query_rewrite=true` 默认经 LLM chat completions 通道。
+- `query_rewrite_backend=service` 仍能使用 legacy HTTP endpoint。
+- `retrieval_use_query_rewrite=false` 行为不变。
 
-### 验证命令
+### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_react_reflect.py tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py
+conda run -n autoGLM pytest tests/test_retrieval_tool.py tests/test_core_config_logging.py
 conda run -n autoGLM pytest
 conda run -n autoGLM python -m compileall app tests scripts
 ```
+
+### Checkpoint 5
+
+提交前请用户确认是否需要：
+
+- 运行真实 LLM 网关 smoke test。
+- 运行 ragas 对比 baseline / multi / hyde。
+- 删除或进一步标注 legacy service backend。
+
+---
 
 ## 风险与控制
 
-- **风险：Act 与 Reflect 仍隐性耦合。** 控制：单测覆盖 `decision.sufficient=True` 但 reflect false 时不收敛。
-- **风险：有 evidence 即停回归。** 控制：阈值测试覆盖 evidence 非空但 top_score 低于阈值不收敛。
-- **风险：observation 正文进入 trace。** 控制：trace 只记录长度 / count / score；测试搜索敏感正文不出现。
-- **风险：reflect prompt 被 observation 注入影响。** 控制：prompt 使用 `<data>` 并声明数据区指令无效。
-- **风险：多一次 LLM 调用导致无 key 环境失败。** 控制：无真实配置走 heuristic；测试使用 FakeLLM。
-- **风险：hint 回灌覆盖原始任务导致上下文丢失。** 控制：最小实现只影响下一步 Act 输入，scratchpad 保留上步 observation digest。
-- **风险：新增配置范围过窄。** 控制：配置命名使用通用 `react_*`，不新增 `qa_*` 单节点配置。
+- **LLM JSON 不稳定**：通过 `output_schema` 触发 JSON 模式；错误、非 dict、缺字段统一返回 `[]`。
+- **语义漂移**：原 query 始终置首位，扩展结果去重保序，最多 `count + 1`。
+- **延迟和成本**：默认 `retrieval_use_query_rewrite=false`；开启后才调用 LLM。
+- **兼容旧 endpoint**：保留 `HTTPQueryRewriter`，仅 `query_rewrite_backend=service` 时使用。
+- **可观测但不泄密**：只记录稳定 event 和中文 message，不记录完整 query / prompt / key。
+- **测试触网风险**：所有新增测试使用 fake / stub，不调用真实网关。
 
-## 总体验证计划
+## 文件改动清单
 
-```bash
-conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_react_policy.py tests/test_react_reflect.py
-conda run -n autoGLM pytest tests/test_agentic_loop.py
-conda run -n autoGLM pytest tests/test_qa_node.py
-conda run -n autoGLM pytest tests/test_react_reflect.py tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py
-conda run -n autoGLM pytest
-conda run -n autoGLM python -m compileall app tests scripts
-```
+计划中的实现阶段会涉及：
+
+- `app/prompts/query_expand.py`：新增。
+- `app/tools/retrieval.py`：新增 `LLMQueryRewriter`、`_build_query_rewriter`，调整 `_expand_queries` 与 `build_retriever`。
+- `app/core/config.py`：新增查询改写 backend/model/temperature 配置。
+- `tests/test_retrieval_tool.py`：新增 rewriter、prompt、backend、日志降级测试。
+- `tests/test_core_config_logging.py`：新增配置默认值、环境变量、public dict 测试。
+
+不计划修改：
+
+- `app/nodes/qa.py`
+- `app/orchestrator/*`
+- `app/tools/llm.py` 公共契约
+- embedding / Qdrant / rerank 主逻辑
+- `requirements.txt`

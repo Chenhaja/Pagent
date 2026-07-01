@@ -1,172 +1,168 @@
-# R7.2 ReAct Observe/Reflect 观察-反思分离 Todo
+# 查询改写 LLM 化 Todo
 
 ## Phase 0 — 口径确认与基线锁定
 
-- [x] 确认本需求只补 Observe/Reflect，不改检索算法和工具注册。
-  - 验收：计划不包含 R4.3 检索算法、tool registry 重写或外部工具默认启用。
+- [ ] 确认本需求只处理检索层查询改写 LLM 化。
+  - 验收：计划不包含 ReAct、QANode、rerank、embedding、Qdrant 或检索合并逻辑重写。
   - 验证：review `tasks/plan.md`。
-- [x] 确认 `ReActDecision.sufficient` 先按 planning-only 兼容处理。
-  - 验收：实施计划要求主循环不读取该字段收敛；是否删除字段需另行确认。
-  - 验证：review Phase 0 / Phase 3。
-- [x] 确认默认测试不触网、不调用真实 LLM。
-  - 验收：测试任务均要求 fake / stub LLM。
-  - 验证：review Phase 6。
-- [x] 确认不新增依赖。
-  - 验收：计划不包含 requirements 更新，除非后续用户明确确认。
-  - 验证：review 依赖图与风险控制。
+- [ ] 确认 `retrieval_use_query_rewrite` 默认仍关闭。
+  - 验收：默认配置仍为 `False`。
+  - 验证：配置测试 / review。
+- [ ] 确认开启查询改写后的默认 backend 为 `llm`。
+  - 验收：`query_rewrite_backend` 默认值为 `llm`。
+  - 验证：配置测试。
+- [ ] 确认保留 legacy `HTTPQueryRewriter`。
+  - 验收：`query_rewrite_backend=service` 时仍可构造 `HTTPQueryRewriter`。
+  - 验证：backend 选择测试。
+- [ ] 确认默认测试不触网、不调用真实 LLM。
+  - 验收：新增测试全部使用 fake / stub。
+  - 验证：review 测试实现。
 
-## Phase 1 — 配置与 prompt/schema 契约
+## Phase 1 — Prompt/schema 与配置垂直切片
 
-- [x] 新增 `react_sufficient_score_threshold` 配置。
-  - 验收：`Settings` 默认值为 `0.5`，`PAGENT_REACT_SUFFICIENT_SCORE_THRESHOLD` 可覆盖。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [x] 新增 `react_observation_digest_chars` 配置。
-  - 验收：`Settings` 默认值为 `600`，`PAGENT_REACT_OBSERVATION_DIGEST_CHARS` 可覆盖。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [x] 新增 `react_reflect_model` 配置。
-  - 验收：默认 `None`，`PAGENT_REACT_REFLECT_MODEL` 可覆盖。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [x] 更新 `to_public_dict()` 公开新增 react 配置。
-  - 验收：public dict 包含新增非敏感配置，不包含任何 key / token / secret。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [x] 调整 `REACT_DECISION_SCHEMA` 中 `sufficient` 的权威地位。
-  - 验收：`sufficient` 不再是 required；如保留字段，后续主循环不读取其收敛。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_policy.py`
-- [x] 新增 `REACT_REFLECT_SCHEMA`。
-  - 验收：包含 `sufficient`、`reason`、`next_query_hint`；required 为 `sufficient/reason`；`additionalProperties=False`。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [x] 新增 reflect prompt 构造函数。
-  - 验收：`build_react_reflect_messages(...)` 包含任务、observation digest、scratchpad、step_index，并用 `<data>` 隔离。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [x] 覆盖 reflect prompt 六要素和安全约束。
-  - 验收：prompt 包含任务目标、判定规则、角色、受众、样例、输出格式；声明数据区指令无效、禁止臆造。
+- [ ] 新增 `app/prompts/query_expand.py`。
+  - 验收：模块可 import，导出 schema、system prompt、user prompt 构造函数。
+  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
+- [ ] 定义 `QUERY_EXPAND_OUTPUT_SCHEMA`。
+  - 验收：包含 required `queries`，`queries` 为 string array，`additionalProperties=False`。
+  - 验证：prompt/schema 单测。
+- [ ] 定义 `QUERY_EXPAND_SYSTEM_PROMPT`。
+  - 验收：包含 `multi` 与 `hyde` 两种模式；覆盖任务目标、规则、角色、受众、样例、输出格式。
   - 验证：prompt 单测 / review。
+- [ ] 实现 `build_query_expand_user_prompt(...)`。
+  - 验收：原 query、mode、count 位于 `<data>...</data>`；声明数据区不作为指令。
+  - 验证：prompt 单测。
+- [ ] 在 prompt 中加入专利域安全约束。
+  - 验收：禁止臆造法条、专利号、检索结果、引用、IPC 或技术事实；要求仅输出 JSON。
+  - 验证：prompt 单测 / review。
+- [ ] 新增 `Settings.query_rewrite_backend`。
+  - 验收：默认 `llm`；`PAGENT_QUERY_REWRITE_BACKEND` 可覆盖。
+  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
+- [ ] 新增 `Settings.query_rewrite_model`。
+  - 验收：默认 `None`；`PAGENT_QUERY_REWRITE_MODEL` 可覆盖。
+  - 验证：配置测试。
+- [ ] 新增 `Settings.query_rewrite_temperature`。
+  - 验收：默认 `0.3`；`PAGENT_QUERY_REWRITE_TEMPERATURE` 可覆盖为 float。
+  - 验证：配置测试。
+- [ ] 更新 `Settings` docstring。
+  - 验收：新增配置在 docstring 中说明用途。
+  - 验证：review。
+- [ ] 更新 `to_public_dict()`。
+  - 验收：新增非敏感查询改写配置进入 public dict；不包含 key / token / secret。
+  - 验证：配置测试。
 
-## Phase 2 — Policy reflect 能力
+## Phase 2 — LLMQueryRewriter 单组件闭环
 
-- [x] 新增 `ReflectResult` dataclass。
-  - 验收：字段为 `sufficient: bool`、`reason: str`、`next_query_hint: str | None`。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [x] 扩展 `ReActPolicy` Protocol 增加 `reflect(...)`。
-  - 验收：Protocol 同时包含 `decide` 与 `reflect`。
-  - 验证：类型相关单测和 import 不报错。
-- [x] 实现 `_parse_reflection`。
-  - 验收：合法 dict 解析成功；缺 `sufficient/reason`、类型错误、非 dict 均抛 `ReActPolicyError`。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [x] 实现 `LLMReActPolicy.reflect`。
-  - 验收：调用 `LLMClient.generate(messages=..., output_schema=REACT_REFLECT_SCHEMA, trace_context={task_type: react_reflect})`。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_policy.py tests/test_react_reflect.py`
-- [x] 支持 `LLMReActPolicy.reflect_model`。
-  - 验收：reflect 调用优先使用 `reflect_model`，为空回退 `model`。
-  - 验证：Fake trace 断言 model 字段。
-- [x] 实现 `HeuristicReActPolicy.reflect`。
-  - 验收：使用 `evidence_count > 0 and top_score >= threshold and not error` 判断，不是 `bool(evidence)`。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [x] 保持 `HeuristicReActPolicy.decide` 旧行为。
-  - 验收：按工具顺序选工具的既有测试继续通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_react_policy.py`
+- [ ] 在 `retrieval.py` 引入 LLM 与 query expand prompt 依赖。
+  - 验收：复用 `LLMClient`、`LLMMessage`、`build_llm_client`，不新增 LLM SDK。
+  - 验证：import 测试 / pytest。
+- [ ] 新增 `LLMQueryRewriter` 类。
+  - 验收：构造函数接收 `Settings` 与可选 `LLMClient`；公共类有中文 Google 风格 docstring。
+  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
+- [ ] 实现空 query 直接返回 `[]`。
+  - 验收：空字符串或空白字符串不调用 LLM。
+  - 验证：单测断言 fake trace / calls 为空。
+- [ ] 实现 `LLMClient.generate(...)` 调用。
+  - 验收：传入 messages、`QUERY_EXPAND_OUTPUT_SCHEMA`、model、temperature、timeout、trace_context。
+  - 验证：FakeLLMClient trace 断言。
+- [ ] 实现模型回退顺序。
+  - 验收：`query_rewrite_model or llm_cheap_model or llm_model`。
+  - 验证：单测覆盖三种配置。
+- [ ] 实现成功响应解析。
+  - 验收：从 `response.content["queries"]` 读取字符串列表。
+  - 验证：FakeLLMClient 成功响应测试。
+- [ ] 实现原 query 首位、去重保序、过滤空白、截断。
+  - 验收：返回最多 `query_rewrite_count + 1` 条，首项为原 query。
+  - 验证：单测。
+- [ ] 实现错误响应返回 `[]`。
+  - 验收：`response.errors` 非空时返回 `[]`。
+  - 验证：FakeLLMClient(error=...) 测试。
+- [ ] 实现非法结构返回 `[]`。
+  - 验收：content 非 dict、缺 `queries`、queries 空或不可用时返回 `[]`。
+  - 验证：单测。
+- [ ] 确认 `LLMQueryRewriter` 不自建 HTTP 调用。
+  - 验收：实现中不使用 `urllib` / `requests` 调用 LLM，只调用 `llm_client.generate`。
+  - 验证：review。
 
-## Phase 3 — 主循环三段式单步收敛
+## Phase 3 — build_retriever backend 切换闭环
 
-- [x] 扩展 `BoundedReActLoop.__init__` 接收阈值和 digest 长度。
-  - 验收：支持 `sufficient_score_threshold`、`observation_digest_chars`，默认兼容现有构造。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] 新增 `_build_observation_digest`。
-  - 验收：从 evidence 中提取截断 content、provenance、top_score、count、error、external，整体不超过配置长度。
-  - 验证：digest 单测或 loop 测试断言。
-- [x] 新增 loop 内 `_reflect` 降级封装。
-  - 验收：judge 开启时调用 policy reflect；judge 关闭或异常时调用 heuristic reflect。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] 调整 `decision.stop` 收敛口径。
-  - 验收：`decision.stop or action is None` 固定为 `policy_stop`，不因 `decision.sufficient` 返回 `sufficient`。
-  - 验证：新增 / 更新 policy stop 测试。
-- [x] 移除 `decision.sufficient` 直接收敛路径。
-  - 验收：`decision.sufficient=True` 但 reflect false 时不收敛。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] 移除 `observation.sufficient` 直接收敛路径。
-  - 验收：observation sufficient true 但 reflect false / 阈值不足时不收敛。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] 新增 `react_reflect_step` trace。
-  - 验收：trace data 含 `node_name`、`step_index`、`sufficient`、`reason_len`、`next_query_hint_present`、`driver`。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] 确认 trace 不泄露完整敏感正文。
-  - 验收：完整 task_input、evidence content、reflect reason 不出现在 trace 文本中。
-  - 验证：更新 trace 安全测试。
-- [x] 实现 `react_use_llm_judge=false` 阈值路径。
-  - 验收：禁用 judge 时由 `top_score >= threshold` 和 evidence count 决定收敛。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
+- [ ] 新增 `_build_query_rewriter(settings)`。
+  - 验收：函数有中文 docstring；根据 `query_rewrite_backend` 构造 rewriter。
+  - 验证：backend 单测。
+- [ ] 支持 `query_rewrite_backend=llm`。
+  - 验收：返回 `LLMQueryRewriter`。
+  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
+- [ ] 支持 `query_rewrite_backend=service`。
+  - 验收：返回 legacy `HTTPQueryRewriter`。
+  - 验证：backend 单测。
+- [ ] 调整未知 backend 的安全默认。
+  - 验收：未知值不导致检索工厂崩溃，按 spec 默认到 LLM 或现有配置风格处理。
+  - 验证：单测 / review。
+- [ ] 修改 `build_retriever()` 默认查询改写构造。
+  - 验收：开启 `retrieval_use_query_rewrite` 且未注入 rewriter 时使用 `_build_query_rewriter(...)`。
+  - 验证：工厂测试。
+- [ ] 保持显式注入 `query_rewriter` 优先。
+  - 验收：传入 fake rewriter 时不构造默认 LLM / HTTP rewriter。
+  - 验证：工厂测试。
+- [ ] 保持关闭查询改写行为不变。
+  - 验收：`retrieval_use_query_rewrite=false` 时不包裹 `MultiQueryRetriever`。
+  - 验证：工厂回归测试。
+- [ ] 保持装配顺序 base/hybrid → multi-query → rerank。
+  - 验收：既有 hybrid + rewrite + rerank 测试继续通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
 
-## Phase 4 — 多步闭环、scratchpad digest 与失败降级
+## Phase 4 — MultiQueryRetriever 降级可观测闭环
 
-- [x] 将 `observation_digest` 写入 scratchpad item。
-  - 验收：下一步 policy 收到的 scratchpad 包含上一轮 digest，且不超过长度上限。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] 实现 `next_query_hint` 回灌下一步 Act。
-  - 验收：第一步 reflect 返回 hint 后，第二步工具输入 query 使用该 hint。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] 处理 `next_query_hint=None`。
-  - 验收：hint 为空时不强行改写 query，继续使用当前 task input / policy 决策。
-  - 验证：loop 单测。
-- [x] 实现 reflect 异常 fallback。
-  - 验收：policy reflect 抛异常时 outcome `fallback_used=True`，使用 threshold 判断，循环不中断。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_react_reflect.py`
-- [x] 保持 token budget 硬约束。
-  - 验收：evidence token 预算耗尽时仍以 `token_budget` 收敛。
-  - 验证：既有 token budget 测试继续通过。
-- [x] 保持 max_steps / timeout 硬约束。
-  - 验收：不因 reflect 或 hint 绕过步数和超时限制。
-  - 验证：既有预算测试继续通过。
-- [x] 保持工具白名单和 schema 校验降级。
-  - 验收：非法 action / tool_input 仍 fallback，不执行越权工具。
-  - 验证：既有 invalid policy action/schema 测试继续通过。
+- [ ] 调整 `_expand_queries()` 异常路径日志。
+  - 验收：rewriter 抛异常时 `logger.warning`，extra event 为 `query_rewrite_failed`，返回 `[query]`。
+  - 验证：caplog 单测。
+- [ ] 调整 `_expand_queries()` 空结果日志。
+  - 验收：过滤后无 query 时 `logger.info`，extra event 为 `query_rewrite_empty`，返回 `[query]`。
+  - 验证：caplog 单测。
+- [ ] 保持正常结果顺序。
+  - 验收：正常扩展时过滤空白字符串，保留 rewriter 返回顺序。
+  - 验证：MultiQueryRetriever 单测。
+- [ ] 确认降级后仍执行单查询召回。
+  - 验收：inner retriever 收到原 query。
+  - 验证：既有 / 新增 fallback 测试。
+- [ ] 确认日志不泄露敏感信息。
+  - 验收：日志不包含完整 query、扩展式、prompt、API key。
+  - 验证：review / 日志断言。
 
-## Phase 5 — QA 默认接线与集成回归
+## Phase 5 — 总体验收与提交准备
 
-- [x] `QANode._build_react_loop` 传入新增 loop 配置。
-  - 验收：传入 `react_sufficient_score_threshold` 和 `react_observation_digest_chars`。
-  - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [x] `QANode._build_react_policy` 传入 reflect model。
-  - 验收：`react_reflect_model` 优先，其次 `react_policy_model` / `llm_cheap_model` / `llm_model`。
-  - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [x] 保持无 LLM 配置时安全降级。
-  - 验收：缺 base_url/model/api_key 时仍使用 `HeuristicReActPolicy`。
-  - 验证：既有 QA policy fallback 测试继续通过。
-- [x] 新增 QA reflect trace 集成测试。
-  - 验收：QA result trace 中可见 `react_reflect_step`。
-  - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [x] 新增 QA reflect 收敛序列测试。
-  - 验收：Fake reflect false 后继续，Fake reflect true 后 `react_main_converged.reason=sufficient`。
-  - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [x] 确认 reflect reason 不进入最终 QA 输出。
-  - 验收：`qa_result` 和用户可见输出不包含 reflect reason 独有文本。
-  - 验证：QA 单测断言。
-- [x] 确认 QA history / basis 回归不破坏。
-  - 验收：既有 history_msg_count、basis、风险提示测试继续通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-
-## Phase 6 — 总体验收与提交准备
-
-- [x] 运行 R7.2 目标测试。
-  - 命令：`conda run -n autoGLM pytest tests/test_react_reflect.py tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py`
+- [ ] 运行目标测试。
+  - 命令：`conda run -n autoGLM pytest tests/test_retrieval_tool.py tests/test_core_config_logging.py`
   - 验收：全部通过。
-- [x] 运行全量测试。
+- [ ] 运行全量测试。
   - 命令：`conda run -n autoGLM pytest`
   - 验收：全部通过。
-- [x] 运行编译检查。
+- [ ] 运行编译检查。
   - 命令：`conda run -n autoGLM python -m compileall app tests scripts`
   - 验收：无语法错误。
-- [x] grep 确认主循环不通过 `decision.sufficient` 收敛。
-  - 验收：`react_loop.py` 中不存在以 `decision.sufficient` 决定 `reason="sufficient"` 的逻辑。
-  - 验证：代码 review / 搜索。
-- [x] 检查 trace 安全边界。
-  - 验收：trace 不记录完整 observation、完整 query、完整 reflect reason 或密钥。
-  - 验证：相关单测和 review。
-- [x] 确认默认测试不调用真实 LLM / 外部服务。
-  - 验收：使用 fake / stub LLM，未访问 websearch、legal_status、official_fee 或付费模型。
-  - 验证：测试实现 review。
-- [x] 检查无无关改动。
-  - 验收：diff 只包含 R7.2 相关代码、测试、tasks 文档和必要 SPEC。
-  - 验证：`git diff`。
-- [x] 准备阶段性提交。
-  - 验收：只 stage 本需求相关文件，提交信息使用 `<type>(scope): <summary>` 中文动词开头格式。
-  - 验证：提交前 `git status`。
+- [ ] 检查默认 backend 不依赖 `/query-rewrite`。
+  - 验收：`retrieval_use_query_rewrite=true` 默认构造 `LLMQueryRewriter`。
+  - 验证：单测 / review。
+- [ ] 检查 legacy service backend 仍可用。
+  - 验收：`query_rewrite_backend=service` 构造 `HTTPQueryRewriter`，旧 HTTP 单测通过。
+  - 验证：单测。
+- [ ] 检查关闭态完全一致。
+  - 验收：`retrieval_use_query_rewrite=false` 时工厂返回原有 base / rerank 组合，不新增 LLM 调用。
+  - 验证：工厂测试。
+- [ ] 检查 diff 范围。
+  - 验收：只包含本需求相关文件；无密钥、临时文件、调试代码。
+  - 验证：`git status` / `git diff`。
+- [ ] 阶段性提交。
+  - 验收：目标测试和 compileall 通过后，按 `<type>(scope): <summary>` 中文提交规范提交。
+  - 验证：`git status` clean。
+
+## 需用户另行确认的可选项
+
+- [ ] 是否运行真实 LLM 网关 smoke test。
+  - 默认：不运行。
+- [ ] 是否运行 ragas baseline / multi / hyde 对比。
+  - 默认：不运行。
+- [ ] 是否删除 legacy `HTTPQueryRewriter`。
+  - 默认：不删除。
+- [ ] 是否把 `retrieval_use_query_rewrite` 默认改为开启。
+  - 默认：不改，仍为关闭。

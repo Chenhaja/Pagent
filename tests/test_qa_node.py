@@ -381,7 +381,7 @@ def test_qa_node_uses_llm_react_policy_for_decision_sequence(monkeypatch) -> Non
     )
     llm_client = SequenceLLMClient([
         {"thought": "先宽泛检索", "action": "kb_retrieval", "tool_input": {"query": "宽泛问题"}, "stop": False, "sufficient": False},
-        {"thought": "缩小问题", "action": "kb_retrieval", "tool_input": {"query": "缩小问题"}, "stop": False, "sufficient": True},
+        {"sufficient": True, "reason": "证据充分", "next_query_hint": None},
     ])
     retrieval_tool = CountingRetrievalTool([
         RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc", "locator": "doc"}, score=1)
@@ -395,9 +395,11 @@ def test_qa_node_uses_llm_react_policy_for_decision_sequence(monkeypatch) -> Non
     result = node.run(WorkflowState(raw_input="原问题", normalized_input="原问题"))
 
     assert retrieval_tool.calls == [{"query": "宽泛问题", "top_k": 3, "as_of": None, "fetch_k": None}]
-    assert len(llm_client.calls) == 1
+    assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["model"] == "cheap-model"
     assert llm_client.calls[0]["temperature"] == 0.1
+    assert llm_client.calls[1]["model"] == "cheap-model"
+    assert llm_client.calls[1]["temperature"] == 0.0
     assert trace_event(result, "react_policy_step")["data"]["driver"] == "llm"
     assert trace_event(result, "react_main_converged")["data"]["driver"] == "llm"
 

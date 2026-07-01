@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from app.orchestrator.react_policy import HeuristicReActPolicy, ReActDecision, ReActPolicy, ReActPolicyError, ToolCard
+from app.orchestrator.react_policy import HeuristicReActPolicy, ReActDecision, ReActPolicy, ReActPolicyError, ReflectResult, ToolCard
 
 
 @dataclass
@@ -67,6 +67,8 @@ class BoundedReActLoop:
         heuristic_policy: ReActPolicy | None = None,
         tool_cards: list[ToolCard] | None = None,
         use_llm_judge: bool = True,
+        sufficient_score_threshold: float = 0.5,
+        observation_digest_chars: int = 600,
     ) -> None:
         """初始化主循环。
 
@@ -77,15 +79,19 @@ class BoundedReActLoop:
             policy: 可选 LLM 或脚本化决策策略。
             heuristic_policy: policy 失败时使用的确定性降级策略。
             tool_cards: 可供 policy 决策的工具卡片。
-            use_llm_judge: 是否使用 policy 的 sufficient 判断。
+            use_llm_judge: 是否使用 policy 的 reflect 判断。
+            sufficient_score_threshold: 确定性阈值兜底的 top_score 门槛。
+            observation_digest_chars: observation 摘要字符上限。
         """
         self.tools = tools
         self.budget = budget
         self.node_name = node_name
-        self.policy = policy or HeuristicReActPolicy()
-        self.heuristic_policy = heuristic_policy or HeuristicReActPolicy()
+        self.policy = policy or HeuristicReActPolicy(sufficient_score_threshold=sufficient_score_threshold)
+        self.heuristic_policy = heuristic_policy or HeuristicReActPolicy(sufficient_score_threshold=sufficient_score_threshold)
         self.tool_cards = tool_cards or [ToolCard(name=name, description="", input_schema={}) for name in tools]
         self.use_llm_judge = use_llm_judge
+        self.sufficient_score_threshold = sufficient_score_threshold
+        self.observation_digest_chars = observation_digest_chars
         self.emit_policy_trace = policy is not None
 
     def run(self, task_input: str, allowed_tools: list[str]) -> ReActOutcome:
@@ -135,7 +141,7 @@ class BoundedReActLoop:
                 trace_events.append(self._build_policy_trace(step_index, decision, step_driver))
 
             if decision.stop or decision.action is None:
-                reason = "sufficient" if decision.sufficient else "policy_stop"
+                reason = "policy_stop"
                 break
 
             tool_name = decision.action
@@ -164,8 +170,9 @@ class BoundedReActLoop:
                 tool_calls += 1
                 reason = "tool_unavailable"
                 observation = ToolObservation(tool_name=tool_name, error="tool_unavailable")
+                observation_digest = self._build_observation_digest(observation)
                 trace_events.append(self._build_step_trace(step_index, tool_name, task_input, 0, 0.0, False))
-                scratchpad.append(self._build_scratchpad_item(step_index, decision, observation))
+                scratchpad.append(self._build_scratchpad_item(step_index, decision, observation, observation_digest))
                 break
 
             steps_used += 1
@@ -173,6 +180,9 @@ class BoundedReActLoop:
             evidence = self._accumulate_evidence(evidence, observation.evidence)
             if observation.external and tool_name not in external_tools_used:
                 external_tools_used.append(tool_name)
+            observation_digest = self._build_observation_digest(observation)
+            reflection, reflect_driver, reflect_fallback = self._reflect(task_input, observation_digest, scratchpad, step_index, not step_fallback)
+            fallback_used = fallback_used or reflect_fallback
             trace_events.append(
                 self._build_step_trace(
                     step_index,
@@ -183,11 +193,12 @@ class BoundedReActLoop:
                     observation.external,
                 )
             )
-            scratchpad.append(self._build_scratchpad_item(step_index, decision, observation))
+            trace_events.append(self._build_reflect_trace(step_index, reflection, reflect_driver))
+            scratchpad.append(self._build_scratchpad_item(step_index, decision, observation, observation_digest))
             if observation.error:
                 reason = "tool_unavailable"
                 break
-            if decision.sufficient or observation.sufficient:
+            if reflection.sufficient:
                 reason = "sufficient"
                 break
             if self._estimate_evidence_tokens(evidence) >= self.budget.token_budget:
@@ -226,6 +237,22 @@ class BoundedReActLoop:
             return self.heuristic_policy.decide(task_input, cards, scratchpad, step_index), "heuristic", True
         except ReActPolicyError:
             return ReActDecision(thought="降级策略失败", action=None, tool_input={}, stop=True, sufficient=False), "heuristic", True
+
+    def _reflect(
+        self,
+        task_input: str,
+        observation_digest: dict[str, Any],
+        scratchpad: list[dict[str, Any]],
+        step_index: int,
+        can_use_policy: bool = True,
+    ) -> tuple[ReflectResult, str, bool]:
+        """执行 observation 反思,失败时用阈值策略降级。"""
+        if not self.use_llm_judge or not can_use_policy:
+            return self.heuristic_policy.reflect(task_input, observation_digest, scratchpad, step_index), "heuristic", False
+        try:
+            return self.policy.reflect(task_input, observation_digest, scratchpad, step_index), self._policy_driver(), False
+        except Exception:
+            return self.heuristic_policy.reflect(task_input, observation_digest, scratchpad, step_index), "fallback", True
 
     def _converge(
         self,
@@ -281,6 +308,20 @@ class BoundedReActLoop:
             },
         }
 
+    def _build_reflect_trace(self, step_index: int, reflection: ReflectResult, driver: str) -> dict[str, Any]:
+        """构造 reflect trace,不记录 reason 原文。"""
+        return {
+            "event": "react_reflect_step",
+            "data": {
+                "node_name": self.node_name,
+                "step_index": step_index,
+                "sufficient": reflection.sufficient,
+                "reason_len": len(reflection.reason),
+                "next_query_hint_present": bool(reflection.next_query_hint),
+                "driver": driver,
+            },
+        }
+
     def _build_step_trace(
         self,
         step_index: int,
@@ -304,7 +345,44 @@ class BoundedReActLoop:
             },
         }
 
-    def _build_scratchpad_item(self, step_index: int, decision: ReActDecision, observation: ToolObservation) -> dict[str, Any]:
+    def _build_observation_digest(self, observation: ToolObservation) -> dict[str, Any]:
+        """构造本步 observation 的截断摘要。"""
+        items = []
+        used_chars = 0
+        for item in observation.evidence:
+            if used_chars >= self.observation_digest_chars:
+                break
+            content = str(item.get("content") or "")
+            remaining = max(0, self.observation_digest_chars - used_chars)
+            clipped_content = content[:remaining]
+            used_chars += len(clipped_content)
+            provenance = item.get("provenance") or {}
+            items.append(
+                {
+                    "content": clipped_content,
+                    "provenance": {
+                        "source": provenance.get("source"),
+                        "document_id": provenance.get("document_id"),
+                        "locator": provenance.get("locator"),
+                    },
+                    "score": item.get("score", item.get("similarity", item.get("confidence"))),
+                }
+            )
+        return {
+            "evidence_count": len(observation.evidence),
+            "top_score": observation.top_score,
+            "error": observation.error,
+            "external": observation.external,
+            "items": items,
+        }
+
+    def _build_scratchpad_item(
+        self,
+        step_index: int,
+        decision: ReActDecision,
+        observation: ToolObservation,
+        observation_digest: dict[str, Any],
+    ) -> dict[str, Any]:
         """构造历史步骤摘要,避免保存完整正文。"""
         return {
             "step_index": step_index,
@@ -314,6 +392,7 @@ class BoundedReActLoop:
             "top_score": observation.top_score,
             "error": observation.error,
             "external": observation.external,
+            "observation_digest": observation_digest,
         }
 
     def _allowed_tool_cards(self, allowed_tools: list[str]) -> list[ToolCard]:

@@ -1,7 +1,7 @@
 import time
 
 from app.orchestrator.react_loop import BoundedReActLoop, ReActBudget, ToolObservation
-from app.orchestrator.react_policy import ReActDecision, ReActPolicyError
+from app.orchestrator.react_policy import ReActDecision, ReActPolicyError, ReflectResult
 from app.orchestrator.tool_registry import ToolCard
 
 
@@ -10,10 +10,19 @@ class ScriptedPolicy:
 
     driver = "llm"
 
-    def __init__(self, decisions: list[ReActDecision] | None = None, should_raise: bool = False) -> None:
+    def __init__(
+        self,
+        decisions: list[ReActDecision] | None = None,
+        reflections: list[ReflectResult] | None = None,
+        should_raise: bool = False,
+        reflect_should_raise: bool = False,
+    ) -> None:
         self.decisions = decisions or []
+        self.reflections = reflections or []
         self.should_raise = should_raise
+        self.reflect_should_raise = reflect_should_raise
         self.calls = []
+        self.reflect_calls = []
 
     def decide(self, task_input: str, allowed_tools: list[ToolCard], scratchpad: list[dict], step_index: int) -> ReActDecision:
         """记录调用并返回下一条决策。"""
@@ -24,6 +33,18 @@ class ScriptedPolicy:
         if index >= len(self.decisions):
             return ReActDecision(thought="停止", action=None, tool_input={}, stop=True, sufficient=False)
         return self.decisions[index]
+
+    def reflect(self, task_input: str, observation_digest: dict, scratchpad: list[dict], step_index: int) -> ReflectResult:
+        """记录反思调用并返回下一条结果。"""
+        self.reflect_calls.append(
+            {"task_input": task_input, "observation_digest": observation_digest, "scratchpad": scratchpad, "step_index": step_index}
+        )
+        if self.reflect_should_raise:
+            raise ReActPolicyError("reflect_failed")
+        index = len(self.reflect_calls) - 1
+        if index >= len(self.reflections):
+            return ReflectResult(sufficient=False, reason="默认不足", next_query_hint=None)
+        return self.reflections[index]
 
 
 class FakeTool:
@@ -56,7 +77,7 @@ def make_loop(tool: FakeTool, budget: ReActBudget | None = None) -> BoundedReAct
 
 def test_agentic_loop_converges_when_first_observation_is_sufficient() -> None:
     """首轮 observation 充分时应立即收敛。"""
-    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据", "provenance": {"source": "local://doc"}}], sufficient=True)])
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据", "provenance": {"source": "local://doc"}}], sufficient=True, top_score=0.8)])
     loop = make_loop(tool)
 
     outcome = loop.run("问题", allowed_tools=["fake"])
@@ -66,7 +87,7 @@ def test_agentic_loop_converges_when_first_observation_is_sufficient() -> None:
     assert outcome.steps_used == 1
     assert outcome.tool_calls == 1
     assert outcome.evidence == [{"content": "证据", "provenance": {"source": "local://doc"}}]
-    assert [event["event"] for event in outcome.trace_events] == ["react_main_step", "react_main_converged"]
+    assert [event["event"] for event in outcome.trace_events] == ["react_main_step", "react_reflect_step", "react_main_converged"]
 
 
 def test_agentic_loop_continues_until_max_steps_when_insufficient() -> None:
@@ -187,10 +208,16 @@ def test_agentic_loop_uses_policy_decision_and_rewritten_query() -> None:
         ToolObservation(tool_name="fake", evidence=[], sufficient=False),
         ToolObservation(tool_name="fake", evidence=[{"content": "证据", "provenance": {"source": "local://doc"}}], sufficient=False),
     ])
-    policy = ScriptedPolicy([
-        ReActDecision(thought="先查宽泛问题", action="fake", tool_input={"query": "宽泛问题"}, stop=False, sufficient=False),
-        ReActDecision(thought="基于观察缩小问题", action="fake", tool_input={"query": "缩小后的问题"}, stop=False, sufficient=True),
-    ])
+    policy = ScriptedPolicy(
+        decisions=[
+            ReActDecision(thought="先查宽泛问题", action="fake", tool_input={"query": "宽泛问题"}, stop=False, sufficient=False),
+            ReActDecision(thought="基于观察缩小问题", action="fake", tool_input={"query": "缩小后的问题"}, stop=False, sufficient=True),
+        ],
+        reflections=[
+            ReflectResult(sufficient=False, reason="继续检索"),
+            ReflectResult(sufficient=True, reason="证据充分"),
+        ],
+    )
     loop = BoundedReActLoop(
         tools={"fake": tool},
         budget=ReActBudget(max_steps=4, token_budget=100, timeout_seconds=5),
@@ -205,8 +232,83 @@ def test_agentic_loop_uses_policy_decision_and_rewritten_query() -> None:
     assert outcome.reason == "sufficient"
     assert outcome.driver == "llm"
     assert outcome.fallback_used is False
-    assert [event["event"] for event in outcome.trace_events[:4]] == ["react_policy_step", "react_main_step", "react_policy_step", "react_main_step"]
+    assert [event["event"] for event in outcome.trace_events[:6]] == [
+        "react_policy_step",
+        "react_main_step",
+        "react_reflect_step",
+        "react_policy_step",
+        "react_main_step",
+        "react_reflect_step",
+    ]
     assert policy.calls[1]["scratchpad"][0]["observation_count"] == 0
+
+
+def test_agentic_loop_reflect_controls_sufficient_after_observation() -> None:
+    """tool.run 后的 reflect false 应阻止有 evidence 即停。"""
+    tool = FakeTool([
+        ToolObservation(tool_name="fake", evidence=[{"content": "低分证据", "provenance": {"source": "local://doc"}}], sufficient=True, top_score=0.4),
+        ToolObservation(tool_name="fake", evidence=[{"content": "高分证据", "provenance": {"source": "local://doc2"}}], sufficient=False, top_score=0.9),
+    ])
+    policy = ScriptedPolicy(
+        decisions=[
+            ReActDecision(thought="第一步", action="fake", tool_input={"query": "q1"}, stop=False, sufficient=True),
+            ReActDecision(thought="第二步", action="fake", tool_input={"query": "q2"}, stop=False, sufficient=False),
+        ],
+        reflections=[
+            ReflectResult(sufficient=False, reason="证据不足", next_query_hint=None),
+            ReflectResult(sufficient=True, reason="证据充分", next_query_hint=None),
+        ],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=3, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    outcome = loop.run("原问题", allowed_tools=["fake"])
+
+    assert tool.calls == [{"query": "q1"}, {"query": "q2"}]
+    assert outcome.reason == "sufficient"
+    assert [event["event"] for event in outcome.trace_events[:6]] == [
+        "react_policy_step",
+        "react_main_step",
+        "react_reflect_step",
+        "react_policy_step",
+        "react_main_step",
+        "react_reflect_step",
+    ]
+    assert outcome.trace_events[2]["data"]["sufficient"] is False
+    assert outcome.trace_events[5]["data"]["sufficient"] is True
+
+
+def test_agentic_loop_threshold_fallback_when_llm_judge_disabled() -> None:
+    """禁用 LLM judge 时应使用 top_score 阈值判断充分性。"""
+    low_tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], sufficient=True, top_score=0.4)])
+    low_loop = BoundedReActLoop(
+        tools={"fake": low_tool},
+        budget=ReActBudget(max_steps=1, token_budget=100, timeout_seconds=5),
+        use_llm_judge=False,
+        sufficient_score_threshold=0.5,
+    )
+
+    low = low_loop.run("问题", allowed_tools=["fake"])
+
+    assert low.reason == "max_steps"
+    assert low.trace_events[1]["data"]["driver"] == "heuristic"
+
+    high_tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], sufficient=False, top_score=0.6)])
+    high_loop = BoundedReActLoop(
+        tools={"fake": high_tool},
+        budget=ReActBudget(max_steps=1, token_budget=100, timeout_seconds=5),
+        use_llm_judge=False,
+        sufficient_score_threshold=0.5,
+    )
+
+    high = high_loop.run("问题", allowed_tools=["fake"])
+
+    assert high.reason == "sufficient"
 
 
 def test_agentic_loop_supports_policy_stop() -> None:
@@ -231,7 +333,7 @@ def test_agentic_loop_supports_policy_stop() -> None:
 
 def test_agentic_loop_falls_back_when_policy_fails() -> None:
     """policy 失败时应当步降级 heuristic 并继续执行。"""
-    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据", "provenance": {"source": "local://doc"}}], sufficient=True)])
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据", "provenance": {"source": "local://doc"}}], sufficient=True, top_score=0.8)])
     policy = ScriptedPolicy(should_raise=True)
     loop = BoundedReActLoop(
         tools={"fake": tool},

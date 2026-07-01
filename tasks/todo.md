@@ -68,31 +68,31 @@
 
 ## Phase 3 — 主循环三段式单步收敛
 
-- [ ] 扩展 `BoundedReActLoop.__init__` 接收阈值和 digest 长度。
+- [x] 扩展 `BoundedReActLoop.__init__` 接收阈值和 digest 长度。
   - 验收：支持 `sufficient_score_threshold`、`observation_digest_chars`，默认兼容现有构造。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [ ] 新增 `_build_observation_digest`。
+- [x] 新增 `_build_observation_digest`。
   - 验收：从 evidence 中提取截断 content、provenance、top_score、count、error、external，整体不超过配置长度。
   - 验证：digest 单测或 loop 测试断言。
-- [ ] 新增 loop 内 `_reflect` 降级封装。
+- [x] 新增 loop 内 `_reflect` 降级封装。
   - 验收：judge 开启时调用 policy reflect；judge 关闭或异常时调用 heuristic reflect。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [ ] 调整 `decision.stop` 收敛口径。
+- [x] 调整 `decision.stop` 收敛口径。
   - 验收：`decision.stop or action is None` 固定为 `policy_stop`，不因 `decision.sufficient` 返回 `sufficient`。
   - 验证：新增 / 更新 policy stop 测试。
-- [ ] 移除 `decision.sufficient` 直接收敛路径。
+- [x] 移除 `decision.sufficient` 直接收敛路径。
   - 验收：`decision.sufficient=True` 但 reflect false 时不收敛。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [ ] 移除 `observation.sufficient` 直接收敛路径。
+- [x] 移除 `observation.sufficient` 直接收敛路径。
   - 验收：observation sufficient true 但 reflect false / 阈值不足时不收敛。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [ ] 新增 `react_reflect_step` trace。
+- [x] 新增 `react_reflect_step` trace。
   - 验收：trace data 含 `node_name`、`step_index`、`sufficient`、`reason_len`、`next_query_hint_present`、`driver`。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [ ] 确认 trace 不泄露完整敏感正文。
+- [x] 确认 trace 不泄露完整敏感正文。
   - 验收：完整 task_input、evidence content、reflect reason 不出现在 trace 文本中。
   - 验证：更新 trace 安全测试。
-- [ ] 实现 `react_use_llm_judge=false` 阈值路径。
+- [x] 实现 `react_use_llm_judge=false` 阈值路径。
   - 验收：禁用 judge 时由 `top_score >= threshold` 和 evidence count 决定收敛。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
 

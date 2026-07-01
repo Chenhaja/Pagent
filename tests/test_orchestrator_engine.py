@@ -124,6 +124,8 @@ def test_orchestrator_logs_node_error_event(caplog) -> None:
     assert error_record.fields["node_name"] == "fail"
     assert error_record.fields["status"] == "failed"
     assert error_record.fields["error_count"] == 1
+    assert error_record.fields["errors"] == ["boom"]
+    assert error_record.fields["error_summary"] == "boom"
 
 
 def test_orchestrator_stops_on_failed_node() -> None:

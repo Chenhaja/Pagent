@@ -1,9 +1,11 @@
+import logging
 from datetime import date
 from typing import Any
 
 from pydantic import ValidationError
 
 from app.core.config import get_settings
+from app.core.logging import log_event
 from app.models.schemas import NodeResult, SkillContext, WorkflowState
 from app.orchestrator.node_base import Node
 from app.orchestrator.react_loop import BoundedReActLoop, ReActBudget, ReActOutcome
@@ -15,6 +17,7 @@ from app.tools.retrieval import Retriever, build_retriever
 
 
 INSUFFICIENT_EVIDENCE_WARNING = "依据可能不足，建议补充材料或核对官方来源"
+logger = logging.getLogger(__name__)
 
 
 class QANode(Node):
@@ -120,7 +123,19 @@ class QANode(Node):
         )
         try:
             qa_result = self.skill.run(context)
-        except (ValueError, ValidationError):
+        except (ValueError, ValidationError) as error:
+            log_event(
+                logger,
+                logging.WARNING,
+                "qa_failed",
+                "QA 生成失败",
+                error_type=type(error).__name__,
+                evidence_count=len(evidence),
+                react_reason=outcome.reason,
+                steps_used=outcome.steps_used,
+                tool_calls=outcome.tool_calls,
+                fallback_used=outcome.fallback_used,
+            )
             return NodeResult.failed(errors=["qa_failed"])
 
         qa_result = self._apply_law_stale_warnings(qa_result, evidence)

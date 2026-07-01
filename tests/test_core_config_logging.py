@@ -7,7 +7,7 @@ from app.core.logging import JsonLineFormatter, configure_logging
 
 def test_default_settings_use_safe_local_values() -> None:
     """默认配置应使用安全的本地占位值。"""
-    settings = get_settings()
+    settings = Settings()
 
     assert settings.service_name == "patent-agent"
     assert settings.environment == "local"

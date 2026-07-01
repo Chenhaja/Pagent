@@ -83,6 +83,9 @@ def dispatch_agent(request: AgentRequest) -> dict[str, Any]:
                 status_code=400,
                 duration_ms=int((time.perf_counter() - started_at) * 1000),
                 session_id=request.session_id,
+                errors=result.get("errors", []),
+                error_summary=";".join(result.get("errors", [])[:3]),
+                error_message=result.get("message"),
             )
             raise HTTPException(status_code=400, detail=build_error_detail(result))
         if "patch" in result:

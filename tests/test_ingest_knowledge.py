@@ -109,6 +109,7 @@ def test_ingest_knowledge_embeds_and_upserts_payload(tmp_path) -> None:
     (tmp_path / "law" / "patent_law.md").write_text("第22条\n授予专利权的发明应具备创造性。", encoding="utf-8")
     embedding = FakeEmbedding()
     qdrant = FakeQdrant()
+    settings = Settings(retrieval_use_hybrid=False)
 
     points = ingest_knowledge(
         tmp_path,
@@ -116,12 +117,13 @@ def test_ingest_knowledge_embeds_and_upserts_payload(tmp_path) -> None:
         embedding_client=embedding,
         qdrant_client=qdrant,
         vector_size=1024,
+        settings=settings,
     )
 
     assert embedding.calls == ["第22条\n授予专利权的发明应具备创造性。"]
     assert len(points) == 1
     assert qdrant.calls == [
-        {"collection_name": "patent_kb", "vector_size": 1024},
+        {"collection_name": "patent_kb", "vector_size": 1024, "settings": settings},
         {"collection_name": "patent_kb", "points": points},
     ]
     assert points[0]["vector"] == [0.1, 0.2]

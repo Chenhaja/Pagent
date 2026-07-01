@@ -111,6 +111,29 @@ def test_agent_api_logs_request_lifecycle_with_session_context(monkeypatch, capl
     assert events[0].request_id
 
 
+def test_agent_api_logs_failure_reason(monkeypatch, caplog) -> None:
+    """统一 Agent API 失败日志应包含可定位错误原因。"""
+    class StubAgentDispatchService:
+        """测试用失败 dispatch 服务。"""
+
+        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+            """返回失败响应。"""
+            return {"status": "failed", "errors": ["qa_failed:ValidationError"], "message": "QA 失败"}
+
+    monkeypatch.setattr(routes, "AgentDispatchService", StubAgentDispatchService)
+    client = TestClient(app)
+
+    with caplog.at_level(logging.WARNING, logger="app.api.routes"):
+        response = client.post("/agent", json={"raw_input": "继续", "session_id": "s1"})
+
+    assert response.status_code == 400
+    record = next(item for item in caplog.records if getattr(item, "event", None) == "request_end")
+    assert record.fields["errors"] == ["qa_failed:ValidationError"]
+    assert record.fields["error_summary"] == "qa_failed:ValidationError"
+    assert record.fields["error_message"] == "QA 失败"
+
+
+
 def test_agent_api_accepts_and_forwards_session_id(monkeypatch) -> None:
     """统一 Agent API 应接收并透传可选 session_id。"""
     captured = {}

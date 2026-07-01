@@ -69,6 +69,9 @@ class Orchestrator:
                     status=result.status,
                     duration_ms=duration_ms,
                     error_count=len(result.errors),
+                    errors=result.errors,
+                    error_summary=";".join(result.errors[:3]),
+                    trace_event_count=len(result.trace_events),
                 )
 
             if result.status != "success":

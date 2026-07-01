@@ -183,6 +183,28 @@ def test_openai_compatible_embedding_client_returns_empty_on_provider_error() ->
     assert client.embed("问题") == []
 
 
+def test_qdrant_retriever_logs_result_previews(caplog) -> None:
+    """Qdrant 检索后应输出命中块短预览日志。"""
+    embedding = FakeEmbedding(vector=[0.1, 0.2])
+    qdrant = FakeQdrantClient(
+        [FakeQdrantHit(payload={"content": "敏感块内容" * 20, "source": "local://a", "document_id": "a", "locator": "第1段"}, score=0.9)]
+    )
+    retriever = QdrantRetriever(collection_name="patent_kb", embedding_client=embedding, qdrant_client=qdrant)
+
+    with caplog.at_level(logging.DEBUG, logger="app.tools.retrieval"):
+        retriever.search("创造性", top_k=1)
+
+    record = next(item for item in caplog.records if getattr(item, "event", None) == "retrieval_result")
+    assert record.fields["backend"] == "qdrant"
+    assert record.fields["retrieval_mode"] == "vector"
+    assert record.fields["rank"] == 1
+    assert record.fields["document_id"] == "a"
+    assert record.fields["locator"] == "第1段"
+    assert record.fields["content_preview"].endswith("...[TRUNCATED]")
+    assert len(record.fields["content_preview"]) < len("敏感块内容" * 20)
+
+
+
 def test_qdrant_retriever_maps_hits_to_retrieval_results() -> None:
     """Qdrant 检索器应把命中 payload 映射为检索结果。"""
     embedding = FakeEmbedding(vector=[0.1, 0.2])
@@ -293,6 +315,23 @@ def test_qdrant_retriever_recall_returns_fetch_k_candidates() -> None:
 
     assert [result.provenance["document_id"] for result in results] == ["a", "b"]
     assert qdrant.calls[0]["limit"] == 2
+
+
+def test_qdrant_retriever_logs_hybrid_result_previews(caplog) -> None:
+    """Hybrid 检索后应在预览日志中标记 hybrid 模式。"""
+    qdrant = FakeQdrantClient([FakeQdrantHit(payload={"content": "创造性内容" * 20, "source": "local://a", "document_id": "a"}, score=0.9)])
+    sparse_encoder = FakeSparseEncoder({"indices": [1], "values": [0.5]})
+    retriever = QdrantRetriever("patent_kb_hybrid", FakeEmbedding([0.1]), qdrant, settings=Settings(retrieval_use_hybrid=True), sparse_encoder=sparse_encoder)
+
+    with caplog.at_level(logging.DEBUG, logger="app.tools.retrieval"):
+        retriever.search("创造性", top_k=1, fetch_k=3)
+
+    record = next(item for item in caplog.records if getattr(item, "event", None) == "retrieval_result")
+    assert record.fields["backend"] == "qdrant"
+    assert record.fields["retrieval_mode"] == "hybrid"
+    assert record.fields["document_id"] == "a"
+    assert record.fields["content_preview"].endswith("...[TRUNCATED]")
+
 
 
 def test_qdrant_retriever_uses_hybrid_query_when_sparse_encoder_exists() -> None:
@@ -676,6 +715,25 @@ def test_build_retriever_falls_back_to_local_when_backend_unavailable() -> None:
     """检索工厂配置缺失或未知后端时应回退本地后端。"""
     assert isinstance(build_retriever(Settings(retrieval_backend="unknown")), LocalRetrievalTool)
     assert isinstance(build_retriever(Settings(retrieval_backend="qdrant")), LocalRetrievalTool)
+
+
+def test_local_retrieval_tool_logs_result_previews(caplog) -> None:
+    """本地检索后应输出命中块短预览日志。"""
+    tool = LocalRetrievalTool(
+        documents=[{"id": "doc-1", "text": "创造性内容" * 20, "source": "local://case/doc-1", "locator": "第2段"}]
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="app.tools.retrieval"):
+        tool.search("创造性", top_k=1)
+
+    record = next(item for item in caplog.records if getattr(item, "event", None) == "retrieval_result")
+    assert record.fields["backend"] == "local"
+    assert record.fields["retrieval_mode"] == "keyword"
+    assert record.fields["rank"] == 1
+    assert record.fields["document_id"] == "doc-1"
+    assert record.fields["locator"] == "第2段"
+    assert record.fields["content_preview"].endswith("...[TRUNCATED]")
+
 
 
 def test_local_retrieval_tool_returns_predictable_results_with_provenance() -> None:

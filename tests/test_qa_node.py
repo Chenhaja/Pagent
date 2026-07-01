@@ -531,12 +531,17 @@ def test_qa_node_keeps_basis_from_real_evidence_after_policy_rewrite(monkeypatch
     assert result.output["qa_result"]["basis"] == ["真实出处"]
 
 
-def test_qa_node_returns_failed_when_skill_output_invalid() -> None:
-    """QA node 遇到无效 skill 输出时应结构化失败。"""
+def test_qa_node_returns_failed_when_skill_output_invalid(caplog) -> None:
+    """QA node 遇到无效 skill 输出时应结构化失败并记录原因。"""
     node = QANode(skill=PatentQASkill(llm_client=FakeLLMClient(response={"answer": "缺少字段"})))
     state = WorkflowState(raw_input="这个权利要求有什么风险？", normalized_input="这个权利要求有什么风险？")
 
-    result = node.run(state)
+    with caplog.at_level("WARNING", logger="app.nodes.qa"):
+        result = node.run(state)
 
     assert result.status == "failed"
     assert result.errors == ["qa_failed"]
+    record = next(item for item in caplog.records if getattr(item, "event", None) == "qa_failed")
+    assert record.fields["error_type"] == "ValidationError"
+    assert record.fields["react_reason"]
+    assert "这个权利要求有什么风险" not in str(record.fields)

@@ -150,21 +150,21 @@
 
 ## Phase 6 — Trace、安全与旧行为清理
 
-- [ ] 确认 `react_policy_step` 不记录完整 thought。
+- [x] 确认 `react_policy_step` 不记录完整 thought。
   - 验收：trace 中只有 `thought_len` 或安全摘要。
-- [ ] 确认 trace 不记录完整 query。
+- [x] 确认 trace 不记录完整 query。
   - 验收：负向测试包含敏感 query 字符串。
-- [ ] 确认 trace 不记录完整 evidence 正文。
+- [x] 确认 trace 不记录完整 evidence 正文。
   - 验收：负向测试包含敏感 evidence 字符串。
-- [ ] 确认 LLM trace_context 不含 raw input / api_key。
+- [x] 确认 LLM trace_context 不含 raw input / api_key。
   - 验收：FakeLLMClient trace 中不出现敏感字段。
-- [ ] 搜索并清理 `continue_or_converge`。
+- [x] 搜索并清理 `continue_or_converge`。
   - 验收：仅保留在 heuristic 分支或已删除。
-- [ ] 确认 outcome 与 converged trace 都有 `driver`。
+- [x] 确认 outcome 与 converged trace 都有 `driver`。
   - 验收：测试断言字段存在。
-- [ ] 确认 outcome 与 converged trace 都有 `fallback_used`。
+- [x] 确认 outcome 与 converged trace 都有 `fallback_used`。
   - 验收：fallback 场景测试断言为 `True`。
-- [ ] 验证 Phase 6。
+- [x] 验证 Phase 6。
   - 命令：`conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_qa_node.py`
 
 ## Phase 7 — 回归与总体验收

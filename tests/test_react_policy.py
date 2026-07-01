@@ -34,7 +34,7 @@ def test_llm_react_policy_parses_valid_decision() -> None:
     )
     policy = LLMReActPolicy(llm_client=client, node_name="qa", model="cheap", temperature=0.0, timeout=3)
 
-    decision = policy.decide("原问题", [tool_card()], [], 0)
+    decision = policy.decide("敏感原问题", [tool_card()], [], 0)
 
     assert decision == ReActDecision(
         thought="需要先检索本地知识库",
@@ -43,11 +43,15 @@ def test_llm_react_policy_parses_valid_decision() -> None:
         stop=False,
         sufficient=False,
     )
-    assert trace_sink.records[0]["task_type"] == "react_policy"
-    assert trace_sink.records[0]["node_name"] == "qa"
-    assert trace_sink.records[0]["model"] == "cheap"
-    assert trace_sink.records[0]["temperature"] == 0.0
-    assert trace_sink.records[0]["timeout"] == 3
+    trace = trace_sink.records[0]
+    assert trace["task_type"] == "react_policy"
+    assert trace["node_name"] == "qa"
+    assert trace["model"] == "cheap"
+    assert trace["temperature"] == 0.0
+    assert trace["timeout"] == 3
+    assert "api_key" not in trace
+    assert "raw_input" not in trace
+    assert "敏感原问题" not in str(trace)
 
 
 @pytest.mark.parametrize(

@@ -156,6 +156,31 @@ def test_agentic_loop_trace_does_not_expose_full_input_or_content() -> None:
     assert step["external"] is False
 
 
+def test_agentic_loop_policy_trace_does_not_expose_thought_or_query() -> None:
+    """policy trace 只能记录 thought 长度,不能记录完整 thought 或 query。"""
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[], sufficient=False)])
+    policy = ScriptedPolicy([
+        ReActDecision(thought="敏感推理全文", action="fake", tool_input={"query": "敏感改写查询"}, stop=False, sufficient=False),
+    ])
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=1, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    outcome = loop.run("原始敏感问题", allowed_tools=["fake"])
+
+    trace_text = str(outcome.trace_events)
+    assert "敏感推理全文" not in trace_text
+    assert "敏感改写查询" not in trace_text
+    assert "原始敏感问题" not in trace_text
+    policy_step = outcome.trace_events[0]["data"]
+    assert policy_step["thought_len"] == len("敏感推理全文")
+    assert "thought" not in policy_step
+
+
 def test_agentic_loop_uses_policy_decision_and_rewritten_query() -> None:
     """LLM policy 路径应使用决策中的工具和改写 query。"""
     tool = FakeTool([

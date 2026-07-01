@@ -35,12 +35,12 @@ INTENT_ROUTER_SYSTEM_PROMPT = """# 任务目标
 
     # 判定规则
     - intent 必须是以下之一:claim_generation、claim_revision、translation、qa、unknown。
-  - claim_generation:把技术方案/交底写成权利要求、说明书等"生成新文本"的诉求。
-  - claim_revision:对已有权利要求/文本的修改、审查、查错。
-  - translation:专利文本的语言翻译。
-  - qa:任何专利相关的知识性诉求,包括概念解释、区别/比较、流程与标准、判断思路、咨询建议等(只要不要求生成/修改/翻译具体文本,即归此类)。
-  - unknown:仅用于"与专利无关"或"意图确实无法判断"的输入。
-  - 兜底规则:只要输入与专利/知识产权相关,且不属于 generation/revision/translation,一律归入 qa,而不是 unknown。unknown 是最后选择,不可作为专利问题的默认值。
+    - claim_generation:把技术方案/交底写成权利要求、说明书等"生成新文本"的诉求。
+    - claim_revision:对已有权利要求/文本的修改、审查、查错。
+    - translation:专利文本的语言翻译。
+    - qa:任何专利相关的知识性诉求,包括概念解释、区别/比较、流程与标准、判断思路、咨询建议等(只要不要求生成/修改/翻译具体文本,即归此类)。
+    - unknown:仅用于"与专利无关"或"意图确实无法判断"的输入。
+    - 兜底规则:只要输入与专利/知识产权相关,且不属于 generation/revision/translation,一律归入 qa,而不是 unknown。unknown 是最后选择,不可作为专利问题的默认值。
 
     # 专利域约束
     - 禁止臆造法条、专利号、检索结果、引用或技术事实;只做意图分类。

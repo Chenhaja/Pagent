@@ -80,6 +80,45 @@ def test_patent_qa_skill_returns_structured_answer_with_prompt_layers() -> None:
     assert "<data>" in messages[2].content
 
 
+def test_patent_qa_skill_injects_history_as_native_messages() -> None:
+    """QA skill 应把历史展开为原生 user/assistant 消息。"""
+    llm_client = RecordingLLMClient()
+    skill = PatentQASkill(llm_client=llm_client)
+    context = SkillContext(
+        task_type="patent_qa",
+        state_snapshot={
+            "question": "把上一条用通俗话讲一遍",
+            "retrieval_results": [{"content": "本轮检索材料", "provenance": {"source": "local://doc"}}],
+            "claims_draft": [],
+            "history": [
+                {"role": "user", "content": "上一轮用户问题"},
+                {"role": "assistant", "content": "上一轮模型回答独有文本"},
+                {"role": "tool", "content": "未知角色历史"},
+                {"role": "assistant", "content": "   "},
+            ],
+        },
+    )
+
+    result = skill.run(context)
+
+    assert isinstance(result, PatentQAResult)
+    messages = llm_client.calls[0]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "assistant", "user", "user", "user"]
+    assert messages[1].content == "上一轮用户问题"
+    assert messages[2].content == "上一轮模型回答独有文本"
+    assert messages[3].content == "未知角色历史"
+    assert "把上一条用通俗话讲一遍" in messages[-1].content
+    assert "本轮检索材料" in messages[-1].content
+    assert "上一轮模型回答独有文本" not in messages[-1].content
+
+
+def test_patent_qa_system_prompt_limits_history_as_context_only() -> None:
+    """QA system prompt 应声明历史仅作上下文且不能作为依据。"""
+    assert "历史消息" in PATENT_QA_SYSTEM_PROMPT
+    assert "仅用于理解本轮指代与延续" in PATENT_QA_SYSTEM_PROMPT
+    assert "不得把历史内容当作已证实的事实或来源" in PATENT_QA_SYSTEM_PROMPT
+
+
 def test_patent_qa_skill_rejects_invalid_llm_output() -> None:
     """patent_qa skill 应拒绝不符合 QA schema 的 LLM 输出。"""
     skill = PatentQASkill(llm_client=FakeLLMClient(response={"answer": "缺少字段"}))

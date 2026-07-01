@@ -48,18 +48,33 @@ class PatentQASkill:
         context.examples.extend(PATENT_QA_FEW_SHOT_EXAMPLES)
         context.output_schema.update(PATENT_QA_OUTPUT_SCHEMA)
 
-        response = self.llm_client.generate(
-            messages=[
-                LLMMessage(role="system", content=prompt_layers["system"]),
+        messages = [LLMMessage(role="system", content=prompt_layers["system"])]
+        messages.extend(self._build_history_messages(context.state_snapshot.get("history") or []))
+        messages.extend(
+            [
                 LLMMessage(role="user", content=prompt_layers["task"]),
                 LLMMessage(role="user", content=prompt_layers["user_data"]),
-            ],
+            ]
+        )
+        response = self.llm_client.generate(
+            messages=messages,
             output_schema=PATENT_QA_OUTPUT_SCHEMA,
             trace_context={"task_type": context.task_type, "node_name": "qa"},
         )
         if response.errors:
             raise ValueError(response.errors[0]["code"])
         return PatentQAResult.model_validate(response.content)
+
+    def _build_history_messages(self, history: list[dict]) -> list[LLMMessage]:
+        """将会话历史转换为原生 LLM 消息。"""
+        messages = []
+        for turn in history:
+            content = str(turn.get("content", ""))
+            if not content.strip():
+                continue
+            role = "assistant" if turn.get("role") == "assistant" else "user"
+            messages.append(LLMMessage(role=role, content=content))
+        return messages
 
     def _build_prompt_layers(self, context: SkillContext) -> dict[str, str]:
         """构造 QA 分层 prompt。

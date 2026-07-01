@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import redact_sensitive_text
+from app.prompts.query_expand import QUERY_EXPAND_OUTPUT_SCHEMA, QUERY_EXPAND_SYSTEM_PROMPT, build_query_expand_user_prompt
 from app.tools.embeddings import EmbeddingClient, OpenAICompatibleEmbeddingClient
+from app.tools.llm import LLMClient, LLMMessage, build_llm_client
 
 
 class RetrievalResult(BaseModel):
@@ -735,6 +737,60 @@ class FakeQueryRewriter:
         """
         self.calls.append(query)
         return self.queries
+
+
+class LLMQueryRewriter:
+    """基于 OpenAI 兼容 LLM 的查询改写器。
+
+    Args:
+        settings: 应用配置。
+        llm_client: 可选 LLM 客户端,测试可注入 fake。
+
+    Returns:
+        通过标准 chat completions 通道生成检索扩展式的组件。
+    """
+
+    def __init__(self, settings: Settings, llm_client: LLMClient | None = None) -> None:
+        self.settings = settings
+        self.llm_client = llm_client or build_llm_client(settings)
+
+    def expand(self, query: str) -> list[str]:
+        """调用 LLM 扩展查询。
+
+        Args:
+            query: 原始查询。
+
+        Returns:
+            原始 query 置首位的扩展查询列表;失败时返回空列表供上层降级。
+        """
+        normalized_query = (query or "").strip()
+        if not normalized_query:
+            return []
+        mode = self.settings.query_rewrite_mode if self.settings.query_rewrite_mode in QUERY_EXPAND_SYSTEM_PROMPT else "multi"
+        count = max(1, int(self.settings.query_rewrite_count))
+        response = self.llm_client.generate(
+            messages=[
+                LLMMessage(role="system", content=QUERY_EXPAND_SYSTEM_PROMPT[mode]),
+                LLMMessage(role="user", content=build_query_expand_user_prompt(normalized_query, mode, count)),
+            ],
+            output_schema=QUERY_EXPAND_OUTPUT_SCHEMA,
+            model=self.settings.query_rewrite_model or self.settings.llm_cheap_model or self.settings.llm_model,
+            temperature=self.settings.query_rewrite_temperature,
+            timeout=self.settings.retrieval_timeout_seconds,
+            trace_context={"node_name": "retrieval", "task_type": "query_expand"},
+        )
+        if response.errors or not isinstance(response.content, dict):
+            return []
+        raw_queries = response.content.get("queries") or []
+        expanded = [str(item).strip() for item in raw_queries if str(item).strip()]
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in [normalized_query, *expanded]:
+            if item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+        return result[: count + 1] if len(result) > 1 else []
 
 
 class HTTPQueryRewriter:

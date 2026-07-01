@@ -3,7 +3,8 @@ import json
 from app.core.config import Settings
 from app.prompts.query_expand import QUERY_EXPAND_OUTPUT_SCHEMA, QUERY_EXPAND_SYSTEM_PROMPT, build_query_expand_user_prompt
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
-from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LocalLexicalSparseEncoder, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, ServiceSparseEncoder, _QdrantHTTPClient, _build_sparse_encoder, build_retriever
+from app.tools.llm import FakeLLMClient, LLMResponse, InMemoryLLMTraceSink
+from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LLMQueryRewriter, LocalLexicalSparseEncoder, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, ServiceSparseEncoder, _QdrantHTTPClient, _build_sparse_encoder, build_retriever
 
 
 class FakeQdrantHit:
@@ -77,6 +78,27 @@ class RaisingQueryRewriter:
     def expand(self, query: str) -> list[str]:
         """模拟查询改写失败。"""
         raise RuntimeError("rewrite failed")
+
+
+class RecordingLLMClient(FakeLLMClient):
+    """记录 generate 调用参数的测试 LLM。"""
+
+    def __init__(self, response: dict | None = None, error: str | None = None) -> None:
+        super().__init__(response=response, error=error)
+        self.calls = []
+
+    def generate(self, **kwargs) -> LLMResponse:
+        """记录调用参数并返回固定响应。"""
+        self.calls.append(kwargs)
+        return super().generate(**kwargs)
+
+
+class NonDictContentLLMClient:
+    """返回非 dict content 的测试 LLM。"""
+
+    def generate(self, **kwargs):
+        """模拟非法 LLM 响应结构。"""
+        return type("Response", (), {"content": [], "errors": []})()
 
 
 class FakeHTTPResponse:
@@ -434,6 +456,57 @@ def test_fake_query_rewriter_returns_configured_queries() -> None:
 
     assert rewriter.expand("创造性要求") == ["创造性", "非显而易见性"]
     assert rewriter.calls == ["创造性要求"]
+
+
+def test_llm_query_rewriter_expands_with_original_first_and_trace_context() -> None:
+    """LLM query rewriter 应通过 LLMClient 生成扩展式并保留原始 query 首位。"""
+    trace_sink = InMemoryLLMTraceSink()
+    llm = FakeLLMClient(response={"queries": ["创造性要求", "非显而易见性", "", "创造性评价"]}, trace_sink=trace_sink)
+    settings = Settings(
+        query_rewrite_count=2,
+        query_rewrite_model="rewrite-model",
+        query_rewrite_temperature=0.4,
+        retrieval_timeout_seconds=6,
+    )
+
+    queries = LLMQueryRewriter(settings, llm_client=llm).expand("创造性要求")
+
+    assert queries == ["创造性要求", "非显而易见性", "创造性评价"]
+    assert trace_sink.records[0]["model"] == "rewrite-model"
+    assert trace_sink.records[0]["temperature"] == 0.4
+    assert trace_sink.records[0]["timeout"] == 6
+    assert trace_sink.records[0]["node_name"] == "retrieval"
+    assert trace_sink.records[0]["task_type"] == "query_expand"
+
+
+def test_llm_query_rewriter_passes_messages_schema_and_model_fallback() -> None:
+    """LLM query rewriter 应传入 messages、schema 并按配置回退模型。"""
+    llm = RecordingLLMClient(response={"queries": ["权利要求书"]})
+    settings = Settings(query_rewrite_model=None, llm_cheap_model="cheap-model", llm_model="strong-model")
+
+    queries = LLMQueryRewriter(settings, llm_client=llm).expand("权利要求")
+
+    assert queries == ["权利要求", "权利要求书"]
+    assert llm.calls[0]["output_schema"] == QUERY_EXPAND_OUTPUT_SCHEMA
+    assert llm.calls[0]["model"] == "cheap-model"
+    assert [message.role for message in llm.calls[0]["messages"]] == ["system", "user"]
+    assert "<data>" in llm.calls[0]["messages"][1].content
+
+
+def test_llm_query_rewriter_returns_empty_on_blank_query_and_errors() -> None:
+    """LLM query rewriter 对空输入或 LLM 错误应返回空列表。"""
+    llm = RecordingLLMClient(response={"queries": ["不应调用"]})
+
+    assert LLMQueryRewriter(Settings(), llm_client=llm).expand("  ") == []
+    assert llm.calls == []
+    assert LLMQueryRewriter(Settings(), llm_client=FakeLLMClient(error="provider_error")).expand("创造性") == []
+
+
+def test_llm_query_rewriter_returns_empty_on_invalid_content() -> None:
+    """LLM query rewriter 对非法响应结构应返回空列表。"""
+    assert LLMQueryRewriter(Settings(), llm_client=NonDictContentLLMClient()).expand("创造性") == []
+    assert LLMQueryRewriter(Settings(), llm_client=FakeLLMClient(response={})).expand("创造性") == []
+    assert LLMQueryRewriter(Settings(), llm_client=FakeLLMClient(response={"queries": []})).expand("创造性") == []
 
 
 def test_multi_query_retriever_expands_merges_and_deduplicates() -> None:

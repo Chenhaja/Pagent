@@ -71,6 +71,8 @@ class QANode(Node):
             policy=self._build_react_policy(),
             tool_cards=registry.tool_cards(allowed_tools),
             use_llm_judge=self.settings.react_use_llm_judge,
+            sufficient_score_threshold=self.settings.react_sufficient_score_threshold,
+            observation_digest_chars=self.settings.react_observation_digest_chars,
         )
 
     def _build_react_policy(self) -> ReActPolicy:
@@ -78,10 +80,12 @@ class QANode(Node):
         if self.settings.react_policy_driver != "llm" or not self._has_llm_config():
             return HeuristicReActPolicy()
         model = self.settings.react_policy_model or self.settings.llm_cheap_model or self.settings.llm_model
+        reflect_model = self.settings.react_reflect_model or model
         return LLMReActPolicy(
             llm_client=build_llm_client(self.settings),
             node_name=self.name,
             model=model,
+            reflect_model=reflect_model,
             temperature=self.settings.react_policy_temperature,
             timeout=self.settings.react_timeout_seconds,
         )

@@ -367,6 +367,21 @@ def test_qa_node_continues_when_retrieval_raises() -> None:
     assert trace_event(result, "qa_retrieval_completed")["data"]["result_count"] == 0
 
 
+def test_qa_node_passes_react_reflect_loop_settings(monkeypatch) -> None:
+    """QA 默认 loop 应继承 reflect 阈值和 observation digest 长度配置。"""
+    settings = Settings(react_sufficient_score_threshold=0.7, react_observation_digest_chars=123)
+    retrieval_tool = CountingRetrievalTool()
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+
+    node = QANode(skill=RecordingQASkill())
+
+    assert node.react_loop.sufficient_score_threshold == 0.7
+    assert node.react_loop.observation_digest_chars == 123
+    assert node.react_loop.heuristic_policy.sufficient_score_threshold == 0.7
+
+
 def test_qa_node_uses_llm_react_policy_for_decision_sequence(monkeypatch) -> None:
     """QA 默认 loop 应按 react policy 配置使用 LLM 决策和改写 query。"""
     settings = Settings(
@@ -374,6 +389,7 @@ def test_qa_node_uses_llm_react_policy_for_decision_sequence(monkeypatch) -> Non
         llm_model="base-model",
         llm_api_key="secret",
         llm_cheap_model="cheap-model",
+        react_reflect_model="reflect-model",
         react_policy_driver="llm",
         react_policy_temperature=0.1,
         react_timeout_seconds=5,
@@ -398,10 +414,56 @@ def test_qa_node_uses_llm_react_policy_for_decision_sequence(monkeypatch) -> Non
     assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["model"] == "cheap-model"
     assert llm_client.calls[0]["temperature"] == 0.1
-    assert llm_client.calls[1]["model"] == "cheap-model"
+    assert llm_client.calls[1]["model"] == "reflect-model"
     assert llm_client.calls[1]["temperature"] == 0.0
     assert trace_event(result, "react_policy_step")["data"]["driver"] == "llm"
+    assert trace_event(result, "react_reflect_step")["data"] == {
+        "node_name": "qa",
+        "step_index": 0,
+        "sufficient": True,
+        "reason_len": len("证据充分"),
+        "next_query_hint_present": False,
+        "driver": "llm",
+    }
     assert trace_event(result, "react_main_converged")["data"]["driver"] == "llm"
+
+
+def test_qa_node_reflect_false_then_true_converges_with_sufficient(monkeypatch) -> None:
+    """QA 默认 loop 应在 reflect false 后继续并在 reflect true 后充分收敛。"""
+    settings = Settings(
+        llm_base_url="https://llm.example.test/v1",
+        llm_model="base-model",
+        llm_api_key="secret",
+        react_policy_driver="llm",
+        react_max_steps=2,
+        retrieval_top_k=3,
+    )
+    unique_reason = "第二轮反思充分但不应进入 QA 输出"
+    llm_client = SequenceLLMClient([
+        {"thought": "先查", "action": "kb_retrieval", "tool_input": {"query": "第一问"}, "stop": False, "sufficient": False},
+        {"sufficient": False, "reason": "第一轮不足", "next_query_hint": "第二问"},
+        {"thought": "再查", "action": "kb_retrieval", "tool_input": {"query": "会被 hint 覆盖"}, "stop": False, "sufficient": False},
+        {"sufficient": True, "reason": unique_reason, "next_query_hint": None},
+    ])
+    retrieval_tool = CountingRetrievalTool([
+        RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc", "locator": "doc"}, score=1)
+    ])
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+    monkeypatch.setattr(qa_module, "build_llm_client", lambda settings: llm_client)
+
+    result = QANode(skill=RecordingQASkill(answer="最终回答")).run(WorkflowState(raw_input="原问题", normalized_input="原问题"))
+
+    assert retrieval_tool.calls == [
+        {"query": "第一问", "top_k": 3, "as_of": None, "fetch_k": None},
+        {"query": "第二问", "top_k": 3, "as_of": None, "fetch_k": None},
+    ]
+    reflect_events = [event for event in result.trace_events if event["event"] == "react_reflect_step"]
+    assert [event["data"]["sufficient"] for event in reflect_events] == [False, True]
+    assert trace_event(result, "react_main_converged")["data"]["reason"] == "sufficient"
+    assert unique_reason not in str(result.output["qa_result"])
+    assert unique_reason not in str(result.trace_events)
 
 
 def test_qa_node_falls_back_to_heuristic_without_llm_config(monkeypatch) -> None:

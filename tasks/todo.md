@@ -122,25 +122,25 @@
 
 ## Phase 5 — QA 默认接线与集成回归
 
-- [ ] `QANode._build_react_loop` 传入新增 loop 配置。
+- [x] `QANode._build_react_loop` 传入新增 loop 配置。
   - 验收：传入 `react_sufficient_score_threshold` 和 `react_observation_digest_chars`。
   - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [ ] `QANode._build_react_policy` 传入 reflect model。
+- [x] `QANode._build_react_policy` 传入 reflect model。
   - 验收：`react_reflect_model` 优先，其次 `react_policy_model` / `llm_cheap_model` / `llm_model`。
   - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [ ] 保持无 LLM 配置时安全降级。
+- [x] 保持无 LLM 配置时安全降级。
   - 验收：缺 base_url/model/api_key 时仍使用 `HeuristicReActPolicy`。
   - 验证：既有 QA policy fallback 测试继续通过。
-- [ ] 新增 QA reflect trace 集成测试。
+- [x] 新增 QA reflect trace 集成测试。
   - 验收：QA result trace 中可见 `react_reflect_step`。
   - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [ ] 新增 QA reflect 收敛序列测试。
+- [x] 新增 QA reflect 收敛序列测试。
   - 验收：Fake reflect false 后继续，Fake reflect true 后 `react_main_converged.reason=sufficient`。
   - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
-- [ ] 确认 reflect reason 不进入最终 QA 输出。
+- [x] 确认 reflect reason 不进入最终 QA 输出。
   - 验收：`qa_result` 和用户可见输出不包含 reflect reason 独有文本。
   - 验证：QA 单测断言。
-- [ ] 确认 QA history / basis 回归不破坏。
+- [x] 确认 QA history / basis 回归不破坏。
   - 验收：既有 history_msg_count、basis、风险提示测试继续通过。
   - 验证：`conda run -n autoGLM pytest tests/test_qa_node.py`
 

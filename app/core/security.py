@@ -14,12 +14,28 @@ def redact_sensitive_text(text: str, max_length: int = DEFAULT_REDACTION_MAX_LEN
         max_length: 脱敏后保留的最大长度。
 
     Returns:
-        隐藏 API Key 样式内容并按长度截断后的文本。
+        隐藏密钥、令牌、密码等敏感内容并按长度截断后的文本。
     """
-    redacted = re.sub(r"sk-[A-Za-z0-9_-]+", "[REDACTED]", text)
+    redacted = str(text)
+    patterns = [
+        r"sk-[A-Za-z0-9_-]+",
+        r"Bearer\s+[^\s,;]+",
+        r"(?i)(password\s*=\s*)[^\s,;]+",
+        r"(?i)(token\s*=\s*)[^\s,;]+",
+        r"(?i)(api_key\s*=\s*)[^\s,;]+",
+    ]
+    for pattern in patterns:
+        redacted = re.sub(pattern, _redact_match, redacted)
     if len(redacted) > max_length:
         return f"{redacted[:max_length]}...[TRUNCATED]"
     return redacted
+
+
+def _redact_match(match: re.Match[str]) -> str:
+    """保留键名前缀并替换敏感值。"""
+    if match.lastindex:
+        return f"{match.group(1)}[REDACTED]"
+    return "[REDACTED]"
 
 
 def should_send_full_content(settings: Settings, user_explicitly_allowed: bool) -> bool:

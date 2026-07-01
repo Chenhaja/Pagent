@@ -11,6 +11,10 @@ def test_default_settings_use_safe_local_values() -> None:
 
     assert settings.service_name == "patent-agent"
     assert settings.environment == "local"
+    assert settings.log_format == "auto"
+    assert settings.log_include_context is True
+    assert settings.log_max_field_length == 205
+    assert settings.log_sample_llm_call is False
     assert settings.llm_api_key is None
     assert settings.llm_base_url is None
     assert settings.llm_model == ""
@@ -106,6 +110,10 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_LLM_BASE_URL", "https://llm.example.test/v1")
     monkeypatch.setenv("PAGENT_LLM_MODEL", "test-model")
     monkeypatch.setenv("PAGENT_LLM_API_KEY", "sk-test-secret")
+    monkeypatch.setenv("PAGENT_LOG_FORMAT", "pretty")
+    monkeypatch.setenv("PAGENT_LOG_INCLUDE_CONTEXT", "false")
+    monkeypatch.setenv("PAGENT_LOG_MAX_FIELD_LENGTH", "128")
+    monkeypatch.setenv("PAGENT_LOG_SAMPLE_LLM_CALL", "true")
     monkeypatch.setenv("PAGENT_LLM_TEMPERATURE", "0.3")
     monkeypatch.setenv("PAGENT_LLM_MAX_TOKENS", "1024")
     monkeypatch.setenv("PAGENT_LLM_TIMEOUT", "12.5")
@@ -174,6 +182,10 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.llm_base_url == "https://llm.example.test/v1"
     assert settings.llm_model == "test-model"
     assert settings.llm_api_key == "sk-test-secret"
+    assert settings.log_format == "pretty"
+    assert settings.log_include_context is False
+    assert settings.log_max_field_length == 128
+    assert settings.log_sample_llm_call is True
     assert settings.llm_temperature == 0.3
     assert settings.llm_max_tokens == 1024
     assert settings.llm_timeout == 12.5
@@ -257,6 +269,10 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert "qdrant-secret" not in str(public_values)
     assert "embedding-secret" not in str(public_values)
     assert "rerank-secret" not in str(public_values)
+    assert public_values["log_format"] == "auto"
+    assert public_values["log_include_context"] == "True"
+    assert public_values["log_max_field_length"] == "205"
+    assert public_values["log_sample_llm_call"] == "False"
     assert public_values["memory_enabled"] == "True"
     assert public_values["memory_db_path"] == "./pagent_memory.db"
     assert public_values["memory_history_window"] == "6"

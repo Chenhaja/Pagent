@@ -12,6 +12,10 @@ class Settings(BaseModel):
         service_name: 服务名称,用于日志和观测字段。
         environment: 运行环境名称。
         log_level: 日志级别。
+        log_format: 日志渲染格式,支持 auto、pretty、json。
+        log_include_context: 是否向日志自动注入请求和节点上下文。
+        log_max_field_length: 日志消息和结构化字段最大保留长度。
+        log_sample_llm_call: 是否采样 LLM 调用日志;本轮仅公开配置。
         llm_base_url: OpenAI 兼容 LLM 端点地址,默认不配置。
         llm_model: 默认 LLM 模型名称。
         llm_api_key: 可选 LLM API Key,默认不配置。
@@ -86,6 +90,10 @@ class Settings(BaseModel):
     service_name: str = "patent-agent"
     environment: str = "local"
     log_level: str = "INFO"
+    log_format: str = "auto"
+    log_include_context: bool = True
+    log_max_field_length: int = 205
+    log_sample_llm_call: bool = False
     llm_base_url: str | None = None
     llm_model: str = ""
     llm_api_key: str | None = Field(default=None, exclude=True)
@@ -163,6 +171,10 @@ class Settings(BaseModel):
             "service_name": self.service_name,
             "environment": self.environment,
             "log_level": self.log_level,
+            "log_format": self.log_format,
+            "log_include_context": str(self.log_include_context),
+            "log_max_field_length": str(self.log_max_field_length),
+            "log_sample_llm_call": str(self.log_sample_llm_call),
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
             "llm_temperature": str(self.llm_temperature),
@@ -289,6 +301,10 @@ def get_settings() -> Settings:
         service_name=os.getenv("PAGENT_SERVICE_NAME", "patent-agent"),
         environment=os.getenv("PAGENT_ENVIRONMENT", "local"),
         log_level=os.getenv("PAGENT_LOG_LEVEL", "INFO"),
+        log_format=os.getenv("PAGENT_LOG_FORMAT", "auto"),
+        log_include_context=_get_bool_env("PAGENT_LOG_INCLUDE_CONTEXT", True),
+        log_max_field_length=int(os.getenv("PAGENT_LOG_MAX_FIELD_LENGTH", "205")),
+        log_sample_llm_call=_get_bool_env("PAGENT_LOG_SAMPLE_LLM_CALL", False),
         llm_base_url=os.getenv("PAGENT_LLM_BASE_URL"),
         llm_model=os.getenv("PAGENT_LLM_MODEL", ""),
         llm_api_key=os.getenv("PAGENT_LLM_API_KEY"),

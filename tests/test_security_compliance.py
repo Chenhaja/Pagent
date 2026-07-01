@@ -73,3 +73,17 @@ def test_redact_sensitive_text_masks_api_keys_and_truncates_long_text() -> None:
     assert "[REDACTED]" in redacted
     assert redacted.endswith("...[TRUNCATED]")
     assert len(redacted) <= 95
+
+
+def test_redact_sensitive_text_masks_common_secret_patterns() -> None:
+    """脱敏工具应隐藏常见令牌、密码和 API Key 模式。"""
+    text = "Bearer token-secret password=pass123 token=tok123 api_key=key123 sk-test-secret"
+
+    redacted = redact_sensitive_text(text)
+
+    assert "token-secret" not in redacted
+    assert "pass123" not in redacted
+    assert "tok123" not in redacted
+    assert "key123" not in redacted
+    assert "sk-test-secret" not in redacted
+    assert redacted.count("[REDACTED]") >= 5

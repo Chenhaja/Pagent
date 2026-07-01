@@ -40,6 +40,9 @@ class Settings(BaseModel):
         react_policy_model: ReAct 决策模型。
         react_policy_temperature: ReAct 决策温度。
         react_use_llm_judge: 是否使用 LLM 判断充分性。
+        react_sufficient_score_threshold: ReAct 阈值兜底的充分性分数门槛。
+        react_observation_digest_chars: ReAct observation 摘要字符上限。
+        react_reflect_model: ReAct 反思模型。
         react_token_budget: ReAct evidence token 预算。
         react_timeout_seconds: ReAct 主循环超时时间。
         agentic_enabled: 是否启用 R7 agentic 主循环。
@@ -108,6 +111,9 @@ class Settings(BaseModel):
     react_policy_model: str | None = None
     react_policy_temperature: float = 0.0
     react_use_llm_judge: bool = True
+    react_sufficient_score_threshold: float = 0.5
+    react_observation_digest_chars: int = 600
+    react_reflect_model: str | None = None
     react_token_budget: int = 1000
     react_timeout_seconds: int = 10
     agentic_enabled: bool = True
@@ -178,6 +184,9 @@ class Settings(BaseModel):
             "react_policy_model": self.react_policy_model,
             "react_policy_temperature": str(self.react_policy_temperature),
             "react_use_llm_judge": str(self.react_use_llm_judge),
+            "react_sufficient_score_threshold": str(self.react_sufficient_score_threshold),
+            "react_observation_digest_chars": str(self.react_observation_digest_chars),
+            "react_reflect_model": self.react_reflect_model,
             "react_token_budget": str(self.react_token_budget),
             "react_timeout_seconds": str(self.react_timeout_seconds),
             "agentic_enabled": str(self.agentic_enabled),
@@ -299,6 +308,9 @@ def get_settings() -> Settings:
         react_policy_model=os.getenv("PAGENT_REACT_POLICY_MODEL"),
         react_policy_temperature=float(os.getenv("PAGENT_REACT_POLICY_TEMPERATURE", "0.0")),
         react_use_llm_judge=_get_bool_env("PAGENT_REACT_USE_LLM_JUDGE", True),
+        react_sufficient_score_threshold=float(os.getenv("PAGENT_REACT_SUFFICIENT_SCORE_THRESHOLD", "0.5")),
+        react_observation_digest_chars=int(os.getenv("PAGENT_REACT_OBSERVATION_DIGEST_CHARS", "600")),
+        react_reflect_model=os.getenv("PAGENT_REACT_REFLECT_MODEL"),
         react_token_budget=int(os.getenv("PAGENT_REACT_TOKEN_BUDGET", str(retrieval_token_budget))),
         react_timeout_seconds=int(os.getenv("PAGENT_REACT_TIMEOUT_SECONDS", str(retrieval_timeout_seconds))),
         agentic_enabled=_get_bool_env("PAGENT_AGENTIC_ENABLED", True),

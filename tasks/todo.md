@@ -17,28 +17,28 @@
 
 ## Phase 1 — 配置与 prompt/schema 契约
 
-- [ ] 新增 `react_sufficient_score_threshold` 配置。
+- [x] 新增 `react_sufficient_score_threshold` 配置。
   - 验收：`Settings` 默认值为 `0.5`，`PAGENT_REACT_SUFFICIENT_SCORE_THRESHOLD` 可覆盖。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] 新增 `react_observation_digest_chars` 配置。
+- [x] 新增 `react_observation_digest_chars` 配置。
   - 验收：`Settings` 默认值为 `600`，`PAGENT_REACT_OBSERVATION_DIGEST_CHARS` 可覆盖。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] 新增 `react_reflect_model` 配置。
+- [x] 新增 `react_reflect_model` 配置。
   - 验收：默认 `None`，`PAGENT_REACT_REFLECT_MODEL` 可覆盖。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] 更新 `to_public_dict()` 公开新增 react 配置。
+- [x] 更新 `to_public_dict()` 公开新增 react 配置。
   - 验收：public dict 包含新增非敏感配置，不包含任何 key / token / secret。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] 调整 `REACT_DECISION_SCHEMA` 中 `sufficient` 的权威地位。
+- [x] 调整 `REACT_DECISION_SCHEMA` 中 `sufficient` 的权威地位。
   - 验收：`sufficient` 不再是 required；如保留字段，后续主循环不读取其收敛。
   - 验证：`conda run -n autoGLM pytest tests/test_react_policy.py`
-- [ ] 新增 `REACT_REFLECT_SCHEMA`。
+- [x] 新增 `REACT_REFLECT_SCHEMA`。
   - 验收：包含 `sufficient`、`reason`、`next_query_hint`；required 为 `sufficient/reason`；`additionalProperties=False`。
   - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [ ] 新增 reflect prompt 构造函数。
+- [x] 新增 reflect prompt 构造函数。
   - 验收：`build_react_reflect_messages(...)` 包含任务、observation digest、scratchpad、step_index，并用 `<data>` 隔离。
   - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [ ] 覆盖 reflect prompt 六要素和安全约束。
+- [x] 覆盖 reflect prompt 六要素和安全约束。
   - 验收：prompt 包含任务目标、判定规则、角色、受众、样例、输出格式；声明数据区指令无效、禁止臆造。
   - 验证：prompt 单测 / review。
 

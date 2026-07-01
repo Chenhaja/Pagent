@@ -37,6 +37,9 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.react_policy_model is None
     assert settings.react_policy_temperature == 0.0
     assert settings.react_use_llm_judge is True
+    assert settings.react_sufficient_score_threshold == 0.5
+    assert settings.react_observation_digest_chars == 600
+    assert settings.react_reflect_model is None
     assert settings.react_token_budget == 1000
     assert settings.react_timeout_seconds == 10
     assert settings.agentic_enabled is True
@@ -123,6 +126,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_REACT_POLICY_MODEL", "policy-model")
     monkeypatch.setenv("PAGENT_REACT_POLICY_TEMPERATURE", "0.1")
     monkeypatch.setenv("PAGENT_REACT_USE_LLM_JUDGE", "false")
+    monkeypatch.setenv("PAGENT_REACT_SUFFICIENT_SCORE_THRESHOLD", "0.7")
+    monkeypatch.setenv("PAGENT_REACT_OBSERVATION_DIGEST_CHARS", "320")
+    monkeypatch.setenv("PAGENT_REACT_REFLECT_MODEL", "reflect-model")
     monkeypatch.setenv("PAGENT_REACT_TOKEN_BUDGET", "450")
     monkeypatch.setenv("PAGENT_REACT_TIMEOUT_SECONDS", "9")
     monkeypatch.setenv("PAGENT_AGENTIC_ENABLED", "false")
@@ -185,6 +191,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.react_policy_model == "policy-model"
     assert settings.react_policy_temperature == 0.1
     assert settings.react_use_llm_judge is False
+    assert settings.react_sufficient_score_threshold == 0.7
+    assert settings.react_observation_digest_chars == 320
+    assert settings.react_reflect_model == "reflect-model"
     assert settings.react_token_budget == 450
     assert settings.react_timeout_seconds == 9
     assert settings.agentic_enabled is False
@@ -254,6 +263,9 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["react_policy_model"] is None
     assert public_values["react_policy_temperature"] == "0.0"
     assert public_values["react_use_llm_judge"] == "True"
+    assert public_values["react_sufficient_score_threshold"] == "0.5"
+    assert public_values["react_observation_digest_chars"] == "600"
+    assert public_values["react_reflect_model"] is None
     assert public_values["react_token_budget"] == "1000"
     assert public_values["react_timeout_seconds"] == "10"
     assert public_values["agentic_enabled"] == "True"

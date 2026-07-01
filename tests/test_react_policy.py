@@ -1,6 +1,7 @@
 import pytest
 
 from app.orchestrator.react_policy import HeuristicReActPolicy, LLMReActPolicy, ReActDecision, ReActPolicyError
+from app.prompts.react_policy import REACT_DECISION_SCHEMA
 from app.orchestrator.tool_registry import ToolCard
 from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink
 
@@ -17,6 +18,12 @@ def tool_card(name: str = "kb_retrieval") -> ToolCard:
             "additionalProperties": False,
         },
     )
+
+
+def test_react_decision_schema_does_not_require_sufficient() -> None:
+    """Act 决策 schema 不应再要求权威 sufficient 字段。"""
+    assert "sufficient" in REACT_DECISION_SCHEMA["properties"]
+    assert "sufficient" not in REACT_DECISION_SCHEMA["required"]
 
 
 def test_llm_react_policy_parses_valid_decision() -> None:

@@ -174,14 +174,14 @@ def _parse_decision(payload: dict[str, Any]) -> ReActDecision:
     """解析并校验 LLM 决策。"""
     if not isinstance(payload, dict):
         raise ReActPolicyError("invalid_decision")
-    for key in ("thought", "stop", "sufficient"):
+    for key in ("thought", "stop"):
         if key not in payload:
             raise ReActPolicyError("missing_required")
     thought = payload["thought"]
     action = payload.get("action")
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
     stop = payload["stop"]
-    sufficient = payload["sufficient"]
+    sufficient = payload.get("sufficient", False)
     if not isinstance(thought, str):
         raise ReActPolicyError("invalid_thought")
     if action is not None and not isinstance(action, str):

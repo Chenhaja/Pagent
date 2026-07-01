@@ -1,4 +1,5 @@
 import json
+import logging
 
 from app.core.config import Settings
 from app.prompts.query_expand import QUERY_EXPAND_OUTPUT_SCHEMA, QUERY_EXPAND_SYSTEM_PROMPT, build_query_expand_user_prompt
@@ -528,14 +529,32 @@ def test_multi_query_retriever_expands_merges_and_deduplicates() -> None:
     assert [result.provenance["document_id"] for result in results] == ["a", "b"]
 
 
-def test_multi_query_retriever_falls_back_to_original_query_on_expand_error() -> None:
-    """查询改写失败时应降级为原始 query。"""
+def test_multi_query_retriever_falls_back_to_original_query_on_expand_error(caplog) -> None:
+    """查询改写失败时应记录日志并降级为原始 query。"""
     inner = FakeInnerRetriever([RetrievalResult(content="A", provenance={"document_id": "a"})])
 
-    results = MultiQueryRetriever(inner, RaisingQueryRewriter(), settings=Settings(retrieval_fetch_k=2)).search("原始问题", top_k=1)
+    with caplog.at_level(logging.WARNING, logger="app.tools.retrieval"):
+        results = MultiQueryRetriever(inner, RaisingQueryRewriter(), settings=Settings(retrieval_fetch_k=2)).search("原始问题", top_k=1)
 
     assert inner.calls == [{"method": "recall", "query": "原始问题", "fetch_k": 2, "as_of": None}]
     assert [result.provenance["document_id"] for result in results] == ["a"]
+    assert caplog.records[0].event == "query_rewrite_failed"
+
+
+def test_multi_query_retriever_logs_empty_rewrite_and_filters_blank_queries(caplog) -> None:
+    """查询改写为空时应记录日志,正常结果应过滤空白改写式。"""
+    empty_inner = FakeInnerRetriever([RetrievalResult(content="A", provenance={"document_id": "a"})])
+
+    with caplog.at_level(logging.INFO, logger="app.tools.retrieval"):
+        MultiQueryRetriever(empty_inner, FakeQueryRewriter(["", "  "]), settings=Settings(retrieval_fetch_k=2)).search("原始问题", top_k=1)
+
+    assert empty_inner.calls == [{"method": "recall", "query": "原始问题", "fetch_k": 2, "as_of": None}]
+    assert caplog.records[0].event == "query_rewrite_empty"
+
+    inner = FakeInnerRetriever([RetrievalResult(content="B", provenance={"document_id": "b"})])
+    MultiQueryRetriever(inner, FakeQueryRewriter(["", "有效改写", "  "]), settings=Settings(retrieval_fetch_k=2)).search("原始问题", top_k=1)
+
+    assert inner.calls == [{"method": "recall", "query": "有效改写", "fetch_k": 2, "as_of": None}]
 
 
 def test_http_query_rewriter_builds_request() -> None:

@@ -902,8 +902,12 @@ class MultiQueryRetriever:
         try:
             queries = [item for item in self.query_rewriter.expand(query) if item.strip()]
         except Exception:
+            logger.warning("查询改写失败，降级为单查询", extra={"event": "query_rewrite_failed"})
             return [query]
-        return queries or [query]
+        if not queries:
+            logger.info("查询改写为空，降级为单查询", extra={"event": "query_rewrite_empty"})
+            return [query]
+        return queries
 
 
 def _build_query_rewriter(settings: Settings) -> QueryRewriter:

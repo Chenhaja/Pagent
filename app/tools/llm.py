@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from typing import Any, Callable, Literal, Protocol
 from urllib import error, request
@@ -6,6 +7,11 @@ from urllib import error, request
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
+from app.core.logging import log_event
+
+
+logger = logging.getLogger(__name__)
+_DROPPED_TRACE_FIELDS = {"api_key", "raw_input", "prompt", "raw_output", "response"}
 
 
 class LLMMessage(BaseModel):
@@ -98,6 +104,36 @@ class InMemoryLLMTraceSink:
             无返回值。
         """
         self.records.append(dict(trace))
+
+
+class LoggingLLMTraceSink:
+    """将 LLM trace 写入统一结构化日志。
+
+    Args:
+        logger: 可选 logger,测试可注入替身。
+
+    Returns:
+        LLM trace 日志 sink。
+    """
+
+    def __init__(self, logger: logging.Logger | Any | None = None) -> None:
+        self.logger = logger or logging.getLogger(__name__)
+
+    def write(self, trace: dict[str, Any]) -> None:
+        """写入一条 llm_call 结构化日志。
+
+        Args:
+            trace: 不含密钥和完整输入输出正文的 trace。
+
+        Returns:
+            无返回值。
+        """
+        try:
+            safe_trace = {str(key): value for key, value in trace.items() if str(key) not in _DROPPED_TRACE_FIELDS}
+            level = logging.WARNING if bool(safe_trace.get("fallback_used")) else logging.INFO
+            log_event(self.logger, level, "llm_call", "LLM 调用完成", **safe_trace)
+        except Exception:
+            return
 
 
 class LLMClient(Protocol):

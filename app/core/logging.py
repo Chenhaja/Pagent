@@ -11,6 +11,7 @@ from app.core.security import DEFAULT_REDACTION_MAX_LENGTH, redact_sensitive_tex
 MAX_LOG_MESSAGE_LENGTH = DEFAULT_REDACTION_MAX_LENGTH
 _CONTEXT_FIELD_NAMES = ("request_id", "session_id", "trace_id", "node_name", "task_type")
 _PRIORITY_PRETTY_FIELDS = ("duration_ms", "input_chars", "output_chars", "result_count", "degraded", "degrade_reason")
+_DROPPED_FIELD_NAMES = {"api_key", "raw_input", "prompt", "raw_output", "response"}
 
 
 def sanitize_log_message(message: str, max_length: int = MAX_LOG_MESSAGE_LENGTH) -> str:
@@ -47,7 +48,7 @@ def _record_fields(record: logging.LogRecord, max_length: int) -> dict[str, Any]
     fields = getattr(record, "fields", {})
     if not isinstance(fields, dict):
         return {}
-    return {str(key): _sanitize_log_value(value, max_length) for key, value in fields.items()}
+    return {str(key): _sanitize_log_value(value, max_length) for key, value in fields.items() if str(key) not in _DROPPED_FIELD_NAMES}
 
 
 def _record_context(record: logging.LogRecord) -> dict[str, str | None]:

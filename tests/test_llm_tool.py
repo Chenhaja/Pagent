@@ -1,10 +1,12 @@
 import json
+import logging
 import os
 
 import pytest
 
 from app.core.config import Settings
-from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink, LLMMessage, OpenAICompatibleClient, build_llm_client
+from app.core.logging import JsonLineFormatter
+from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink, LLMMessage, LoggingLLMTraceSink, OpenAICompatibleClient, build_llm_client
 
 
 def test_fake_llm_returns_fixed_response() -> None:
@@ -81,6 +83,66 @@ def test_fake_llm_can_simulate_empty_response_and_refusal() -> None:
 
     assert empty_response.errors[0]["code"] == "empty_response"
     assert refusal_response.errors[0]["code"] == "model_refusal"
+
+
+def test_logging_llm_trace_sink_writes_llm_call_event(caplog) -> None:
+    """LoggingLLMTraceSink 应输出 llm_call 结构化事件。"""
+    sink = LoggingLLMTraceSink()
+
+    with caplog.at_level(logging.INFO, logger="app.tools.llm"):
+        sink.write({"provider": "fake", "model": "fake", "input_chars": 4, "output_chars": 2, "fallback_used": False, "duration_ms": 10})
+
+    record = caplog.records[-1]
+    assert record.event == "llm_call"
+    assert record.levelname == "INFO"
+    assert record.fields["provider"] == "fake"
+    assert record.fields["model"] == "fake"
+    assert record.fields["input_chars"] == 4
+    assert record.fields["output_chars"] == 2
+    assert record.fields["fallback_used"] is False
+
+
+def test_logging_llm_trace_sink_warns_on_fallback(caplog) -> None:
+    """LLM 降级 trace 应升级为 WARNING 日志。"""
+    sink = LoggingLLMTraceSink()
+
+    with caplog.at_level(logging.WARNING, logger="app.tools.llm"):
+        sink.write({"provider": "fake", "model": "fake", "input_chars": 4, "output_chars": 0, "fallback_used": True})
+
+    assert caplog.records[-1].event == "llm_call"
+    assert caplog.records[-1].levelname == "WARNING"
+
+
+def test_logging_llm_trace_sink_does_not_emit_sensitive_trace_fields() -> None:
+    """LLM 日志 sink 不应输出 api_key、raw_input 或完整正文。"""
+    logger = logging.getLogger("test.llm_trace")
+    logger.handlers.clear()
+    logger.propagate = False
+    handler = logging.StreamHandler()
+    formatter = JsonLineFormatter(service="patent-agent", environment="prod")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    sink = LoggingLLMTraceSink(logger=logger)
+
+    sink.write({"provider": "fake", "model": "fake", "api_key": "sk-secret", "raw_input": "完整技术交底书内容", "prompt": "完整提示词"})
+
+    record = logging.LogRecord("test.llm_trace", logging.INFO, __file__, 1, "LLM 调用完成", (), None)
+    record.event = "llm_call"
+    record.fields = {"api_key": "sk-secret", "raw_input": "完整技术交底书内容", "prompt": "完整提示词"}
+    payload = json.loads(formatter.format(record))
+    assert "api_key" not in payload
+    assert "raw_input" not in payload
+    assert "prompt" not in payload
+
+
+def test_logging_llm_trace_sink_swallows_logger_errors() -> None:
+    """LLM 日志 sink 失败时不应影响调用方。"""
+    class FailingLogger:
+        def log(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    LoggingLLMTraceSink(logger=FailingLogger()).write({"fallback_used": False})
 
 
 def test_build_llm_client_returns_openai_client_when_config_complete() -> None:

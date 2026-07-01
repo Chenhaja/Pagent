@@ -86,7 +86,7 @@ def test_json_formatter_flattens_fields_and_context() -> None:
     assert payload["request_id"] == "req-123456"
     assert payload["node_name"] == "qa"
     assert payload["duration_ms"] == 12
-    assert payload["api_key"] == "[REDACTED]"
+    assert "api_key" not in payload
     assert payload["message"] == "调用 [REDACTED] 成功"
     assert payload["long"].endswith("...[TRUNCATED]")
 

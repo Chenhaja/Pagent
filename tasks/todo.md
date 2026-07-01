@@ -98,25 +98,25 @@
 
 ## Phase 4 — 多步闭环、scratchpad digest 与失败降级
 
-- [ ] 将 `observation_digest` 写入 scratchpad item。
+- [x] 将 `observation_digest` 写入 scratchpad item。
   - 验收：下一步 policy 收到的 scratchpad 包含上一轮 digest，且不超过长度上限。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [ ] 实现 `next_query_hint` 回灌下一步 Act。
+- [x] 实现 `next_query_hint` 回灌下一步 Act。
   - 验收：第一步 reflect 返回 hint 后，第二步工具输入 query 使用该 hint。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [ ] 处理 `next_query_hint=None`。
+- [x] 处理 `next_query_hint=None`。
   - 验收：hint 为空时不强行改写 query，继续使用当前 task input / policy 决策。
   - 验证：loop 单测。
-- [ ] 实现 reflect 异常 fallback。
+- [x] 实现 reflect 异常 fallback。
   - 验收：policy reflect 抛异常时 outcome `fallback_used=True`，使用 threshold 判断，循环不中断。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_react_reflect.py`
-- [ ] 保持 token budget 硬约束。
+- [x] 保持 token budget 硬约束。
   - 验收：evidence token 预算耗尽时仍以 `token_budget` 收敛。
   - 验证：既有 token budget 测试继续通过。
-- [ ] 保持 max_steps / timeout 硬约束。
+- [x] 保持 max_steps / timeout 硬约束。
   - 验收：不因 reflect 或 hint 绕过步数和超时限制。
   - 验证：既有预算测试继续通过。
-- [ ] 保持工具白名单和 schema 校验降级。
+- [x] 保持工具白名单和 schema 校验降级。
   - 验收：非法 action / tool_input 仍 fallback，不执行越权工具。
   - 验证：既有 invalid policy action/schema 测试继续通过。
 

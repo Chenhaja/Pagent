@@ -124,6 +124,7 @@ class BoundedReActLoop:
         tool_calls = 0
         driver = self._policy_driver()
         fallback_used = False
+        next_query_hint: str | None = None
 
         for step_index in range(self.budget.max_steps):
             if time.monotonic() >= deadline:
@@ -163,8 +164,11 @@ class BoundedReActLoop:
                 reason = "tool_unavailable"
                 break
 
+            tool_input = self._apply_next_query_hint(decision.tool_input, next_query_hint)
+            next_query_hint = None
+
             try:
-                observation = tool.run(decision.tool_input)
+                observation = tool.run(tool_input)
             except Exception:
                 steps_used += 1
                 tool_calls += 1
@@ -195,6 +199,7 @@ class BoundedReActLoop:
             )
             trace_events.append(self._build_reflect_trace(step_index, reflection, reflect_driver))
             scratchpad.append(self._build_scratchpad_item(step_index, decision, observation, observation_digest))
+            next_query_hint = reflection.next_query_hint
             if observation.error:
                 reason = "tool_unavailable"
                 break
@@ -253,6 +258,12 @@ class BoundedReActLoop:
             return self.policy.reflect(task_input, observation_digest, scratchpad, step_index), self._policy_driver(), False
         except Exception:
             return self.heuristic_policy.reflect(task_input, observation_digest, scratchpad, step_index), "fallback", True
+
+    def _apply_next_query_hint(self, tool_input: dict[str, Any], next_query_hint: str | None) -> dict[str, Any]:
+        """在存在下一步 query hint 时改写工具输入中的 query。"""
+        if not next_query_hint or "query" not in tool_input:
+            return tool_input
+        return {**tool_input, "query": next_query_hint}
 
     def _converge(
         self,

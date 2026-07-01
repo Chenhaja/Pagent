@@ -243,6 +243,136 @@ def test_agentic_loop_uses_policy_decision_and_rewritten_query() -> None:
     assert policy.calls[1]["scratchpad"][0]["observation_count"] == 0
 
 
+def test_agentic_loop_scratchpad_contains_limited_observation_digest() -> None:
+    """下一步 policy 应收到上一轮 observation digest 且正文被长度限制。"""
+    tool = FakeTool([
+        ToolObservation(tool_name="fake", evidence=[{"content": "abcdef", "provenance": {"source": "local://doc", "document_id": "doc"}}], top_score=0.1),
+        ToolObservation(tool_name="fake", evidence=[], top_score=0.0),
+    ])
+    policy = ScriptedPolicy(
+        decisions=[
+            ReActDecision(thought="第一步", action="fake", tool_input={"query": "q1"}, stop=False),
+            ReActDecision(thought="第二步", action="fake", tool_input={"query": "q2"}, stop=False),
+        ],
+        reflections=[
+            ReflectResult(sufficient=False, reason="继续"),
+            ReflectResult(sufficient=False, reason="仍不足"),
+        ],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=2, token_budget=100, timeout_seconds=5),
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+        observation_digest_chars=3,
+    )
+
+    loop.run("原问题", allowed_tools=["fake"])
+
+    digest = policy.calls[1]["scratchpad"][0]["observation_digest"]
+    assert digest["evidence_count"] == 1
+    assert digest["items"][0]["content"] == "abc"
+    assert digest["items"][0]["provenance"] == {"source": "local://doc", "document_id": "doc", "locator": None}
+
+
+def test_agentic_loop_applies_next_query_hint_to_next_action() -> None:
+    """reflect 返回 hint 后下一步 action query 应使用该 hint。"""
+    tool = FakeTool([
+        ToolObservation(tool_name="fake", evidence=[], top_score=0.0),
+        ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], top_score=0.8),
+    ])
+    policy = ScriptedPolicy(
+        decisions=[
+            ReActDecision(thought="第一步", action="fake", tool_input={"query": "原始查询"}, stop=False),
+            ReActDecision(thought="第二步", action="fake", tool_input={"query": "模型旧查询"}, stop=False),
+        ],
+        reflections=[
+            ReflectResult(sufficient=False, reason="需要缩小", next_query_hint="缩小后的 hint"),
+            ReflectResult(sufficient=True, reason="证据充分"),
+        ],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=2, token_budget=100, timeout_seconds=5),
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    loop.run("原问题", allowed_tools=["fake"])
+
+    assert tool.calls == [{"query": "原始查询"}, {"query": "缩小后的 hint"}]
+
+
+def test_agentic_loop_keeps_policy_query_when_next_query_hint_is_none() -> None:
+    """reflect 未返回 hint 时不应改写下一步 policy query。"""
+    tool = FakeTool([
+        ToolObservation(tool_name="fake", evidence=[], top_score=0.0),
+        ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], top_score=0.8),
+    ])
+    policy = ScriptedPolicy(
+        decisions=[
+            ReActDecision(thought="第一步", action="fake", tool_input={"query": "原始查询"}, stop=False),
+            ReActDecision(thought="第二步", action="fake", tool_input={"query": "模型查询"}, stop=False),
+        ],
+        reflections=[
+            ReflectResult(sufficient=False, reason="继续", next_query_hint=None),
+            ReflectResult(sufficient=True, reason="证据充分"),
+        ],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=2, token_budget=100, timeout_seconds=5),
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    loop.run("原问题", allowed_tools=["fake"])
+
+    assert tool.calls == [{"query": "原始查询"}, {"query": "模型查询"}]
+
+
+def test_agentic_loop_falls_back_when_reflect_fails() -> None:
+    """reflect 异常时应使用阈值 fallback 且循环不中断。"""
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], top_score=0.8)])
+    policy = ScriptedPolicy(
+        decisions=[ReActDecision(thought="第一步", action="fake", tool_input={"query": "q1"}, stop=False)],
+        reflect_should_raise=True,
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=2, token_budget=100, timeout_seconds=5),
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+        sufficient_score_threshold=0.5,
+    )
+
+    outcome = loop.run("原问题", allowed_tools=["fake"])
+
+    assert outcome.reason == "sufficient"
+    assert outcome.fallback_used is True
+    assert outcome.trace_events[2]["data"]["driver"] == "fallback"
+
+
+def test_agentic_loop_reflect_hint_does_not_bypass_token_budget() -> None:
+    """hint 存在时 evidence token 预算仍应优先停止。"""
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "x" * 40}], top_score=0.1)])
+    policy = ScriptedPolicy(
+        decisions=[ReActDecision(thought="第一步", action="fake", tool_input={"query": "q1"}, stop=False)],
+        reflections=[ReflectResult(sufficient=False, reason="继续", next_query_hint="下一步")],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=2, token_budget=5, timeout_seconds=5),
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    outcome = loop.run("原问题", allowed_tools=["fake"])
+
+    assert outcome.reason == "token_budget"
+    assert len(tool.calls) == 1
+
+
 def test_agentic_loop_reflect_controls_sufficient_after_observation() -> None:
     """tool.run 后的 reflect false 应阻止有 evidence 即停。"""
     tool = FakeTool([

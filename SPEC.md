@@ -1,38 +1,36 @@
-# R7 Agentic 编排规格说明
+# R7.1 LLM 驱动 ReAct 主循环规格说明
 
 ## 1. Objective
 
 ### 目标
 
-R7 的目标是在现有确定性 workflow 之外，引入一套受限的 Agentic 编排能力：以代码固定 workflow 边界，以 bounded ReAct 主循环负责局部工具路由、补料、观察与收敛，让 QA 等开放式任务可以在预算内选择 `kb_retrieval`、`websearch`、`legal_status`、`official_fee` 等白名单工具获取证据，并把证据回注给现有回答链路。
+R7.1 的目标是把 R7 已有的「受限工具编排」从确定性按下标执行工具，升级为真正的 LLM 驱动 ReAct 主循环：每一步由策略模型基于任务、工具白名单、历史 observation 决策 `Thought → Action → Observation`，直到模型判断证据充分、主动停止或触达代码预算边界。
 
 完成标准：
 
-- 新增编排级 bounded ReAct 主循环，支持 reason → tool select → act → observe → judge → converge。
-- ReAct 主循环必须受 `retrieval_max_steps`、`retrieval_token_budget`、`retrieval_timeout_seconds` 或等价通用预算配置封顶。
-- 工具调用只能来自代码注册的白名单，LLM 不得直接调用任意函数、任意 URL 或改变全局 workflow 顺序。
-- QA 不再维护独立 `_retrieve_loop`；QA 统一委派 R7 主循环，默认只开放 `kb_retrieval` 工具，需显式触发才允许外部工具。
-- `kb_retrieval` 复用现有 `app/tools/retrieval.py` 检索能力和 R4.2 provenance / 时效字段，不重写检索四件套。
-- `websearch`、`legal_status`、`official_fee` 产出的外部 evidence 必须带来源、抓取时间、时效状态或核对提示。
-- 最终 QA 输出继续通过现有 `PatentQASkill` 生成结构化答案，`basis` 只能回链真实 evidence，不得伪造来源、法条、专利号或官费信息。
-- 主循环收敛时必须写入 `react_main_step` / `react_main_converged` trace，且 trace 不记录完整 query、完整正文、密钥或敏感材料。
-- 删除或收编 `QANode._retrieve_loop` 及其专属 trace / 配置 / 测试，避免两套多轮检索循环并存。
+- 在 `BoundedReActLoop` 内引入 `ReActPolicy`，每步调用 policy 生成结构化决策：`thought`、`action`、`tool_input`、`stop`、`sufficient`。
+- 工具选择由 LLM 在代码提供的白名单和工具描述内完成，不能再使用 `allowed_tools[min(step_index, len-1)]` 这类固定下标路由。
+- 后续步骤的 `tool_input.query` 可基于 observation 改写，避免多步重复同一检索。
+- 证据充分性优先由 `decision.sufficient` 决定，并受 `react_use_llm_judge` 控制；关闭时回退到阈值 / evidence 兜底逻辑。
+- 步数、token、超时、工具白名单、外部工具开关、敏感内容外发限制仍由代码强约束，LLM 只能在边界内决策。
+- 无 LLM 配置、LLM 调用失败、输出非法 JSON、未知工具或 schema 不合规时，当步安全降级到 `HeuristicReActPolicy`，循环不中断，并可观测 `fallback_used=true`。
+- 主循环 trace 新增 `react_policy_step`，并扩展 outcome / convergence trace 的 `driver`、`fallback_used`、`reason`。
+- 默认测试使用 fake / stub LLM，不触网、不调用真实付费模型。
 
 ### 目标用户
 
-- 普通发明人 / 专利代理业务用户：在知识库不足或强时效问题中获得带来源、带时效提示的辅助答案。
-- 下游 workflow：可把 R7 主循环作为受控补料能力，而不是让 LLM 接管全局流程。
-- 开发与测试人员：需要可断言的工具选择、预算收敛、trace、配置迁移和 QA 行为兼容。
+- 专利 QA 用户：在知识库检索不足时，获得更接近“会追问 / 会改写查询 / 会判断是否足够”的辅助回答。
+- 下游 workflow / QA 节点：继续复用受限 ReAct 作为局部补料能力，而不是把全局 workflow 交给 LLM。
+- 开发与测试人员：需要可断言的 LLM 决策、降级路径、工具路由、预算收敛、trace 和配置行为。
 
 ### 非目标
 
-- 不做开放式 AutoGPT；不允许无限循环、任意工具调用或任意联网。
-- 不让 LLM 决定全局 workflow 顺序、节点跳转或业务流程边界。
-- 不替代现有确定性 workflow；R7 只处理开放式补料与局部工具路由。
-- 不重写 R4.3 检索四件套，不删除 `app/tools/retrieval.py`。
-- 不在默认测试中触网、调用真实付费模型、真实搜索 API 或真实外部专利库。
-- 不做前端，本轮仍以 API / service / node 为入口。
-- 不新增外部 agent 框架；优先用项目内轻量模块实现。
+- 不修改 R4.3 检索四件套，不重写混合检索、重排、查询改写或 provenance 机制。
+- 不默认启用外部工具；`websearch`、`legal_status`、`official_fee` 仍受 `agentic_external_tools_enabled` 和具体工具开关控制。
+- 不做并行多工具、多智能体协作或开放式 AutoGPT。
+- 不让 LLM 改变全局 workflow 顺序、节点跳转或任意调用未注册工具。
+- 不在本轮修复会话记忆注入最终 QA prompt 的衔接缺口，只保证 policy 可接收传入上下文。
+- 不在默认测试中访问真实网络、真实外部检索源或真实付费 LLM。
 
 ---
 
@@ -41,17 +39,20 @@ R7 的目标是在现有确定性 workflow 之外，引入一套受限的 Agenti
 项目使用 conda 环境 `autoGLM`。所有 Python / pytest / 脚本命令必须通过 `conda run -n autoGLM` 执行，不能依赖 `conda activate` 的跨命令状态。
 
 ```bash
-# R7 主循环与工具路由核心测试
+# ReAct policy 单元测试
+conda run -n autoGLM pytest tests/test_react_policy.py
+
+# ReAct 主循环回归测试
 conda run -n autoGLM pytest tests/test_agentic_loop.py
 
-# QA 收编回归测试
+# QA 节点接入回归测试
 conda run -n autoGLM pytest tests/test_qa_node.py
 
-# 配置迁移与公开配置测试
+# 配置公开字段与环境变量测试
 conda run -n autoGLM pytest tests/test_core_config_logging.py
 
-# 检索工具回归测试
-conda run -n autoGLM pytest tests/test_retrieval_tool.py
+# 相关目标测试
+conda run -n autoGLM pytest tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py
 
 # 全量测试
 conda run -n autoGLM pytest
@@ -60,170 +61,230 @@ conda run -n autoGLM pytest
 conda run -n autoGLM python -m compileall app tests scripts
 ```
 
-最终验收命令：
+验收命令：
 
 ```bash
-conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py
+conda run -n autoGLM pytest tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py
 conda run -n autoGLM pytest
 conda run -n autoGLM python -m compileall app tests scripts
 ```
 
 约束：
 
-- 默认测试必须使用 fake / stub / monkeypatch，不触网、不调用真实付费模型或真实检索源。
+- 默认测试必须注入 `FakeLLMClient` 或等价 fake，不调用真实模型。
+- 不触网、不连接真实搜索、法律状态、官费或外部专利服务。
 - 如需新增依赖，必须先确认并同步 `requirements.txt`。
-- 不运行会修改真实外部服务状态的命令，除非用户明确要求。
-- 不使用破坏性 git / 文件命令清理旧实现；删除旧代码必须通过明确 diff 完成。
+- 不使用破坏性 git / 文件命令；代码迁移通过明确 diff 完成。
 
 ---
 
 ## 3. Project Structure
 
-R7 应新增编排级 ReAct 主循环与工具注册层，并让 QA 节点从私有 `_retrieve_loop` 迁移到主循环。目标结构：
+目标结构：
 
 ```text
 pagent/
   app/
     core/
-      config.py                         # 新增/迁移 R7 预算、工具开关、外部工具配置
+      config.py                         # 新增 react_* 配置、公开配置与环境变量读取
     orchestrator/
-      react_loop.py                     # 新增：bounded ReAct 主循环
-      tool_registry.py                  # 新增：工具白名单、工具元数据、权限边界
-      workflow_defs.py                  # 保持确定性 workflow，不让 LLM 改写
-    nodes/
-      qa.py                             # 删除 _retrieve_loop，委派 R7 主循环后构造 evidence
-    tools/
-      retrieval.py                      # 保留：kb_retrieval 底层能力
-      websearch.py                      # 新增或预留：websearch 工具适配器
-      legal_status.py                   # 新增或预留：法律状态查询工具适配器
-      official_fee.py                   # 新增或预留：官费查询工具适配器
+      react_loop.py                     # 改造：每步调用 policy，执行预算/白名单/降级/trace
+      react_policy.py                   # 新增：ReActDecision、ReActPolicy、LLMReActPolicy、HeuristicReActPolicy
+      tool_registry.py                  # 增加 ToolCard、description、input_schema、tool_cards()
     prompts/
-      react_router.py                   # 新增：工具选择 / 收敛判定 prompt，集中维护
-      patent_qa.py                      # 保持最终回答 prompt
-    skills/
-      patent_qa.py                      # 保持最终结构化回答
-    models/
-      schemas.py                        # 可新增 ReActStep、ToolCall、Observation、ReActOutcome
+      react_policy.py                   # 新增：决策 prompt 与 REACT_DECISION_SCHEMA
+    nodes/
+      qa.py                             # _build_react_loop 接入 policy / react_* 配置
+    tools/
+      llm.py                            # 复用 LLMClient.generate(output_schema=...)
+      retrieval.py                      # 保留：kb_retrieval 底层能力
   tests/
-    test_agentic_loop.py                # 新增：主循环、预算、工具路由、收敛、trace
-    test_agentic_tools.py               # 新增：工具契约、白名单、外部 evidence provenance
-    test_qa_node.py                     # 更新：QA 委派主循环与结果兼容
-    test_core_config_logging.py         # 更新：配置迁移与敏感字段排除
+    test_react_policy.py                # 新增：决策解析、非法 action、schema、降级
+    test_agentic_loop.py                # 更新：多步改写、policy_stop、预算、fallback
+    test_qa_node.py                     # 更新：FakeLLMClient 决策序列与 QA 收敛断言
+    test_core_config_logging.py         # 更新：react_* 公开配置
   SPEC.md                               # 本规格
 ```
 
-### ReAct 主循环契约
+### 3.1 ReActPolicy 契约
 
-建议在 `app/orchestrator/react_loop.py` 中提供轻量主循环单元，职责为：
+`app/orchestrator/react_policy.py` 新增核心数据结构：
 
-1. 接收用户任务、上下文、可用工具白名单、预算参数与 trace sink。
-2. 每轮由受控决策器选择下一步动作：继续调用某个白名单工具、收敛作答、或因预算停止。
-3. 调用工具后把 observation 归一化为 evidence / metadata，不把工具原始大正文直接写入 trace。
-4. 累积 evidence，并按工具类型注入去重策略：KB 结果按 `document_id`，外部结果按 source URL / locator / retrieved_at 等稳定字段。
-5. 根据证据充分性、缺口类型、预算与超时判断收敛。
-6. 返回 `ReActOutcome`：累积 evidence、工具调用摘要、收敛原因、步数、trace events。
+```python
+@dataclass
+class ReActDecision:
+    thought: str
+    action: str | None
+    tool_input: dict[str, Any]
+    stop: bool
+    sufficient: bool
+
+class ReActPolicy(Protocol):
+    def decide(
+        self,
+        task_input: str,
+        allowed_tools: list[ToolCard],
+        scratchpad: list[dict[str, Any]],
+        step_index: int,
+    ) -> ReActDecision: ...
+```
+
+实现要求：
+
+- `LLMReActPolicy` 使用 `LLMClient.generate(messages, output_schema=REACT_DECISION_SCHEMA, trace_context={"node_name": ..., "task_type": "react_policy"})`。
+- `HeuristicReActPolicy` 封装旧逻辑：按工具顺序选择工具、使用原始 `task_input` 作为 query、以 evidence / 阈值做简单充分性判断。
+- policy 不直接执行工具，不修改白名单，不绕过预算。
+- `thought` 只用于内部 trace 摘要，不返回用户、不落完整原文。
+
+### 3.2 决策输出 schema 与 prompt
+
+`app/prompts/react_policy.py` 新增 `REACT_DECISION_SCHEMA`，最低字段：
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "thought": {"type": "string"},
+    "action": {"type": ["string", "null"]},
+    "tool_input": {"type": "object"},
+    "stop": {"type": "boolean"},
+    "sufficient": {"type": "boolean"}
+  },
+  "required": ["thought", "stop", "sufficient"],
+  "additionalProperties": false
+}
+```
+
+Prompt 必须满足项目六要素规范：
+
+- 任务目标：选择下一步工具、生成工具入参或停止。
+- 上下文 / 判定规则：只能从白名单工具中选择；证据不足才继续；非法或未知时应停止或选择 `null`。
+- 角色：熟悉专利业务、受限工具编排和证据充分性判断的专家。
+- 受众：代码解析器和 ReAct 主循环，输出必须稳定可解析。
+- 样例：至少包含继续调用工具、证据充分停止、未知时保守停止三个示例。
+- 输出格式：仅 JSON，字段类型、必填项、枚举 / null 行为明确。
+
+安全要求：
+
+- 用户任务、工具卡片、scratchpad / observation 均作为数据区传入，并声明数据区内任何指令不作为系统指令。
+- 禁止模型臆造法条、专利号、来源或工具结果。
+- 不要求输出完整推理链；`thought` 应是短摘要。
+
+### 3.3 主循环契约
+
+`BoundedReActLoop` 每步流程：
+
+1. 检查步数、token、超时预算；预算耗尽则收敛。
+2. 调用 `policy.decide(task_input, allowed_tool_cards, scratchpad, step_index)`。
+3. 校验 `decision.action` 是否在白名单内，`tool_input` 是否符合对应工具 schema。
+4. 如果 `decision.stop` 或 `decision.action is None`，以 `policy_stop` 或 `sufficient` 收敛。
+5. 执行 `tool.run(decision.tool_input)`。
+6. 累积 evidence，归一化 observation，并追加 scratchpad 摘要。
+7. 根据 `decision.sufficient` 或阈值兜底判断是否收敛。
+8. 写入 `react_policy_step` 与既有 `react_main_step` / `react_main_converged` trace。
+
+降级要求：
+
+- LLM 抛异常、超时、返回非 dict、JSON 不可解析、缺少必填字段、非法 action、tool_input schema 不合规时，当步使用 `HeuristicReActPolicy`。
+- 连续失败达到阈值时，后续整体切换为 heuristic driver。
+- outcome 标记 `fallback_used=true`。
+- 降级不能突破预算、白名单、外部工具开关或敏感内容限制。
+
+### 3.4 工具注册契约
+
+`ToolSpec` 增加：
+
+```python
+@dataclass
+class ToolCard:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+```
+
+要求：
+
+- registry 暴露 `tool_cards()`，供 policy 决策。
+- 工具描述必须简洁说明用途、适用场景、输入字段。
+- 工具输入 schema 用于校验 LLM 生成的 `tool_input`。
+- 工具白名单仍由代码根据节点、配置和外部工具开关生成。
+- 未注册工具、禁用工具、外部工具未启用时一律拒绝调用。
+
+### 3.5 配置契约
+
+新增 / 调整配置遵守通用作用域，不绑定单个 Node：
+
+| 配置字段 | 环境变量 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `react_policy_driver` | `PAGENT_REACT_POLICY_DRIVER` | `"llm"` | `llm` / `heuristic`；无 LLM 配置时自动 heuristic。 |
+| `react_max_steps` | `PAGENT_REACT_MAX_STEPS` | `4` | LLM 驱动下最大 ReAct 步数。 |
+| `react_policy_model` | `PAGENT_REACT_POLICY_MODEL` | 空 | 空时回退 `llm_cheap_model` / `llm_model`。 |
+| `react_policy_temperature` | `PAGENT_REACT_POLICY_TEMPERATURE` | `0.0` | 决策低温，提升稳定性。 |
+| `react_use_llm_judge` | `PAGENT_REACT_USE_LLM_JUDGE` | `true` | 是否使用 policy 的 `sufficient` 判断。 |
+| `react_token_budget` | `PAGENT_REACT_TOKEN_BUDGET` | 沿用 retrieval 对应值 | ReAct evidence / prompt 预算。 |
+| `react_timeout_seconds` | `PAGENT_REACT_TIMEOUT_SECONDS` | 沿用 retrieval 对应值 | ReAct 主循环超时。 |
+
+兼容要求：
+
+- `retrieval_max_steps` 可保留读取一个版本并映射到 `react_max_steps`，但新代码优先使用 `react_max_steps`。
+- 新增配置必须同步 `Settings` 默认值、环境变量读取、`to_public_dict()`、测试。
+- 非敏感配置可进入 `to_public_dict()`；模型 API Key、token、secret、password 不得进入公开配置、日志或 trace。
+- 覆盖参数使用 `settings.xxx if arg is None else arg`，不得用 `arg or settings.xxx` 吞掉 `0` / `False`。
+
+### 3.6 数据契约
+
+- `ReActDecision`：policy 输出，字段为 `thought`、`action`、`tool_input`、`stop`、`sufficient`。
+- `ToolCard`：`name`、`description`、`input_schema`。
+- `ToolObservation`：沿用 `{tool_name, evidence, sufficient, error, external, top_score}` 或等价结构。
+- `ReActOutcome`：扩展 `{evidence, reason, steps_used, tool_calls, trace_events, external_tools_used, driver, fallback_used}`。
 
 收敛原因枚举：
 
 ```text
-sufficient       # 证据充分
+sufficient       # policy 或阈值判断证据充分
+policy_stop      # policy 主动停止但未明确 sufficient
 max_steps        # 达到最大步数
-token_budget     # token / evidence 预算不足或耗尽
+token_budget     # token / evidence 预算耗尽
 timeout          # 超过超时限制
-tool_unavailable # 所需工具未启用或不可用
-unsafe_request   # 请求涉及敏感材料外发或越权工具调用
+tool_unavailable # 工具不存在、未启用或被白名单拒绝
 ```
 
-### 工具注册契约
+### 3.7 Trace 契约
 
-工具必须通过代码注册，不能由 LLM 自由发现：
-
-| 工具名 | 默认可用场景 | 说明 |
-| --- | --- | --- |
-| `kb_retrieval` | QA 默认工具 | 调用现有 `build_retriever(settings).search(...)`，复用混合检索 / 重排 / 查询改写 / provenance。 |
-| `websearch` | 显式补料场景 | 查询最新案例、公开资讯、强时效内容；必须带 URL、标题、retrieved_at、时效提示。 |
-| `legal_status` | 法律状态缺口 | 查询专利法律状态；必须标注来源和查询时间，不能凭模型生成。 |
-| `official_fee` | 官费缺口 | 查询官费或费用规则；必须标注来源、适用地区、查询时间和核对提示。 |
-
-要求：
-
-- 每个工具暴露统一 `run(input) -> ToolObservation` 或等价接口。
-- 工具输入必须经过结构化 schema 校验，禁止把不可信输入拼接进 shell、SQL 或任意 URL。
-- 工具输出必须归一化为 evidence，至少包含 `content`、`provenance`、`score/confidence`、`retrieved_at`（如适用）。
-- 失败时返回可恢复 observation，不抛裸异常中断主循环。
-- 外部工具默认关闭或 stub，只有配置启用且场景允许时才可调用。
-
-### QA 收编契约
-
-R7 采用“一个主循环”方案，删除 QA 私有多轮检索循环：
-
-- `QANode.run()` 不再调用 `_retrieve_loop`。
-- QA 默认调用 R7 主循环，工具白名单默认仅包含 `kb_retrieval`。
-- 只有当输入或上游缺口检测明确需要强时效补料，且配置允许外部工具时，才加入 `websearch` / `legal_status` / `official_fee`。
-- 删除或迁移以下 QA 私有循环 helper：`_retrieve`、`_retrieve_loop`、`_accumulate_results`、`_result_key`、`_is_evidence_sufficient`、`_top_score`、`_get_result_score`、`_estimate_evidence_tokens`、`_rewrite_query`、`_build_converged_trace`、`_build_convergence`。
-- 保留 `_build_evidence`、法规时效告警、依据不足风险提示等最终回答相关逻辑，必要时改为消费 `ReActOutcome`。
-- `qa_react_step` / `qa_react_converged` trace 迁移为 `react_main_step` / `react_main_converged`，可保留 `node_name="qa"` 便于定位。
-
-### 配置契约
-
-优先使用通用作用域配置，避免新增绑定单 Node 的 `qa_*` 字段。
-
-建议配置：
-
-| 配置字段 | 环境变量 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `retrieval_max_steps` | `PAGENT_RETRIEVAL_MAX_STEPS` | 现有默认 | 主循环最大工具步数，兼容现有检索预算。 |
-| `retrieval_token_budget` | `PAGENT_RETRIEVAL_TOKEN_BUDGET` | 现有默认 | 主循环 evidence token 预算。 |
-| `retrieval_timeout_seconds` | `PAGENT_RETRIEVAL_TIMEOUT_SECONDS` | 现有默认 | 主循环超时时间。 |
-| `agentic_enabled` | `PAGENT_AGENTIC_ENABLED` | `True` | 是否启用 R7 主循环。 |
-| `agentic_external_tools_enabled` | `PAGENT_AGENTIC_EXTERNAL_TOOLS_ENABLED` | `False` | 是否允许外部工具加入白名单。 |
-| `agentic_default_tools` | `PAGENT_AGENTIC_DEFAULT_TOOLS` | `kb_retrieval` | 默认工具白名单。 |
-| `websearch_enabled` | `PAGENT_WEBSEARCH_ENABLED` | `False` | 是否启用 websearch 工具。 |
-| `legal_status_enabled` | `PAGENT_LEGAL_STATUS_ENABLED` | `False` | 是否启用法律状态查询工具。 |
-| `official_fee_enabled` | `PAGENT_OFFICIAL_FEE_ENABLED` | `False` | 是否启用官费查询工具。 |
-
-迁移要求：
-
-- `retrieval_react_min_results`、`retrieval_react_min_score`、`retrieval_react_use_llm_judge` 属于旧 QA 私有循环判定配置；本轮应迁移到主循环策略配置或直接删除。
-- 除非明确需要迁移窗口，不保留无意义兼容壳。
-- 新增 / 删除配置必须同步 `Settings` 默认值、环境变量读取、`to_public_dict()`、测试和文档。
-- 非敏感配置可进入 `to_public_dict()`；API Key、token、secret、password 等敏感字段必须排除。
-
-### Trace 契约
-
-每轮工具调用写入 `react_main_step`：
+新增 `react_policy_step`：
 
 ```json
 {
   "node_name": "qa",
   "step_index": 0,
   "tool_name": "kb_retrieval",
-  "input_len": 18,
-  "observation_count": 3,
-  "top_score": 0.67,
-  "decision": "continue_or_converge",
-  "external": false
+  "thought_len": 24,
+  "stop": false,
+  "sufficient": false,
+  "driver": "llm"
 }
 ```
 
-主循环收敛时写入 `react_main_converged`：
+扩展 `react_main_converged`：
 
 ```json
 {
   "node_name": "qa",
   "reason": "sufficient",
-  "steps_used": 1,
-  "tool_calls": 1,
-  "total_evidence": 3,
-  "external_tools_used": []
+  "steps_used": 2,
+  "tool_calls": 2,
+  "total_evidence": 5,
+  "external_tools_used": [],
+  "driver": "llm",
+  "fallback_used": false
 }
 ```
 
 约束：
 
-- trace 不记录完整 query、完整工具返回正文、完整用户敏感材料、密钥或凭证。
-- 外部工具 trace 只记录域名 / 来源类型 / retrieved_at / 结果数量等摘要字段。
-- 继续保留 `qa_completed` trace，字段包括 `basis_count`、`has_retrieval`、`evidence_versions` 或等价信息。
+- trace 不记录完整 `thought`、完整 query、完整工具返回正文、完整网页正文、密钥或敏感材料。
+- `thought` 只记录长度或安全摘要。
+- 决策 LLM 的 trace 只记录 model、input_chars、duration、task_type 等脱敏字段。
 
 ---
 
@@ -231,113 +292,97 @@ R7 采用“一个主循环”方案，删除 QA 私有多轮检索循环：
 
 ### 基本原则
 
-- 最小化、局部化改动；优先复用现有 orchestrator、node、retrieval、patent QA skill、trace 结构。
-- 不引入大型 agent 框架；主循环保持轻量、可测、可替换。
-- 不重写检索工具；`kb_retrieval` 只是对现有 retrieval 能力的工具适配。
+- 最小化、局部化改动；优先改造现有 `react_loop.py`、`tool_registry.py`、`qa.py` 和配置测试。
+- 复用现有 `LLMClient.generate`，不要新增大型 agent 框架。
+- 复用现有工具接口和 retrieval 能力，不重写检索算法。
 - 公共函数、公共方法、公共类必须添加中文 Google 风格 docstring，包含 Args / Returns / Raises（如有）。
-- 私有简单 helper 可用一行中文概述；只在预算判断、工具门控、去重策略、安全降级等不直观处加行内注释。
-- 日志 / trace 沿用稳定英文 event + 中文 message 风格。
-- 不记录完整 query、检索正文、网页正文、密钥、凭证或过长文本。
+- 简单私有 helper 可使用一行中文概述；只在预算裁决、降级、安全边界等不直观处加行内注释。
+- 日志 / trace 使用稳定英文事件名，message 可用中文。
+- 不记录完整敏感正文、完整 query、完整 `thought`、完整工具 observation 或密钥。
 
-### Prompt 规范
+### Prompt 风格
 
-如新增工具选择、收敛判定或缺口判断 prompt，必须满足项目 prompt 规范：
-
-- prompt 集中在 `app/prompts/`，不得内联散落在业务逻辑里。
-- 覆盖任务目标、上下文 / 判定规则、角色、受众、样例、输出格式六要素。
-- 外部 / 用户 / 检索 / websearch 内容必须包裹在 `<data>...</data>` 或三引号中，并声明数据区不作为指令。
-- 默认要求仅输出 JSON，并明确字段类型、必填项、枚举值与 `additionalProperties: False`。
-- 专利域约束必须明确：禁止臆造、不确定显式标注、使用规范术语。
-- LLM 只能输出工具选择建议或收敛判断；最终工具白名单、外部工具权限和 workflow 边界由代码裁决。
+- prompt 集中在 `app/prompts/react_policy.py`，不得内联散落在业务逻辑里。
+- 使用具名占位符，不通过字符串拼接混合系统指令和用户 / 检索数据。
+- 外部 / 用户 / 检索数据必须包裹在 `<data>...</data>` 或等价分隔符内，并声明数据区不作为指令。
+- 输出强制 JSON，schema 设置 `required`、类型约束、枚举 / null 行为和 `additionalProperties: false`。
+- 专利域默认约束必须写入：禁止臆造、不确定显式标注、使用规范术语。
 
 ### 错误处理与降级
 
-- 工具异常、解析异常、决策异常不得以裸异常打断 QA；应记录可恢复 warning / trace 后基于已有 evidence 收敛。
-- 预算为 `<= 0` 时不进入工具调用，直接走无检索 / 依据不足回答路径。
-- 超时判断必须在循环中生效，不能只在循环结束后检查。
-- token 预算不足时停止新增工具调用，收敛 reason 为 `token_budget`。
-- 外部工具未启用或不可用时，收敛 reason 可为 `tool_unavailable`，最终回答需标注依据不足或需核对官方来源。
-- 任何外部 evidence 缺少来源时不得进入 `basis`，只能作为不可引用背景或直接丢弃。
+- LLM 或工具异常不得裸异常中断 QA；应记录 warning / trace，走 heuristic 或基于已有 evidence 收敛。
+- 非法 action、未知工具、禁用工具、schema 不合规必须拒绝调用。
+- 预算 `<= 0` 时不调用工具，直接按对应 reason 收敛。
+- 超时检查必须在循环中生效，不能只在循环结束后检查。
+- 外部工具未启用时，即使 LLM 选择也不得调用。
 
 ---
 
 ## 5. Testing Strategy
 
+### ReActPolicy 测试
+
+必须覆盖：
+
+- `LLMReActPolicy` 能解析合法结构化决策。
+- 缺少必填字段、非 dict、非法 JSON 或类型错误时触发降级。
+- action 为未知工具时被主循环拒绝并降级或停止。
+- `tool_input.query` 可由 FakeLLMClient 在第二步改写，且主循环实际使用改写后的 query。
+- `HeuristicReActPolicy` 行为与旧确定性循环一致。
+- 无 LLM 配置或 FakeLLMClient 模拟失败时，driver 自动回退 heuristic。
+
 ### ReAct 主循环测试
 
 必须覆盖：
 
-- 证据充分时只调用 1 步工具即收敛。
-- 证据不足且仍有预算时继续选择工具并二次调用。
-- 达到 `retrieval_max_steps` 后停止，收敛 reason 为 `max_steps`。
-- token 预算耗尽时停止，收敛 reason 为 `token_budget`。
-- 超时时停止，收敛 reason 为 `timeout`。
-- 工具不可用时停止，收敛 reason 为 `tool_unavailable`。
-- `max_steps <= 0` 或 token 预算 `<= 0` 时不调用任何工具。
-- 循环步数、`steps_used`、trace 数量与实际工具调用次数一致。
+- LLM 配置齐全时，trace 出现 `react_policy_step` 且 `driver="llm"`。
+- 多步场景中第二步 `tool_input.query` 与首步不同。
+- `decision.sufficient=true` 时以 `sufficient` 收敛。
+- `decision.stop=true` 且证据未充分时以 `policy_stop` 收敛。
+- `react_use_llm_judge=false` 时回退阈值 / evidence 兜底。
+- 非法 action / LLM 失败时当步 fallback，循环不崩，`fallback_used=true`。
+- 任何情况下 `steps_used <= react_max_steps`。
+- token 预算耗尽时以 `token_budget` 收敛。
+- 超时时以 `timeout` 收敛。
+- 工具不可用时以 `tool_unavailable` 收敛。
 
-### 工具路由与白名单测试
-
-必须覆盖：
-
-- 默认 QA 场景只允许 `kb_retrieval`。
-- 外部工具开关关闭时，即使 LLM 选择 `websearch` / `legal_status` / `official_fee`，代码也拒绝调用。
-- 未注册工具名被拒绝，不能动态 import 或任意调用。
-- 工具输入通过 schema 校验；非法输入返回可恢复错误 observation。
-- 工具异常不导致主循环裸异常。
-- LLM 输出非法 JSON 或未知工具时回退安全路径。
-
-### QA 收编测试
+### QA 节点测试
 
 必须覆盖：
 
-- `QANode.run()` 委派 R7 主循环，不再调用 `_retrieve_loop`。
-- 默认单工具 `kb_retrieval` 行为与旧 QA 检索成功路径兼容。
-- 依据不足时仍追加 `INSUFFICIENT_EVIDENCE_WARNING` 或等价风险提示。
-- 法规过时 evidence 继续追加时效风险提示。
-- `state.dialog_context["qa_retrieval_results"]` 存储主循环返回的归一化 evidence。
-- 最终 `basis` 回链真实来源，不生成伪来源。
-- 代码搜索 `_retrieve_loop` 无残留，或仅在迁移说明 / 测试 fixture 中出现。
-
-### Evidence 与 provenance 测试
-
-必须覆盖：
-
-- KB evidence 保留 `document_id`、`source`、`locator`、`doc_type`、score / similarity。
-- 法规 evidence 保留 `law_name`、`version`、`effective_date`、`expiry_date`、`status`、`retrieved_at`。
-- websearch evidence 保留 URL / title / retrieved_at / source_type。
-- legal status / official fee evidence 保留官方或可信来源、查询时间、适用范围和核对提示。
-- 无来源 evidence 不进入最终 `basis`。
-- 多轮 evidence 去重后保留高分或更可信来源。
-
-### Trace 测试
-
-必须覆盖：
-
-- 每轮写入 `react_main_step`。
-- `react_main_step` 包含 `node_name`、`step_index`、`tool_name`、`input_len`、`observation_count`、`external`。
-- `react_main_step` 不包含完整 query、完整正文、密钥或敏感材料。
-- 收敛时写入 `react_main_converged`。
-- `react_main_converged` 包含 `reason`、`steps_used`、`tool_calls`、`total_evidence`、`external_tools_used`。
-- 既有 `qa_completed` trace 保持可用。
+- `QANode._build_react_loop` 正确注入 policy、driver、react_* 配置。
+- QA 注入 `FakeLLMClient` 决策序列后，工具调用顺序与收敛原因可断言。
+- 默认只开放 `kb_retrieval`；外部工具开关关闭时 LLM 选择外部工具也不得调用。
+- 主循环返回 evidence 后，最终 QA `basis` 仍只回链真实来源。
+- 依据不足、预算耗尽或工具不可用时仍输出风险提示。
 
 ### 配置测试
 
 必须覆盖：
 
-- 新增 agentic / tool 开关默认值正确，可被 `PAGENT_*` 环境变量覆盖。
-- 非敏感配置进入 `to_public_dict()`。
-- 敏感字段不进入 `to_public_dict()`、日志或 trace。
-- 删除旧 `retrieval_react_*` 配置时，同步删除默认值、环境变量读取、公开配置和旧测试断言。
-- 覆盖参数使用 `None` 继承全局配置，不吞掉 `0` / `False`。
+- `react_policy_driver`、`react_max_steps`、`react_policy_model`、`react_policy_temperature`、`react_use_llm_judge`、`react_token_budget`、`react_timeout_seconds` 默认值正确。
+- 对应 `PAGENT_REACT_*` 环境变量可覆盖。
+- `to_public_dict()` 包含非敏感 `react_*` 配置。
+- API Key、token、secret、password 不进入公开配置、日志或 trace。
+- `retrieval_max_steps` 兼容映射到 `react_max_steps` 的行为有测试覆盖，或明确删除旧兼容并同步测试。
+
+### Trace 测试
+
+必须覆盖：
+
+- 每步写入 `react_policy_step`。
+- `react_policy_step` 包含 `node_name`、`step_index`、`tool_name`、`thought_len`、`stop`、`sufficient`、`driver`。
+- `react_policy_step` 不包含完整 `thought`、完整 query、完整正文或密钥。
+- 收敛 trace 包含 `driver` 与 `fallback_used`。
+- `continue_or_converge` 在生产代码中删除，或仅保留在 heuristic 分支。
 
 ### 验收口径
 
-- `conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py` 通过。
+- `conda run -n autoGLM pytest tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py` 通过。
 - `conda run -n autoGLM pytest` 通过。
 - `conda run -n autoGLM python -m compileall app tests scripts` 通过。
-- 默认测试不触网、不调用真实付费 LLM、不连接真实外部检索源。
-- `grep -r "_retrieve_loop" app tests` 无生产代码残留；如 Windows 环境不用 grep，可用等价搜索工具确认。
+- 默认测试不触网、不调用真实付费 LLM。
+- 搜索 `continue_or_converge`，仅允许出现在 heuristic 分支或已删除。
 
 ---
 
@@ -345,60 +390,57 @@ R7 采用“一个主循环”方案，删除 QA 私有多轮检索循环：
 
 ### Always do
 
-- 始终把全局 workflow 顺序留给确定性编排器。
-- 始终通过代码白名单裁决工具可用性。
-- 始终让 ReAct 主循环受步数、token 预算、超时封顶。
-- 始终在证据不足、预算耗尽、工具不可用或超时时优雅收敛并作答。
-- 始终保留 evidence provenance，最终 `basis` 只引用真实来源。
-- 始终标注辅助初稿、非法律意见和必要的官方核对提示。
-- 始终用 fake / stub / monkeypatch 做默认测试，不触网。
-- 始终使用通用配置名，避免新增绑定单 Node 的 `qa_*` 配置。
+- 始终由代码强制预算、白名单、超时、外部工具开关和敏感内容限制。
+- 始终让 LLM 只输出结构化决策，不直接执行工具。
+- 始终校验 action 与 tool_input schema 后再调用工具。
+- 始终在 LLM 失败、非法 action 或 schema 不合规时安全降级。
+- 始终保留无 LLM 环境下的确定性 heuristic 行为。
+- 始终使用 fake / stub / monkeypatch 做默认测试。
 - 始终使用 `conda run -n autoGLM` 执行 Python、pytest 和脚本命令。
+- 始终避免新增绑定单 Node 的配置名。
 
 ### Ask first
 
-- 是否接入真实 websearch、法律状态或官费查询服务。
-- 是否允许外部工具默认启用。
+- 是否调用真实 LLM 做人工验收。
 - 是否允许向云模型发送完整敏感专利材料。
-- 是否新增依赖或外部 SDK。
-- 是否保留旧 `retrieval_react_*` 配置的兼容读取窗口。
-- 是否提高 `max_steps`、token 预算或超时上限做人工验收。
-- 是否修改全局 workflow 编排或让 LLM 参与节点路由。
+- 是否接入真实 websearch、法律状态或官费服务。
+- 是否新增外部 SDK 或依赖。
+- 是否保留旧 `retrieval_max_steps` 到 `react_max_steps` 的兼容窗口。
+- 是否提高 `react_max_steps`、token 预算或超时上限。
 
 ### Never do
 
-- 不让 LLM 改变全局 workflow 顺序或任意选择未注册工具。
-- 不做无界、长程或跨会话无限 ReAct。
+- 不让 LLM 调用未注册工具、任意函数、任意 URL 或改变全局 workflow。
+- 不做无界循环、跨会话无限 ReAct 或开放式 AutoGPT。
 - 不伪造检索来源、网页来源、法条、专利号、法律状态或官费信息。
-- 不在 trace / 日志记录完整敏感正文、完整 query、完整网页正文、完整检索正文或密钥。
-- 不让预算耗尽、超时或工具失败导致裸异常中断 QA。
-- 不在默认单测中触网、下载模型或调用真实付费服务。
-- 不删除 `app/tools/retrieval.py` 或破坏 R4.3 检索四件套。
-- 不保留两套并行多轮检索循环造成行为分叉。
+- 不在 trace / 日志记录完整 `thought`、完整 query、完整工具返回正文、完整敏感材料或密钥。
+- 不在默认测试中触网、下载模型或调用真实付费服务。
+- 不让预算耗尽、超时、工具失败或 LLM 失败导致裸异常中断 QA。
 
 ---
 
 ## 7. Functional Acceptance Checklist
 
-- [ ] 新增 `app/orchestrator/react_loop.py` 或等价 R7 主循环。
-- [ ] 新增工具注册 / 白名单机制。
-- [ ] `kb_retrieval` 工具复用现有 `app/tools/retrieval.py`。
-- [ ] 预留或实现 `websearch`、`legal_status`、`official_fee` 工具适配器。
-- [ ] 外部工具默认关闭或 stub，默认测试不触网。
-- [ ] QA 委派 R7 主循环，不再调用 `_retrieve_loop`。
-- [ ] 删除 QA 私有多轮检索 helper。
-- [ ] 删除或迁移 `retrieval_react_*` 配置。
-- [ ] 新增 agentic / tool 开关配置，并同步环境变量、`to_public_dict()` 和测试。
-- [ ] 主循环支持 `sufficient`、`max_steps`、`token_budget`、`timeout`、`tool_unavailable`、`unsafe_request` 收敛原因。
-- [ ] 主循环写入 `react_main_step` trace。
-- [ ] 主循环写入 `react_main_converged` trace。
-- [ ] trace 不记录完整 query、正文或敏感信息。
-- [ ] evidence 保留 provenance 和 retrieved_at / 时效字段。
-- [ ] 无来源 evidence 不进入最终 `basis`。
-- [ ] 最终 QA `basis` 回链真实来源。
-- [ ] 依据不足或外部工具不可用时输出风险提示。
-- [ ] 法规过时提示保持可用。
-- [ ] 默认测试不触网、不调用真实付费服务。
+- [ ] 新增 `app/orchestrator/react_policy.py`。
+- [ ] 新增 `app/prompts/react_policy.py` 与 `REACT_DECISION_SCHEMA`。
+- [ ] 实现 `ReActDecision` / `ReActPolicy` / `LLMReActPolicy` / `HeuristicReActPolicy`。
+- [ ] `BoundedReActLoop` 每步通过 policy 决策。
+- [ ] `BoundedReActLoop` 校验 action 白名单和 tool_input schema。
+- [ ] `BoundedReActLoop` 支持 LLM 失败当步 fallback。
+- [ ] outcome 扩展 `driver` 与 `fallback_used`。
+- [ ] trace 新增 `react_policy_step`。
+- [ ] `react_main_converged` 扩展 `driver` 与 `fallback_used`。
+- [ ] `ToolSpec` 增加 `description` 与 `input_schema`。
+- [ ] registry 暴露 `tool_cards()`。
+- [ ] 新增 `react_*` 配置与 `PAGENT_REACT_*` 环境变量读取。
+- [ ] `react_*` 非敏感配置进入 `to_public_dict()`。
+- [ ] `QANode._build_react_loop` 接入 policy 和 react_* 配置。
+- [ ] 多步场景支持基于 observation 改写 query。
+- [ ] `react_use_llm_judge=false` 时回退阈值兜底。
+- [ ] 无 LLM 环境行为与旧确定性循环一致。
+- [ ] 非法 action / LLM 失败不会导致循环崩溃。
+- [ ] 任何情况下 `steps_used <= react_max_steps`。
+- [ ] 默认测试使用 FakeLLMClient，不触网、不调用真实付费服务。
 - [ ] `conda run -n autoGLM pytest` 通过。
 - [ ] `conda run -n autoGLM python -m compileall app tests scripts` 通过。
 
@@ -406,13 +448,12 @@ R7 采用“一个主循环”方案，删除 QA 私有多轮检索循环：
 
 ## 8. Implementation Order
 
-1. 测试先行：新增 `tests/test_agentic_loop.py`，覆盖预算、收敛、工具白名单、trace 和异常降级。
-2. 主循环：新增 `app/orchestrator/react_loop.py`，实现 bounded ReAct 控制流和 `ReActOutcome`。
-3. 工具注册：新增工具 registry，先接入 stub / fake 工具和 `kb_retrieval`。
-4. 配置：新增 agentic / tool 开关配置，决定是否直接删除或短期兼容 `retrieval_react_*`。
-5. QA 收编：修改 `app/nodes/qa.py`，删除 `_retrieve_loop` 及私有循环 helper，委派 R7 主循环。
-6. Evidence：统一主循环 observation → QA evidence 转换，保留 provenance、时效和来源回链。
-7. 外部工具：在默认关闭前提下接入或预留 `websearch`、`legal_status`、`official_fee` 适配器。
-8. Prompt：如需要 LLM 工具选择 / 收敛判定，集中新增 `app/prompts/react_router.py`，严格 JSON 输出和指令 / 数据分离。
-9. 回归：更新 `tests/test_qa_node.py`、`tests/test_core_config_logging.py`，删除或迁移 `tests/test_qa_react_loop.py`。
-10. 验收：运行目标测试、全量 pytest 和 compileall，确认 `_retrieve_loop` 无生产代码残留。
+1. 定义 `ReActDecision`、`ToolCard`、决策 schema 与 prompt。
+2. 抽出 `HeuristicReActPolicy`，保持旧确定性行为不变。
+3. 实现 `LLMReActPolicy`，基于 `LLMClient.generate` 与结构化 schema。
+4. 改造 `BoundedReActLoop`：policy 注入、决策校验、fallback、trace、outcome 扩展。
+5. 改造 `tool_registry`：补充工具描述、输入 schema、`tool_cards()`。
+6. 接入 `config.py` 的 `react_*` 配置与公开配置。
+7. 更新 `QANode._build_react_loop`，让 QA 使用 policy 驱动主循环。
+8. 新增 / 更新测试：`test_react_policy.py`、`test_agentic_loop.py`、`test_qa_node.py`、`test_core_config_logging.py`。
+9. 运行目标测试、全量 pytest 和 compileall。

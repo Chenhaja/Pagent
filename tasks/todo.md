@@ -1,189 +1,181 @@
-# R7 Agentic 编排 Todo
+# R7.1 LLM 驱动 ReAct 主循环 Todo
 
-## Phase 0 — 决策与迁移口径确认
+## Phase 0 — 迁移口径确认
 
-- [x] 确认旧 `retrieval_react_*` 配置直接删除或保留兼容窗口。
-  - 验收：实现前有明确口径；测试按该口径编写。
-- [x] 确认外部工具本轮只做 stub / 关闭，或接入真实服务。
-  - 验收：若接真实服务，补充密钥、安全和默认测试 stub 要求。
-- [x] 确认工具选择本轮使用 deterministic policy，LLM router 仅预留或实现。
-  - 验收：主循环测试不依赖真实 LLM。
+- [x] 确认 `retrieval_max_steps` 到 `react_max_steps` 的兼容口径。
+  - 验收：新代码优先 `react_max_steps`，旧 `retrieval_max_steps` 保留为兼容配置。
+- [x] 确认 `react_policy_driver` 默认行为。
+  - 验收：默认 `llm`，无完整 LLM 配置时自动 heuristic，不触网。
+- [x] 确认 `react_use_llm_judge` 行为。
+  - 验收：开启时优先 `decision.sufficient`，关闭时用 observation / evidence 兜底。
+- [x] 确认外部工具本轮不接真实服务。
+  - 验收：沿用 R7 开关，默认关闭，测试不触网。
 
-## Phase 1 — 主循环最小闭环
+## Phase 1 — Policy 与 prompt 最小闭环
 
-- [x] 新增 `app/orchestrator/react_loop.py`。
-  - 验收：模块可导入，公共类 / 函数有中文 docstring。
-- [x] 定义 `ReActBudget` / `ReActOutcome` / `ToolObservation` 或等价结构。
-  - 验收：能表达 evidence、trace、收敛原因、steps_used、tool_calls。
-- [x] 实现 bounded ReAct 主循环。
-  - 验收：支持 reason -> act -> observe -> judge -> converge。
-- [x] 支持 `sufficient` 收敛。
-  - 验收：fake 工具首轮证据充分时只调用 1 次。
-- [x] 支持 `max_steps` 收敛。
-  - 验收：证据不足时达到步数上限停止。
-- [x] 支持 `token_budget` 收敛。
-  - 验收：预算耗尽时不继续调用工具。
-- [x] 支持 `timeout` 收敛。
-  - 验收：超时时返回 outcome，不裸抛。
-- [x] 支持 `tool_unavailable` / `unsafe_request` 收敛。
-  - 验收：未知工具、不可用工具、越权请求不执行工具。
-- [x] 输出 `react_main_step` trace。
-  - 验收：包含 `node_name`、`step_index`、`tool_name`、`input_len`、`observation_count`、`external`。
-- [x] 输出 `react_main_converged` trace。
-  - 验收：包含 `reason`、`steps_used`、`tool_calls`、`total_evidence`、`external_tools_used`。
-- [x] 新增 `tests/test_agentic_loop.py`。
-  - 验收：覆盖充分、步数、预算、超时、工具不可用、trace、异常降级。
-- [x] 验证 Phase 1。
-  - 命令：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
+- [ ] 新增 `app/orchestrator/react_policy.py`。
+  - 验收：模块可导入，公共类 / 方法有中文 docstring。
+- [ ] 定义 `ReActDecision`。
+  - 验收：字段包含 `thought`、`action`、`tool_input`、`stop`、`sufficient`。
+- [ ] 定义 `ReActPolicy` protocol。
+  - 验收：`decide(task_input, allowed_tools, scratchpad, step_index)` 返回 `ReActDecision`。
+- [ ] 实现 `HeuristicReActPolicy`。
+  - 验收：封装旧确定性逻辑，默认 query 仍来自原始 `task_input`。
+- [ ] 实现 `LLMReActPolicy`。
+  - 验收：调用 `LLMClient.generate(messages=..., output_schema=..., trace_context={"task_type": "react_policy"})`。
+- [ ] 新增 `app/prompts/react_policy.py`。
+  - 验收：prompt 不内联在业务逻辑中。
+- [ ] 定义 `REACT_DECISION_SCHEMA`。
+  - 验收：包含 required、类型约束、`additionalProperties: False`。
+- [ ] 编写 react policy prompt builder。
+  - 验收：覆盖任务目标、上下文 / 判定规则、角色、受众、样例、输出格式六要素。
+- [ ] 实现 prompt 指令 / 数据分离。
+  - 验收：用户任务、工具卡片、scratchpad 作为数据区传入。
+- [ ] 新增 `tests/test_react_policy.py`。
+  - 验收：覆盖合法决策、缺字段、类型错误、LLM error、trace_context。
+- [ ] 验证 Phase 1。
+  - 命令：`conda run -n autoGLM pytest tests/test_react_policy.py`
 
-## Phase 2 — 工具注册与 `kb_retrieval`
+## Phase 2 — 工具卡片与 schema 边界
 
-- [x] 新增 `app/orchestrator/tool_registry.py`。
-  - 验收：工具必须显式注册，不能动态 import 任意工具。
-- [x] 定义工具元数据和统一运行接口。
-  - 验收：包含工具名、external 标记、启用条件、输入校验、run 行为。
-- [x] 实现 `kb_retrieval` 工具适配器。
-  - 验收：复用 `build_retriever(settings).search(...)`。
-- [x] 归一化 KB observation 为 evidence。
-  - 验收：保留 `document_id`、`source`、`locator`、`doc_type`、score / similarity。
-- [x] 保留法规时效字段。
-  - 验收：`law_name`、`version`、`effective_date`、`expiry_date`、`status`、`retrieved_at` 可进入 evidence。
-- [x] 拒绝未注册工具。
-  - 验收：返回安全失败 observation 或 `tool_unavailable`。
-- [x] 拒绝禁用工具。
-  - 验收：开关关闭时不调用工具 run。
-- [x] 新增 `tests/test_agentic_tools.py` 工具注册测试。
-  - 验收：白名单、未注册、禁用、非法输入、异常降级均覆盖。
-- [x] 回归 `tests/test_retrieval_tool.py`。
-  - 验收：R4.3 检索四件套不被破坏。
-- [x] 验证 Phase 2。
-  - 命令：`conda run -n autoGLM pytest tests/test_agentic_tools.py tests/test_retrieval_tool.py`
+- [ ] 新增 `ToolCard` dataclass。
+  - 验收：字段包含 `name`、`description`、`input_schema`。
+- [ ] 扩展 `ToolSpec.description`。
+  - 验收：每个默认工具有用途描述。
+- [ ] 扩展 `ToolSpec.input_schema`。
+  - 验收：每个默认工具有结构化输入 schema。
+- [ ] 实现 `ToolRegistry.tool_cards(...)`。
+  - 验收：只返回已注册、已启用、且被允许的工具卡片。
+- [ ] 为 `kb_retrieval` 定义输入 schema。
+  - 验收：`query` 必填，可选 `top_k`、`as_of`、`fetch_k`。
+- [ ] 为 `websearch` 定义输入 schema 与描述。
+  - 验收：默认关闭时不出现在可用 cards 中。
+- [ ] 为 `legal_status` 定义输入 schema 与描述。
+  - 验收：默认关闭时不出现在可用 cards 中。
+- [ ] 为 `official_fee` 定义输入 schema 与描述。
+  - 验收：默认关闭时不出现在可用 cards 中。
+- [ ] 更新 `tests/test_agentic_tools.py`。
+  - 验收：覆盖 tool cards、禁用工具、未注册工具、schema 元数据。
+- [ ] 验证 Phase 2。
+  - 命令：`conda run -n autoGLM pytest tests/test_agentic_tools.py tests/test_react_policy.py`
 
-## Phase 3 — 配置迁移与工具开关
+## Phase 3 — 主循环 policy 驱动改造
 
-- [x] 新增 `agentic_enabled` 配置。
-  - 验收：默认值和 `PAGENT_AGENTIC_ENABLED` 覆盖生效。
-- [x] 新增 `agentic_external_tools_enabled` 配置。
-  - 验收：默认关闭外部工具。
-- [x] 新增 `agentic_default_tools` 配置。
-  - 验收：默认值为 `kb_retrieval`。
-- [x] 新增 `websearch_enabled` 配置。
-  - 验收：默认 `False`，可由 `PAGENT_WEBSEARCH_ENABLED` 覆盖。
-- [x] 新增 `legal_status_enabled` 配置。
-  - 验收：默认 `False`，可由 `PAGENT_LEGAL_STATUS_ENABLED` 覆盖。
-- [x] 新增 `official_fee_enabled` 配置。
-  - 验收：默认 `False`，可由 `PAGENT_OFFICIAL_FEE_ENABLED` 覆盖。
-- [x] 复用 `retrieval_max_steps` / `retrieval_token_budget` / `retrieval_timeout_seconds` 作为主循环预算。
-  - 验收：不新增 `qa_*` 预算配置。
-- [x] 删除或迁移 `retrieval_react_min_results`。
-  - 验收：按 Phase 0 决策同步默认值、env、public dict、测试。
-- [x] 删除或迁移 `retrieval_react_min_score`。
-  - 验收：按 Phase 0 决策同步默认值、env、public dict、测试。
-- [x] 删除或迁移 `retrieval_react_use_llm_judge`。
-  - 验收：按 Phase 0 决策同步默认值、env、public dict、测试。
-- [x] 更新 `to_public_dict()`。
-  - 验收：非敏感 agentic 配置可见，敏感字段仍不可见。
-- [x] 更新 `tests/test_core_config_logging.py`。
-  - 验收：默认值、环境变量、公开配置、敏感字段排除均覆盖。
-- [x] 验证 Phase 3。
+- [ ] 扩展 `ReActOutcome.driver`。
+  - 验收：outcome 可观测 `llm` / `heuristic`。
+- [ ] 扩展 `ReActOutcome.fallback_used`。
+  - 验收：policy 失败或非法 action 后为 `True`。
+- [ ] 修改 `BoundedReActLoop.__init__` 支持注入 policy。
+  - 验收：测试可注入 fake / scripted policy。
+- [ ] 修改 `BoundedReActLoop.__init__` 支持工具卡片 metadata。
+  - 验收：run 时能把 allowed tool cards 传给 policy。
+- [ ] 在 `run()` 中维护 scratchpad。
+  - 验收：scratchpad 只含摘要，不含完整 query / evidence 正文。
+- [ ] 每步调用 `policy.decide(...)`。
+  - 验收：不再按下标固定选工具作为主路径。
+- [ ] 校验 `decision.action` 白名单。
+  - 验收：未知、禁用、未允许工具不会被调用。
+- [ ] 校验 `decision.tool_input` schema。
+  - 验收：缺少必填字段或类型不匹配时 fallback。
+- [ ] 支持 `policy_stop` 收敛。
+  - 验收：`decision.stop=true` 且未充分时 reason 为 `policy_stop`。
+- [ ] 支持 LLM judge 开关。
+  - 验收：`react_use_llm_judge=false` 时不使用 `decision.sufficient` 直接收敛。
+- [ ] 执行工具时使用 `decision.tool_input`。
+  - 验收：多步场景第二步 query 可不同于首步。
+- [ ] 实现当步 fallback 到 `HeuristicReActPolicy`。
+  - 验收：LLM error、非法 action、schema error 不导致循环崩溃。
+- [ ] 新增 `react_policy_step` trace。
+  - 验收：包含 `node_name`、`step_index`、`tool_name`、`thought_len`、`stop`、`sufficient`、`driver`。
+- [ ] 扩展 `react_main_converged` trace。
+  - 验收：包含 `driver`、`fallback_used`。
+- [ ] 清理固定 `continue_or_converge` 主路径。
+  - 验收：仅允许在 heuristic 分支出现，或完全删除。
+- [ ] 更新 `tests/test_agentic_loop.py`。
+  - 验收：覆盖 llm driver、多步 query 改写、policy_stop、fallback、预算硬约束。
+- [ ] 验证 Phase 3。
+  - 命令：`conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_react_policy.py`
+
+## Phase 4 — react_* 配置接入
+
+- [ ] 新增 `react_policy_driver` 配置。
+  - 验收：默认 `llm`，`PAGENT_REACT_POLICY_DRIVER` 可覆盖。
+- [ ] 新增 `react_max_steps` 配置。
+  - 验收：默认 `4`，`PAGENT_REACT_MAX_STEPS` 可覆盖。
+- [ ] 新增 `react_policy_model` 配置。
+  - 验收：默认空，policy 可回退 `llm_cheap_model` / `llm_model`。
+- [ ] 新增 `react_policy_temperature` 配置。
+  - 验收：默认 `0.0`，环境变量可覆盖。
+- [ ] 新增 `react_use_llm_judge` 配置。
+  - 验收：默认 `True`，环境变量可覆盖。
+- [ ] 新增 `react_token_budget` 配置。
+  - 验收：默认沿用 retrieval token budget，环境变量可覆盖。
+- [ ] 新增 `react_timeout_seconds` 配置。
+  - 验收：默认沿用 retrieval timeout，环境变量可覆盖。
+- [ ] 更新 `get_settings()` 环境变量读取。
+  - 验收：所有 `PAGENT_REACT_*` 生效。
+- [ ] 更新 `Settings.to_public_dict()`。
+  - 验收：非敏感 `react_*` 可见，密钥仍不可见。
+- [ ] 更新 `tests/test_core_config_logging.py` 默认值测试。
+  - 验收：新增 react 默认字段均被断言。
+- [ ] 更新 `tests/test_core_config_logging.py` 环境变量测试。
+  - 验收：新增 `PAGENT_REACT_*` 均被断言。
+- [ ] 更新 `tests/test_core_config_logging.py` 公开配置测试。
+  - 验收：新增 react 字段在 public dict 中。
+- [ ] 验证 Phase 4。
   - 命令：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
 
-## Phase 4 — QA 收编到 R7 主循环
+## Phase 5 — QA 接入 policy 驱动主循环
 
-- [x] 修改 `QANode.__init__` 注入或构造 R7 主循环 / tool registry。
-  - 验收：测试可注入 fake loop，不触网。
-- [x] 修改 `QANode.run()` 委派 R7 主循环。
-  - 验收：不再调用 `_retrieve_loop`。
-- [x] QA 默认工具白名单只包含 `kb_retrieval`。
-  - 验收：外部工具未显式启用时不可达。
-- [x] 将 `ReActOutcome.evidence` 写入 `state.dialog_context["qa_retrieval_results"]`。
-  - 验收：PatentQASkill 能消费 evidence。
-- [x] 保留 `PatentQASkill` 最终回答链路。
-  - 验收：`qa_result` 结构不回归。
-- [x] 保留法规过时提示。
-  - 验收：stale law evidence 仍追加核对提示。
-- [x] 保留依据不足提示。
-  - 验收：非 `sufficient` 或无 evidence 时追加 `INSUFFICIENT_EVIDENCE_WARNING`。
-- [x] 保留 `qa_completed` trace。
-  - 验收：包含 `basis_count`、`has_retrieval`、`evidence_versions` 或等价字段。
-- [x] 删除 `_retrieve`。
-  - 验收：生产代码无该 QA 私有检索 helper。
-- [x] 删除 `_retrieve_loop`。
-  - 验收：生产代码无 `_retrieve_loop`。
-- [x] 删除 `_accumulate_results` / `_result_key`。
-  - 验收：去重逻辑迁移到主循环或工具层。
-- [x] 删除 `_is_evidence_sufficient` / `_top_score` / `_get_result_score`。
-  - 验收：充分性判断迁移到主循环策略。
-- [x] 删除 `_estimate_evidence_tokens`。
-  - 验收：预算估算迁移到主循环。
-- [x] 删除 `_rewrite_query`。
-  - 验收：工具决策 / query 改写不在 QA 私有循环中。
-- [x] 删除 `_build_converged_trace` / `_build_convergence`。
-  - 验收：收敛 trace 由主循环输出。
-- [x] 更新 `tests/test_qa_node.py`。
-  - 验收：QA 委派、默认 KB、风险提示、法规提示、trace、basis 回链均覆盖。
-- [x] 迁移或删除 `tests/test_qa_react_loop.py`。
-  - 验收：有效用例进入 `test_agentic_loop.py` / `test_qa_node.py`。
-- [x] 验证 Phase 4。
+- [ ] 修改 `QANode.__init__` 默认预算来源。
+  - 验收：默认继承 `react_max_steps`、`react_token_budget`、`react_timeout_seconds`。
+- [ ] 保持 QANode 构造参数覆盖语义。
+  - 验收：`0` / `False` 等有效值不被 `or` 吞掉。
+- [ ] 修改 `QANode._build_react_loop` 构建 policy。
+  - 验收：按 `react_policy_driver` 选择 LLM 或 heuristic。
+- [ ] 无 LLM 配置时自动 heuristic。
+  - 验收：默认测试不触网。
+- [ ] QA 构建 loop 时传入 tool cards / registry metadata。
+  - 验收：policy 可见工具描述和 schema。
+- [ ] QA 注入 FakeLLMClient 决策序列测试。
+  - 验收：工具调用顺序、query 改写、收敛 reason 可断言。
+- [ ] QA 无 LLM 回归测试。
+  - 验收：行为与旧确定性循环一致。
+- [ ] QA 外部工具关闭测试。
+  - 验收：LLM 选择外部工具也不会调用。
+- [ ] QA basis 回链测试。
+  - 验收：最终 basis 仍只引用真实 evidence 来源。
+- [ ] 验证 Phase 5。
   - 命令：`conda run -n autoGLM pytest tests/test_qa_node.py tests/test_agentic_loop.py`
 
-## Phase 5 — 外部工具 stub 与 provenance
+## Phase 6 — Trace、安全与旧行为清理
 
-- [x] 新增或预留 `app/tools/websearch.py`。
-  - 验收：默认关闭或 stub，不触网。
-- [x] 新增或预留 `app/tools/legal_status.py`。
-  - 验收：默认关闭或 stub，不触网。
-- [x] 新增或预留 `app/tools/official_fee.py`。
-  - 验收：默认关闭或 stub，不触网。
-- [x] 外部工具启用需同时满足全局外部工具开关和单工具开关。
-  - 验收：任一开关关闭都不调用工具。
-- [x] websearch evidence 保留 URL / title / retrieved_at / source_type。
-  - 验收：无 URL 或来源时不可进入 `basis`。
-- [x] legal status evidence 保留来源 / 查询时间 / 法律状态 / 核对提示。
-  - 验收：不能凭模型生成法律状态。
-- [x] official fee evidence 保留来源 / 查询时间 / 适用范围 / 核对提示。
-  - 验收：不能凭模型生成官费。
-- [x] 外部工具失败返回可恢复 observation。
-  - 验收：主循环收敛为 `tool_unavailable` 或继续使用已有 evidence。
-- [x] 更新 `tests/test_agentic_tools.py` 外部工具覆盖。
-  - 验收：默认关闭、显式启用、provenance、无来源过滤均覆盖。
-- [x] 验证 Phase 5。
-  - 命令：`conda run -n autoGLM pytest tests/test_agentic_tools.py`
+- [ ] 确认 `react_policy_step` 不记录完整 thought。
+  - 验收：trace 中只有 `thought_len` 或安全摘要。
+- [ ] 确认 trace 不记录完整 query。
+  - 验收：负向测试包含敏感 query 字符串。
+- [ ] 确认 trace 不记录完整 evidence 正文。
+  - 验收：负向测试包含敏感 evidence 字符串。
+- [ ] 确认 LLM trace_context 不含 raw input / api_key。
+  - 验收：FakeLLMClient trace 中不出现敏感字段。
+- [ ] 搜索并清理 `continue_or_converge`。
+  - 验收：仅保留在 heuristic 分支或已删除。
+- [ ] 确认 outcome 与 converged trace 都有 `driver`。
+  - 验收：测试断言字段存在。
+- [ ] 确认 outcome 与 converged trace 都有 `fallback_used`。
+  - 验收：fallback 场景测试断言为 `True`。
+- [ ] 验证 Phase 6。
+  - 命令：`conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_qa_node.py`
 
-## Phase 6 — Prompt / LLM router 预留（可选）
+## Phase 7 — 回归与总体验收
 
-- [x] 决定本轮是否实现 LLM router。
-  - 验收：若不实现，本阶段标记为 deferred，不阻塞 R7 默认路径。
-- [ ] 如实现，新增 `app/prompts/react_router.py`。
-  - 验收：本轮 deferred，未实现 LLM router；prompt 集中维护留待后续。
-- [ ] prompt 覆盖六要素。
-  - 验收：本轮 deferred，未实现 LLM router。
-- [ ] prompt 做指令 / 数据分离。
-  - 验收：本轮 deferred，未实现 LLM router。
-- [ ] prompt 要求仅输出 JSON。
-  - 验收：本轮 deferred，未实现 LLM router。
-- [x] 代码对白名单做最终裁决。
-  - 验收：LLM 输出未注册工具也不会调用。
-- [x] 非法 JSON / 异常回退 deterministic policy。
-  - 验收：默认测试不调用真实 LLM。
-- [x] 验证 Phase 6。
-  - 命令：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-
-## Phase 7 — 回归、清理与验收
-
-- [x] 搜索 `_retrieve_loop` 残留。
-  - 验收：生产代码无残留；如测试迁移说明中出现需合理。
-- [x] 搜索 `qa_react_step` / `qa_react_converged` 残留。
-  - 验收：旧 trace 断言迁移为 `react_main_*`。
-- [x] 确认 `app/tools/retrieval.py` 未被删除或重写。
-  - 验收：检索回归测试通过。
-- [x] 确认默认测试不触网。
-  - 验收：外部工具均 fake / stub / disabled。
-- [x] 运行目标测试。
-  - 命令：`conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py`
-- [x] 运行全量测试。
+- [ ] 运行 R7.1 目标测试。
+  - 命令：`conda run -n autoGLM pytest tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py`
+- [ ] 运行全量测试。
   - 命令：`conda run -n autoGLM pytest`
-- [x] 运行编译检查。
+- [ ] 运行编译检查。
   - 命令：`conda run -n autoGLM python -m compileall app tests scripts`
-- [x] 更新 `tasks/plan.md` 和 `tasks/todo.md` 状态。
+- [ ] 确认默认测试不触网。
+  - 验收：真实 LLM、websearch、legal_status、official_fee 均未调用。
+- [ ] 更新 todo 完成状态。
   - 验收：已完成项勾选，延期项保留未勾选并说明原因。

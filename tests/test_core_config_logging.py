@@ -353,9 +353,11 @@ def test_json_line_formatter_outputs_required_fields() -> None:
     assert "timestamp" in payload
 
 
-def test_configure_logging_installs_json_formatter() -> None:
-    """日志初始化应为 root logger 安装 JSON Lines formatter。"""
+def test_configure_logging_installs_pretty_formatter_for_local_auto() -> None:
+    """本地 auto 模式应为 root logger 安装 pretty formatter。"""
+    from app.core.logging import PrettyFormatter
+
     logger = configure_logging(Settings())
 
     assert logger.handlers
-    assert isinstance(logger.handlers[0].formatter, JsonLineFormatter)
+    assert isinstance(logger.handlers[0].formatter, PrettyFormatter)

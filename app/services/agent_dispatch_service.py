@@ -197,6 +197,10 @@ class AgentDispatchService:
             return str(result["claim"].get("text", ""))
         if result.get("answer"):
             return str(result["answer"])
+        if result.get("qa_result"):
+            qa_result = result.get("qa_result")
+            if isinstance(qa_result, dict):
+                return str(qa_result.get("answer", ""))
         return ""
 
     def _run_qa(self, state: WorkflowState, workflow_def: list[str]) -> dict[str, Any]:

@@ -44,25 +44,25 @@
 
 ## Phase 2 — Policy reflect 能力
 
-- [ ] 新增 `ReflectResult` dataclass。
+- [x] 新增 `ReflectResult` dataclass。
   - 验收：字段为 `sufficient: bool`、`reason: str`、`next_query_hint: str | None`。
   - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [ ] 扩展 `ReActPolicy` Protocol 增加 `reflect(...)`。
+- [x] 扩展 `ReActPolicy` Protocol 增加 `reflect(...)`。
   - 验收：Protocol 同时包含 `decide` 与 `reflect`。
   - 验证：类型相关单测和 import 不报错。
-- [ ] 实现 `_parse_reflection`。
+- [x] 实现 `_parse_reflection`。
   - 验收：合法 dict 解析成功；缺 `sufficient/reason`、类型错误、非 dict 均抛 `ReActPolicyError`。
   - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [ ] 实现 `LLMReActPolicy.reflect`。
+- [x] 实现 `LLMReActPolicy.reflect`。
   - 验收：调用 `LLMClient.generate(messages=..., output_schema=REACT_REFLECT_SCHEMA, trace_context={task_type: react_reflect})`。
   - 验证：`conda run -n autoGLM pytest tests/test_react_policy.py tests/test_react_reflect.py`
-- [ ] 支持 `LLMReActPolicy.reflect_model`。
+- [x] 支持 `LLMReActPolicy.reflect_model`。
   - 验收：reflect 调用优先使用 `reflect_model`，为空回退 `model`。
   - 验证：Fake trace 断言 model 字段。
-- [ ] 实现 `HeuristicReActPolicy.reflect`。
+- [x] 实现 `HeuristicReActPolicy.reflect`。
   - 验收：使用 `evidence_count > 0 and top_score >= threshold and not error` 判断，不是 `bool(evidence)`。
   - 验证：`conda run -n autoGLM pytest tests/test_react_reflect.py`
-- [ ] 保持 `HeuristicReActPolicy.decide` 旧行为。
+- [x] 保持 `HeuristicReActPolicy.decide` 旧行为。
   - 验收：按工具顺序选工具的既有测试继续通过。
   - 验证：`conda run -n autoGLM pytest tests/test_react_policy.py`
 

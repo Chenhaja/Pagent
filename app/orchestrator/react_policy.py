@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from app.prompts.react_policy import REACT_DECISION_SCHEMA, build_react_policy_messages
+from app.prompts.react_policy import REACT_DECISION_SCHEMA, REACT_REFLECT_SCHEMA, build_react_policy_messages, build_react_reflect_messages
 from app.tools.llm import LLMClient
 
 
@@ -25,6 +25,24 @@ class ReActDecision:
     tool_input: dict[str, Any] = field(default_factory=dict)
     stop: bool = False
     sufficient: bool = False
+
+
+@dataclass
+class ReflectResult:
+    """ReAct 观察后反思结果。
+
+    Args:
+        sufficient: 当前 observation 是否足以支撑任务。
+        reason: 判断依据短摘要,仅用于 trace 摘要。
+        next_query_hint: 证据不足时的下一步 query 建议。
+
+    Returns:
+        可被主循环消费的结构化反思结果。
+    """
+
+    sufficient: bool
+    reason: str
+    next_query_hint: str | None = None
 
 
 @dataclass
@@ -72,11 +90,39 @@ class ReActPolicy(Protocol):
         """
         ...
 
+    def reflect(
+        self,
+        task_input: str,
+        observation_digest: dict[str, Any],
+        scratchpad: list[dict[str, Any]],
+        step_index: int,
+    ) -> ReflectResult:
+        """生成 observation 反思结果。
+
+        Args:
+            task_input: 当前任务或问题。
+            observation_digest: 本步 observation 摘要。
+            scratchpad: 历史步骤摘要。
+            step_index: 当前步数。
+
+        Returns:
+            结构化反思结果。
+        """
+        ...
+
 
 class HeuristicReActPolicy:
     """确定性降级策略,保留旧版按顺序选工具行为。"""
 
     driver = "heuristic"
+
+    def __init__(self, sufficient_score_threshold: float = 0.5) -> None:
+        """初始化确定性 ReAct policy。
+
+        Args:
+            sufficient_score_threshold: 阈值兜底的 top_score 门槛。
+        """
+        self.sufficient_score_threshold = sufficient_score_threshold
 
     def decide(
         self,
@@ -107,6 +153,31 @@ class HeuristicReActPolicy:
             sufficient=False,
         )
 
+    def reflect(
+        self,
+        task_input: str,
+        observation_digest: dict[str, Any],
+        scratchpad: list[dict[str, Any]],
+        step_index: int,
+    ) -> ReflectResult:
+        """按 evidence 数量和分数阈值生成确定性反思结果。
+
+        Args:
+            task_input: 当前任务或问题。
+            observation_digest: 本步 observation 摘要。
+            scratchpad: 历史步骤摘要。
+            step_index: 当前步数。
+
+        Returns:
+            阈值兜底反思结果。
+        """
+        evidence_count = int(observation_digest.get("evidence_count") or 0)
+        top_score = float(observation_digest.get("top_score") or 0.0)
+        has_error = bool(observation_digest.get("error"))
+        sufficient = evidence_count > 0 and top_score >= self.sufficient_score_threshold and not has_error
+        reason = "证据达到阈值" if sufficient else "证据未达到阈值"
+        return ReflectResult(sufficient=sufficient, reason=reason, next_query_hint=None)
+
 
 class LLMReActPolicy:
     """基于 LLMClient 的 ReAct 决策策略。"""
@@ -118,6 +189,7 @@ class LLMReActPolicy:
         llm_client: LLMClient,
         node_name: str,
         model: str | None = None,
+        reflect_model: str | None = None,
         temperature: float = 0.0,
         timeout: float | None = None,
     ) -> None:
@@ -127,12 +199,14 @@ class LLMReActPolicy:
             llm_client: 可注入的 LLM 客户端。
             node_name: 调用节点名称,用于 trace。
             model: 决策模型名称。
+            reflect_model: 反思模型名称,为空时回退决策模型。
             temperature: 决策温度。
             timeout: 单次决策超时。
         """
         self.llm_client = llm_client
         self.node_name = node_name
         self.model = model
+        self.reflect_model = reflect_model
         self.temperature = temperature
         self.timeout = timeout
 
@@ -169,6 +243,39 @@ class LLMReActPolicy:
             raise ReActPolicyError("llm_error")
         return _parse_decision(response.content)
 
+    def reflect(
+        self,
+        task_input: str,
+        observation_digest: dict[str, Any],
+        scratchpad: list[dict[str, Any]],
+        step_index: int,
+    ) -> ReflectResult:
+        """调用 LLM 生成 observation 反思结果。
+
+        Args:
+            task_input: 当前任务或问题。
+            observation_digest: 本步 observation 摘要。
+            scratchpad: 历史步骤摘要。
+            step_index: 当前步数。
+
+        Returns:
+            结构化反思结果。
+
+        Raises:
+            ReActPolicyError: LLM 调用失败或输出结构不合规。
+        """
+        response = self.llm_client.generate(
+            messages=build_react_reflect_messages(task_input, observation_digest, scratchpad, step_index),
+            output_schema=REACT_REFLECT_SCHEMA,
+            model=self.reflect_model or self.model,
+            temperature=0.0,
+            timeout=self.timeout,
+            trace_context={"node_name": self.node_name, "task_type": "react_reflect"},
+        )
+        if response.errors:
+            raise ReActPolicyError("llm_error")
+        return _parse_reflection(response.content)
+
 
 def _parse_decision(payload: dict[str, Any]) -> ReActDecision:
     """解析并校验 LLM 决策。"""
@@ -191,3 +298,22 @@ def _parse_decision(payload: dict[str, Any]) -> ReActDecision:
     if not isinstance(stop, bool) or not isinstance(sufficient, bool):
         raise ReActPolicyError("invalid_flags")
     return ReActDecision(thought=thought, action=action, tool_input=tool_input, stop=stop, sufficient=sufficient)
+
+
+def _parse_reflection(payload: dict[str, Any]) -> ReflectResult:
+    """解析并校验 LLM 反思结果。"""
+    if not isinstance(payload, dict):
+        raise ReActPolicyError("invalid_reflection")
+    for key in ("sufficient", "reason"):
+        if key not in payload:
+            raise ReActPolicyError("missing_required")
+    sufficient = payload["sufficient"]
+    reason = payload["reason"]
+    next_query_hint = payload.get("next_query_hint")
+    if not isinstance(sufficient, bool):
+        raise ReActPolicyError("invalid_sufficient")
+    if not isinstance(reason, str):
+        raise ReActPolicyError("invalid_reason")
+    if next_query_hint is not None and not isinstance(next_query_hint, str):
+        raise ReActPolicyError("invalid_next_query_hint")
+    return ReflectResult(sufficient=sufficient, reason=reason, next_query_hint=next_query_hint)

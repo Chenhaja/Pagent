@@ -146,27 +146,27 @@
 
 ## Phase 6 — 总体验收与提交准备
 
-- [ ] 运行 R7.2 目标测试。
+- [x] 运行 R7.2 目标测试。
   - 命令：`conda run -n autoGLM pytest tests/test_react_reflect.py tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py`
   - 验收：全部通过。
-- [ ] 运行全量测试。
+- [x] 运行全量测试。
   - 命令：`conda run -n autoGLM pytest`
   - 验收：全部通过。
-- [ ] 运行编译检查。
+- [x] 运行编译检查。
   - 命令：`conda run -n autoGLM python -m compileall app tests scripts`
   - 验收：无语法错误。
-- [ ] grep 确认主循环不通过 `decision.sufficient` 收敛。
+- [x] grep 确认主循环不通过 `decision.sufficient` 收敛。
   - 验收：`react_loop.py` 中不存在以 `decision.sufficient` 决定 `reason="sufficient"` 的逻辑。
   - 验证：代码 review / 搜索。
-- [ ] 检查 trace 安全边界。
+- [x] 检查 trace 安全边界。
   - 验收：trace 不记录完整 observation、完整 query、完整 reflect reason 或密钥。
   - 验证：相关单测和 review。
-- [ ] 确认默认测试不调用真实 LLM / 外部服务。
+- [x] 确认默认测试不调用真实 LLM / 外部服务。
   - 验收：使用 fake / stub LLM，未访问 websearch、legal_status、official_fee 或付费模型。
   - 验证：测试实现 review。
-- [ ] 检查无无关改动。
+- [x] 检查无无关改动。
   - 验收：diff 只包含 R7.2 相关代码、测试、tasks 文档和必要 SPEC。
   - 验证：`git diff`。
-- [ ] 准备阶段性提交。
+- [x] 准备阶段性提交。
   - 验收：只 stage 本需求相关文件，提交信息使用 `<type>(scope): <summary>` 中文动词开头格式。
   - 验证：提交前 `git status`。

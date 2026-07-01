@@ -98,31 +98,31 @@
 
 ## Phase 4 — react_* 配置接入
 
-- [ ] 新增 `react_policy_driver` 配置。
+- [x] 新增 `react_policy_driver` 配置。
   - 验收：默认 `llm`，`PAGENT_REACT_POLICY_DRIVER` 可覆盖。
-- [ ] 新增 `react_max_steps` 配置。
+- [x] 新增 `react_max_steps` 配置。
   - 验收：默认 `4`，`PAGENT_REACT_MAX_STEPS` 可覆盖。
-- [ ] 新增 `react_policy_model` 配置。
+- [x] 新增 `react_policy_model` 配置。
   - 验收：默认空，policy 可回退 `llm_cheap_model` / `llm_model`。
-- [ ] 新增 `react_policy_temperature` 配置。
+- [x] 新增 `react_policy_temperature` 配置。
   - 验收：默认 `0.0`，环境变量可覆盖。
-- [ ] 新增 `react_use_llm_judge` 配置。
+- [x] 新增 `react_use_llm_judge` 配置。
   - 验收：默认 `True`，环境变量可覆盖。
-- [ ] 新增 `react_token_budget` 配置。
+- [x] 新增 `react_token_budget` 配置。
   - 验收：默认沿用 retrieval token budget，环境变量可覆盖。
-- [ ] 新增 `react_timeout_seconds` 配置。
+- [x] 新增 `react_timeout_seconds` 配置。
   - 验收：默认沿用 retrieval timeout，环境变量可覆盖。
-- [ ] 更新 `get_settings()` 环境变量读取。
+- [x] 更新 `get_settings()` 环境变量读取。
   - 验收：所有 `PAGENT_REACT_*` 生效。
-- [ ] 更新 `Settings.to_public_dict()`。
+- [x] 更新 `Settings.to_public_dict()`。
   - 验收：非敏感 `react_*` 可见，密钥仍不可见。
-- [ ] 更新 `tests/test_core_config_logging.py` 默认值测试。
+- [x] 更新 `tests/test_core_config_logging.py` 默认值测试。
   - 验收：新增 react 默认字段均被断言。
-- [ ] 更新 `tests/test_core_config_logging.py` 环境变量测试。
+- [x] 更新 `tests/test_core_config_logging.py` 环境变量测试。
   - 验收：新增 `PAGENT_REACT_*` 均被断言。
-- [ ] 更新 `tests/test_core_config_logging.py` 公开配置测试。
+- [x] 更新 `tests/test_core_config_logging.py` 公开配置测试。
   - 验收：新增 react 字段在 public dict 中。
-- [ ] 验证 Phase 4。
+- [x] 验证 Phase 4。
   - 命令：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
 
 ## Phase 5 — QA 接入 policy 驱动主循环

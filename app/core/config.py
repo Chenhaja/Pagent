@@ -35,6 +35,13 @@ class Settings(BaseModel):
         retrieval_max_steps: 检索最大步数。
         retrieval_token_budget: 检索 evidence token 预算。
         retrieval_timeout_seconds: 检索超时时间。
+        react_policy_driver: ReAct policy 驱动类型。
+        react_max_steps: ReAct 最大步数。
+        react_policy_model: ReAct 决策模型。
+        react_policy_temperature: ReAct 决策温度。
+        react_use_llm_judge: 是否使用 LLM 判断充分性。
+        react_token_budget: ReAct evidence token 预算。
+        react_timeout_seconds: ReAct 主循环超时时间。
         agentic_enabled: 是否启用 R7 agentic 主循环。
         agentic_external_tools_enabled: 是否允许外部工具进入白名单。
         agentic_default_tools: 默认 agentic 工具列表。
@@ -96,6 +103,13 @@ class Settings(BaseModel):
     retrieval_max_steps: int = 1
     retrieval_token_budget: int = 1000
     retrieval_timeout_seconds: int = 10
+    react_policy_driver: str = "llm"
+    react_max_steps: int = 4
+    react_policy_model: str | None = None
+    react_policy_temperature: float = 0.0
+    react_use_llm_judge: bool = True
+    react_token_budget: int = 1000
+    react_timeout_seconds: int = 10
     agentic_enabled: bool = True
     agentic_external_tools_enabled: bool = False
     agentic_default_tools: str = "kb_retrieval"
@@ -159,6 +173,13 @@ class Settings(BaseModel):
             "retrieval_max_steps": str(self.retrieval_max_steps),
             "retrieval_token_budget": str(self.retrieval_token_budget),
             "retrieval_timeout_seconds": str(self.retrieval_timeout_seconds),
+            "react_policy_driver": self.react_policy_driver,
+            "react_max_steps": str(self.react_max_steps),
+            "react_policy_model": self.react_policy_model,
+            "react_policy_temperature": str(self.react_policy_temperature),
+            "react_use_llm_judge": str(self.react_use_llm_judge),
+            "react_token_budget": str(self.react_token_budget),
+            "react_timeout_seconds": str(self.react_timeout_seconds),
             "agentic_enabled": str(self.agentic_enabled),
             "agentic_external_tools_enabled": str(self.agentic_external_tools_enabled),
             "agentic_default_tools": self.agentic_default_tools,
@@ -244,6 +265,8 @@ def get_settings() -> Settings:
         从环境变量读取后的应用配置对象。
     """
     _load_local_dotenv()
+    retrieval_token_budget = int(os.getenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "1000"))
+    retrieval_timeout_seconds = int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10"))
     return Settings(
         service_name=os.getenv("PAGENT_SERVICE_NAME", "patent-agent"),
         environment=os.getenv("PAGENT_ENVIRONMENT", "local"),
@@ -269,8 +292,15 @@ def get_settings() -> Settings:
         retrieval_backend=os.getenv("PAGENT_RETRIEVAL_BACKEND", "qdrant"),
         retrieval_top_k=int(os.getenv("PAGENT_RETRIEVAL_TOP_K", "3")),
         retrieval_max_steps=int(os.getenv("PAGENT_RETRIEVAL_MAX_STEPS", "1")),
-        retrieval_token_budget=int(os.getenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "1000")),
-        retrieval_timeout_seconds=int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10")),
+        retrieval_token_budget=retrieval_token_budget,
+        retrieval_timeout_seconds=retrieval_timeout_seconds,
+        react_policy_driver=os.getenv("PAGENT_REACT_POLICY_DRIVER", "llm"),
+        react_max_steps=int(os.getenv("PAGENT_REACT_MAX_STEPS", "4")),
+        react_policy_model=os.getenv("PAGENT_REACT_POLICY_MODEL"),
+        react_policy_temperature=float(os.getenv("PAGENT_REACT_POLICY_TEMPERATURE", "0.0")),
+        react_use_llm_judge=_get_bool_env("PAGENT_REACT_USE_LLM_JUDGE", True),
+        react_token_budget=int(os.getenv("PAGENT_REACT_TOKEN_BUDGET", str(retrieval_token_budget))),
+        react_timeout_seconds=int(os.getenv("PAGENT_REACT_TIMEOUT_SECONDS", str(retrieval_timeout_seconds))),
         agentic_enabled=_get_bool_env("PAGENT_AGENTIC_ENABLED", True),
         agentic_external_tools_enabled=_get_bool_env("PAGENT_AGENTIC_EXTERNAL_TOOLS_ENABLED", False),
         agentic_default_tools=os.getenv("PAGENT_AGENTIC_DEFAULT_TOOLS", "kb_retrieval"),

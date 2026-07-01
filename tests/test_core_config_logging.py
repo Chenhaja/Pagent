@@ -32,6 +32,13 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.retrieval_max_steps == 1
     assert settings.retrieval_token_budget == 1000
     assert settings.retrieval_timeout_seconds == 10
+    assert settings.react_policy_driver == "llm"
+    assert settings.react_max_steps == 4
+    assert settings.react_policy_model is None
+    assert settings.react_policy_temperature == 0.0
+    assert settings.react_use_llm_judge is True
+    assert settings.react_token_budget == 1000
+    assert settings.react_timeout_seconds == 10
     assert settings.agentic_enabled is True
     assert settings.agentic_external_tools_enabled is False
     assert settings.agentic_default_tools == "kb_retrieval"
@@ -111,6 +118,13 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_RETRIEVAL_MAX_STEPS", "2")
     monkeypatch.setenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "300")
     monkeypatch.setenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "7")
+    monkeypatch.setenv("PAGENT_REACT_POLICY_DRIVER", "heuristic")
+    monkeypatch.setenv("PAGENT_REACT_MAX_STEPS", "6")
+    monkeypatch.setenv("PAGENT_REACT_POLICY_MODEL", "policy-model")
+    monkeypatch.setenv("PAGENT_REACT_POLICY_TEMPERATURE", "0.1")
+    monkeypatch.setenv("PAGENT_REACT_USE_LLM_JUDGE", "false")
+    monkeypatch.setenv("PAGENT_REACT_TOKEN_BUDGET", "450")
+    monkeypatch.setenv("PAGENT_REACT_TIMEOUT_SECONDS", "9")
     monkeypatch.setenv("PAGENT_AGENTIC_ENABLED", "false")
     monkeypatch.setenv("PAGENT_AGENTIC_EXTERNAL_TOOLS_ENABLED", "true")
     monkeypatch.setenv("PAGENT_AGENTIC_DEFAULT_TOOLS", "kb_retrieval,websearch")
@@ -166,6 +180,13 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.retrieval_max_steps == 2
     assert settings.retrieval_token_budget == 300
     assert settings.retrieval_timeout_seconds == 7
+    assert settings.react_policy_driver == "heuristic"
+    assert settings.react_max_steps == 6
+    assert settings.react_policy_model == "policy-model"
+    assert settings.react_policy_temperature == 0.1
+    assert settings.react_use_llm_judge is False
+    assert settings.react_token_budget == 450
+    assert settings.react_timeout_seconds == 9
     assert settings.agentic_enabled is False
     assert settings.agentic_external_tools_enabled is True
     assert settings.agentic_default_tools == "kb_retrieval,websearch"
@@ -228,6 +249,13 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["retrieval_max_steps"] == "1"
     assert public_values["retrieval_token_budget"] == "1000"
     assert public_values["retrieval_timeout_seconds"] == "10"
+    assert public_values["react_policy_driver"] == "llm"
+    assert public_values["react_max_steps"] == "4"
+    assert public_values["react_policy_model"] is None
+    assert public_values["react_policy_temperature"] == "0.0"
+    assert public_values["react_use_llm_judge"] == "True"
+    assert public_values["react_token_budget"] == "1000"
+    assert public_values["react_timeout_seconds"] == "10"
     assert public_values["agentic_enabled"] == "True"
     assert public_values["agentic_external_tools_enabled"] == "False"
     assert public_values["agentic_default_tools"] == "kb_retrieval"

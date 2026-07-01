@@ -1,5 +1,7 @@
 from app.models.schemas import PatentQAResult, WorkflowState
 from app.nodes.qa import INSUFFICIENT_EVIDENCE_WARNING, QANode
+from app.skills.patent_qa import PatentQASkill
+from app.tools.llm import LLMResponse
 from app.tools.retrieval import RetrievalResult
 
 
@@ -19,6 +21,28 @@ class RecordingQASkill:
             risk_notes=["仅供初步参考"],
             next_steps=["继续核对"],
             disclaimer_hint="辅助问答，不等同于专利代理师法律意见。",
+        )
+
+
+class RecordingLLMClient:
+    """测试用 LLM,记录 QA messages 并返回固定结构化结果。"""
+
+    def __init__(self, basis: list[str] | None = None) -> None:
+        """初始化调用记录和固定 basis。"""
+        self.calls = []
+        self.basis = basis or ["真实出处"]
+
+    def generate(self, **kwargs) -> LLMResponse:
+        """记录调用并返回固定 QA 响应。"""
+        self.calls.append(kwargs)
+        return LLMResponse(
+            content={
+                "answer": "通俗解释上一轮回答。",
+                "basis": self.basis,
+                "risk_notes": ["仅供初步参考"],
+                "next_steps": ["继续核对"],
+                "disclaimer_hint": "辅助问答，不等同于专利代理师法律意见。",
+            }
         )
 
 
@@ -125,3 +149,64 @@ def test_retrieval_failure_fallbacks_without_exception() -> None:
     assert trace_event(result, "qa_retrieval_completed")["data"]["result_count"] == 0
     assert trace_events(result, "react_main_step")
     assert trace_event(result, "react_main_converged")["data"]["reason"] == "tool_unavailable"
+
+
+def test_multi_turn_qa_history_reaches_answer_model() -> None:
+    """多轮追问时 QA 回答模型应看到上一轮 assistant 消息。"""
+    llm_client = RecordingLLMClient(basis=["真实出处"])
+    skill = PatentQASkill(llm_client=llm_client)
+    retriever = SequenceRetrievalTool([[make_result("真实出处", content="本轮证据", score=1)]])
+    state = WorkflowState(
+        raw_input="把上一条用更通俗的话讲一遍",
+        normalized_input="把上一条用更通俗的话讲一遍",
+        dialog_context={
+            "history": [
+                {"role": "user", "content": "上一轮问题"},
+                {"role": "assistant", "content": "上一轮回答独有文本"},
+            ]
+        },
+    )
+
+    result = QANode(skill=skill, retrieval_tool=retriever, max_steps=1).run(state)
+
+    assert result.status == "success"
+    messages = llm_client.calls[0]["messages"]
+    assert [message.role for message in messages[:3]] == ["system", "user", "assistant"]
+    assert messages[2].content == "上一轮回答独有文本"
+    assert "上一轮回答独有文本" not in messages[-1].content
+    assert result.output["qa_result"]["basis"] == ["真实出处"]
+    assert "上一轮回答独有文本" not in str(result.output["qa_result"]["basis"])
+    assert trace_event(result, "qa_completed")["data"]["history_msg_count"] == 2
+
+
+def test_summary_turn_is_injected_once_as_assistant_message() -> None:
+    """早期对话摘要应作为一条 assistant 历史消息注入。"""
+    llm_client = RecordingLLMClient()
+    skill = PatentQASkill(llm_client=llm_client)
+    summary = "[早期对话摘要] 用户关心权利要求支持性"
+    state = WorkflowState(
+        raw_input="继续",
+        normalized_input="继续",
+        dialog_context={"history": [{"role": "assistant", "content": summary}]},
+    )
+
+    result = QANode(skill=skill, retrieval_tool=SequenceRetrievalTool([]), max_steps=0).run(state)
+
+    assert result.status == "success"
+    messages = llm_client.calls[0]["messages"]
+    summary_messages = [message for message in messages if summary in message.content]
+    assert len(summary_messages) == 1
+    assert summary_messages[0].role == "assistant"
+
+
+def test_empty_history_keeps_three_message_qa_prompt() -> None:
+    """空历史时 QA prompt 应保持 system/task/user_data 三条消息。"""
+    llm_client = RecordingLLMClient()
+    skill = PatentQASkill(llm_client=llm_client)
+
+    result = QANode(skill=skill, retrieval_tool=SequenceRetrievalTool([]), max_steps=0).run(WorkflowState(raw_input="问题", normalized_input="问题"))
+
+    assert result.status == "success"
+    messages = llm_client.calls[0]["messages"]
+    assert [message.role for message in messages] == ["system", "user", "user"]
+    assert trace_event(result, "qa_completed")["data"]["history_msg_count"] == 0

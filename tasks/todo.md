@@ -169,13 +169,13 @@
 
 ## Phase 7 — 回归与总体验收
 
-- [ ] 运行 R7.1 目标测试。
+- [x] 运行 R7.1 目标测试。
   - 命令：`conda run -n autoGLM pytest tests/test_react_policy.py tests/test_agentic_loop.py tests/test_qa_node.py tests/test_core_config_logging.py`
-- [ ] 运行全量测试。
+- [x] 运行全量测试。
   - 命令：`conda run -n autoGLM pytest`
-- [ ] 运行编译检查。
+- [x] 运行编译检查。
   - 命令：`conda run -n autoGLM python -m compileall app tests scripts`
-- [ ] 确认默认测试不触网。
+- [x] 确认默认测试不触网。
   - 验收：真实 LLM、websearch、legal_status、official_fee 均未调用。
-- [ ] 更新 todo 完成状态。
+- [x] 更新 todo 完成状态。
   - 验收：已完成项勾选，延期项保留未勾选并说明原因。

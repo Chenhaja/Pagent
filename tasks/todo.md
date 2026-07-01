@@ -13,87 +13,87 @@
 
 ## Phase 1 — Policy 与 prompt 最小闭环
 
-- [ ] 新增 `app/orchestrator/react_policy.py`。
+- [x] 新增 `app/orchestrator/react_policy.py`。
   - 验收：模块可导入，公共类 / 方法有中文 docstring。
-- [ ] 定义 `ReActDecision`。
+- [x] 定义 `ReActDecision`。
   - 验收：字段包含 `thought`、`action`、`tool_input`、`stop`、`sufficient`。
-- [ ] 定义 `ReActPolicy` protocol。
+- [x] 定义 `ReActPolicy` protocol。
   - 验收：`decide(task_input, allowed_tools, scratchpad, step_index)` 返回 `ReActDecision`。
-- [ ] 实现 `HeuristicReActPolicy`。
+- [x] 实现 `HeuristicReActPolicy`。
   - 验收：封装旧确定性逻辑，默认 query 仍来自原始 `task_input`。
-- [ ] 实现 `LLMReActPolicy`。
+- [x] 实现 `LLMReActPolicy`。
   - 验收：调用 `LLMClient.generate(messages=..., output_schema=..., trace_context={"task_type": "react_policy"})`。
-- [ ] 新增 `app/prompts/react_policy.py`。
+- [x] 新增 `app/prompts/react_policy.py`。
   - 验收：prompt 不内联在业务逻辑中。
-- [ ] 定义 `REACT_DECISION_SCHEMA`。
+- [x] 定义 `REACT_DECISION_SCHEMA`。
   - 验收：包含 required、类型约束、`additionalProperties: False`。
-- [ ] 编写 react policy prompt builder。
+- [x] 编写 react policy prompt builder。
   - 验收：覆盖任务目标、上下文 / 判定规则、角色、受众、样例、输出格式六要素。
-- [ ] 实现 prompt 指令 / 数据分离。
+- [x] 实现 prompt 指令 / 数据分离。
   - 验收：用户任务、工具卡片、scratchpad 作为数据区传入。
-- [ ] 新增 `tests/test_react_policy.py`。
+- [x] 新增 `tests/test_react_policy.py`。
   - 验收：覆盖合法决策、缺字段、类型错误、LLM error、trace_context。
-- [ ] 验证 Phase 1。
+- [x] 验证 Phase 1。
   - 命令：`conda run -n autoGLM pytest tests/test_react_policy.py`
 
 ## Phase 2 — 工具卡片与 schema 边界
 
-- [ ] 新增 `ToolCard` dataclass。
+- [x] 新增 `ToolCard` dataclass。
   - 验收：字段包含 `name`、`description`、`input_schema`。
-- [ ] 扩展 `ToolSpec.description`。
+- [x] 扩展 `ToolSpec.description`。
   - 验收：每个默认工具有用途描述。
-- [ ] 扩展 `ToolSpec.input_schema`。
+- [x] 扩展 `ToolSpec.input_schema`。
   - 验收：每个默认工具有结构化输入 schema。
-- [ ] 实现 `ToolRegistry.tool_cards(...)`。
+- [x] 实现 `ToolRegistry.tool_cards(...)`。
   - 验收：只返回已注册、已启用、且被允许的工具卡片。
-- [ ] 为 `kb_retrieval` 定义输入 schema。
+- [x] 为 `kb_retrieval` 定义输入 schema。
   - 验收：`query` 必填，可选 `top_k`、`as_of`、`fetch_k`。
-- [ ] 为 `websearch` 定义输入 schema 与描述。
+- [x] 为 `websearch` 定义输入 schema 与描述。
   - 验收：默认关闭时不出现在可用 cards 中。
-- [ ] 为 `legal_status` 定义输入 schema 与描述。
+- [x] 为 `legal_status` 定义输入 schema 与描述。
   - 验收：默认关闭时不出现在可用 cards 中。
-- [ ] 为 `official_fee` 定义输入 schema 与描述。
+- [x] 为 `official_fee` 定义输入 schema 与描述。
   - 验收：默认关闭时不出现在可用 cards 中。
-- [ ] 更新 `tests/test_agentic_tools.py`。
+- [x] 更新 `tests/test_agentic_tools.py`。
   - 验收：覆盖 tool cards、禁用工具、未注册工具、schema 元数据。
-- [ ] 验证 Phase 2。
+- [x] 验证 Phase 2。
   - 命令：`conda run -n autoGLM pytest tests/test_agentic_tools.py tests/test_react_policy.py`
 
 ## Phase 3 — 主循环 policy 驱动改造
 
-- [ ] 扩展 `ReActOutcome.driver`。
+- [x] 扩展 `ReActOutcome.driver`。
   - 验收：outcome 可观测 `llm` / `heuristic`。
-- [ ] 扩展 `ReActOutcome.fallback_used`。
+- [x] 扩展 `ReActOutcome.fallback_used`。
   - 验收：policy 失败或非法 action 后为 `True`。
-- [ ] 修改 `BoundedReActLoop.__init__` 支持注入 policy。
+- [x] 修改 `BoundedReActLoop.__init__` 支持注入 policy。
   - 验收：测试可注入 fake / scripted policy。
-- [ ] 修改 `BoundedReActLoop.__init__` 支持工具卡片 metadata。
+- [x] 修改 `BoundedReActLoop.__init__` 支持工具卡片 metadata。
   - 验收：run 时能把 allowed tool cards 传给 policy。
-- [ ] 在 `run()` 中维护 scratchpad。
+- [x] 在 `run()` 中维护 scratchpad。
   - 验收：scratchpad 只含摘要，不含完整 query / evidence 正文。
-- [ ] 每步调用 `policy.decide(...)`。
+- [x] 每步调用 `policy.decide(...)`。
   - 验收：不再按下标固定选工具作为主路径。
-- [ ] 校验 `decision.action` 白名单。
+- [x] 校验 `decision.action` 白名单。
   - 验收：未知、禁用、未允许工具不会被调用。
-- [ ] 校验 `decision.tool_input` schema。
+- [x] 校验 `decision.tool_input` schema。
   - 验收：缺少必填字段或类型不匹配时 fallback。
-- [ ] 支持 `policy_stop` 收敛。
+- [x] 支持 `policy_stop` 收敛。
   - 验收：`decision.stop=true` 且未充分时 reason 为 `policy_stop`。
-- [ ] 支持 LLM judge 开关。
+- [x] 支持 LLM judge 开关。
   - 验收：`react_use_llm_judge=false` 时不使用 `decision.sufficient` 直接收敛。
-- [ ] 执行工具时使用 `decision.tool_input`。
+- [x] 执行工具时使用 `decision.tool_input`。
   - 验收：多步场景第二步 query 可不同于首步。
-- [ ] 实现当步 fallback 到 `HeuristicReActPolicy`。
+- [x] 实现当步 fallback 到 `HeuristicReActPolicy`。
   - 验收：LLM error、非法 action、schema error 不导致循环崩溃。
-- [ ] 新增 `react_policy_step` trace。
+- [x] 新增 `react_policy_step` trace。
   - 验收：包含 `node_name`、`step_index`、`tool_name`、`thought_len`、`stop`、`sufficient`、`driver`。
-- [ ] 扩展 `react_main_converged` trace。
+- [x] 扩展 `react_main_converged` trace。
   - 验收：包含 `driver`、`fallback_used`。
-- [ ] 清理固定 `continue_or_converge` 主路径。
+- [x] 清理固定 `continue_or_converge` 主路径。
   - 验收：仅允许在 heuristic 分支出现，或完全删除。
-- [ ] 更新 `tests/test_agentic_loop.py`。
+- [x] 更新 `tests/test_agentic_loop.py`。
   - 验收：覆盖 llm driver、多步 query 改写、policy_stop、fallback、预算硬约束。
-- [ ] 验证 Phase 3。
+- [x] 验证 Phase 3。
   - 命令：`conda run -n autoGLM pytest tests/test_agentic_loop.py tests/test_react_policy.py`
 
 ## Phase 4 — react_* 配置接入

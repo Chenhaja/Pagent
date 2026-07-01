@@ -1,6 +1,29 @@
 import time
 
 from app.orchestrator.react_loop import BoundedReActLoop, ReActBudget, ToolObservation
+from app.orchestrator.react_policy import ReActDecision, ReActPolicyError
+from app.orchestrator.tool_registry import ToolCard
+
+
+class ScriptedPolicy:
+    """测试用 policy,按顺序返回决策。"""
+
+    driver = "llm"
+
+    def __init__(self, decisions: list[ReActDecision] | None = None, should_raise: bool = False) -> None:
+        self.decisions = decisions or []
+        self.should_raise = should_raise
+        self.calls = []
+
+    def decide(self, task_input: str, allowed_tools: list[ToolCard], scratchpad: list[dict], step_index: int) -> ReActDecision:
+        """记录调用并返回下一条决策。"""
+        self.calls.append({"task_input": task_input, "allowed_tools": allowed_tools, "scratchpad": scratchpad, "step_index": step_index})
+        if self.should_raise:
+            raise ReActPolicyError("policy_failed")
+        index = len(self.calls) - 1
+        if index >= len(self.decisions):
+            return ReActDecision(thought="停止", action=None, tool_input={}, stop=True, sufficient=False)
+        return self.decisions[index]
 
 
 class FakeTool:
@@ -131,3 +154,95 @@ def test_agentic_loop_trace_does_not_expose_full_input_or_content() -> None:
     assert step["input_len"] == len("完整敏感问题")
     assert step["observation_count"] == 1
     assert step["external"] is False
+
+
+def test_agentic_loop_uses_policy_decision_and_rewritten_query() -> None:
+    """LLM policy 路径应使用决策中的工具和改写 query。"""
+    tool = FakeTool([
+        ToolObservation(tool_name="fake", evidence=[], sufficient=False),
+        ToolObservation(tool_name="fake", evidence=[{"content": "证据", "provenance": {"source": "local://doc"}}], sufficient=False),
+    ])
+    policy = ScriptedPolicy([
+        ReActDecision(thought="先查宽泛问题", action="fake", tool_input={"query": "宽泛问题"}, stop=False, sufficient=False),
+        ReActDecision(thought="基于观察缩小问题", action="fake", tool_input={"query": "缩小后的问题"}, stop=False, sufficient=True),
+    ])
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=4, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    outcome = loop.run("原问题", allowed_tools=["fake"])
+
+    assert tool.calls == [{"query": "宽泛问题"}, {"query": "缩小后的问题"}]
+    assert outcome.reason == "sufficient"
+    assert outcome.driver == "llm"
+    assert outcome.fallback_used is False
+    assert [event["event"] for event in outcome.trace_events[:4]] == ["react_policy_step", "react_main_step", "react_policy_step", "react_main_step"]
+    assert policy.calls[1]["scratchpad"][0]["observation_count"] == 0
+
+
+def test_agentic_loop_supports_policy_stop() -> None:
+    """policy 主动停止时应以 policy_stop 收敛。"""
+    tool = FakeTool([])
+    policy = ScriptedPolicy([ReActDecision(thought="无需继续", action=None, tool_input={}, stop=True, sufficient=False)])
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=2, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    outcome = loop.run("问题", allowed_tools=["fake"])
+
+    assert tool.calls == []
+    assert outcome.reason == "policy_stop"
+    assert outcome.steps_used == 0
+    assert outcome.trace_events[0]["event"] == "react_policy_step"
+
+
+def test_agentic_loop_falls_back_when_policy_fails() -> None:
+    """policy 失败时应当步降级 heuristic 并继续执行。"""
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据", "provenance": {"source": "local://doc"}}], sufficient=True)])
+    policy = ScriptedPolicy(should_raise=True)
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=2, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+    )
+
+    outcome = loop.run("原问题", allowed_tools=["fake"])
+
+    assert tool.calls == [{"query": "原问题", "step_index": 0}]
+    assert outcome.reason == "sufficient"
+    assert outcome.driver == "heuristic"
+    assert outcome.fallback_used is True
+    assert outcome.trace_events[-1]["data"]["fallback_used"] is True
+
+
+def test_agentic_loop_rejects_invalid_policy_action_and_schema() -> None:
+    """非法 action 或 tool_input schema 不合规时应 fallback。"""
+    for decision in [
+        ReActDecision(thought="越权", action="missing", tool_input={"query": "x"}, stop=False, sufficient=False),
+        ReActDecision(thought="缺字段", action="fake", tool_input={}, stop=False, sufficient=False),
+    ]:
+        tool = FakeTool([ToolObservation(tool_name="fake", evidence=[], sufficient=False)])
+        policy = ScriptedPolicy([decision])
+        loop = BoundedReActLoop(
+            tools={"fake": tool},
+            budget=ReActBudget(max_steps=1, token_budget=100, timeout_seconds=5),
+            node_name="qa",
+            policy=policy,
+            tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+        )
+
+        outcome = loop.run("原问题", allowed_tools=["fake"])
+
+        assert tool.calls == [{"query": "原问题", "step_index": 0}]
+        assert outcome.fallback_used is True
+        assert outcome.steps_used <= 1

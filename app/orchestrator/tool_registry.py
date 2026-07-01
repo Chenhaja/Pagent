@@ -3,18 +3,44 @@ from typing import Any
 
 from app.core.config import Settings, get_settings
 from app.orchestrator.react_loop import ReActTool, ToolObservation
+from app.orchestrator.react_policy import ToolCard
 from app.tools.legal_status import LegalStatusTool
 from app.tools.official_fee import OfficialFeeTool
 from app.tools.retrieval import Retriever, RetrievalResult, build_retriever
 from app.tools.websearch import WebSearchTool
 
 
+QUERY_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+        "top_k": {"type": "integer"},
+        "as_of": {"type": ["string", "null"]},
+        "fetch_k": {"type": ["integer", "null"]},
+        "step_index": {"type": "integer"},
+    },
+    "required": ["query"],
+    "additionalProperties": True,
+}
+
+
 @dataclass
 class ToolSpec:
-    """Agentic 工具注册元数据。"""
+    """Agentic 工具注册元数据。
+
+    Args:
+        name: 工具名称。
+        runner: 工具执行器。
+        description: 工具用途描述,供 policy 决策使用。
+        input_schema: 工具输入 JSON schema。
+        external: 是否为外部工具。
+        enabled: 当前配置下是否启用。
+    """
 
     name: str
     runner: ReActTool
+    description: str = ""
+    input_schema: dict[str, Any] | None = None
     external: bool = False
     enabled: bool = True
 
@@ -60,6 +86,27 @@ class ToolRegistry:
             工具名到工具对象的映射。
         """
         return {name: spec.runner for name, spec in self._tools.items() if spec.enabled}
+
+    def tool_cards(self, allowed_tools: list[str] | None = None) -> list[ToolCard]:
+        """返回可供 policy 决策的工具卡片。
+
+        Args:
+            allowed_tools: 当前场景允许的工具名;未传入时返回全部启用工具。
+
+        Returns:
+            已启用且被允许的工具卡片列表。
+        """
+        allowed = set(allowed_tools) if allowed_tools is not None else None
+        cards = []
+        for name, spec in self._tools.items():
+            if not spec.enabled or (allowed is not None and name not in allowed):
+                continue
+            cards.append(ToolCard(name=name, description=spec.description, input_schema=spec.input_schema or {}))
+        return cards
+
+    def tool_specs(self) -> dict[str, ToolSpec]:
+        """返回工具元数据映射。"""
+        return dict(self._tools)
 
     def run(self, name: str, tool_input: dict[str, Any]) -> ToolObservation:
         """执行已注册工具,未知或禁用时安全失败。
@@ -168,6 +215,8 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="kb_retrieval",
             runner=KBRetrievalTool(retriever or build_retriever(current_settings), current_settings),
+            description="检索本地专利知识库、法规和既有材料,用于获取可引用 evidence。",
+            input_schema=QUERY_INPUT_SCHEMA,
             external=False,
             enabled=True,
         )
@@ -177,6 +226,8 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="websearch",
             runner=WebSearchTool(),
+            description="查询公开网络信息或最新资料,返回带来源和 retrieved_at 的外部 evidence。",
+            input_schema=QUERY_INPUT_SCHEMA,
             external=True,
             enabled=external_enabled and getattr(current_settings, "websearch_enabled", False),
         )
@@ -185,6 +236,8 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="legal_status",
             runner=LegalStatusTool(),
+            description="查询专利法律状态,返回需官方核对的状态 evidence。",
+            input_schema=QUERY_INPUT_SCHEMA,
             external=True,
             enabled=external_enabled and getattr(current_settings, "legal_status_enabled", False),
         )
@@ -193,6 +246,8 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="official_fee",
             runner=OfficialFeeTool(),
+            description="查询专利官费或费用规则,返回带适用范围和核对提示的 evidence。",
+            input_schema=QUERY_INPUT_SCHEMA,
             external=True,
             enabled=external_enabled and getattr(current_settings, "official_fee_enabled", False),
         )

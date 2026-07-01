@@ -123,3 +123,28 @@ def test_external_stub_tools_return_provenance_when_enabled() -> None:
         assert provenance["source"]
         assert provenance["retrieved_at"]
         assert provenance["requires_official_check"] is True
+
+
+def test_tool_registry_exposes_enabled_tool_cards() -> None:
+    """registry 应只向 policy 暴露启用且被允许的工具卡片。"""
+    registry = build_default_tool_registry(Settings())
+
+    cards = registry.tool_cards(["kb_retrieval", "websearch", "missing"])
+
+    assert [card.name for card in cards] == ["kb_retrieval"]
+    assert cards[0].description
+    assert cards[0].input_schema["type"] == "object"
+    assert cards[0].input_schema["properties"]["query"]["type"] == "string"
+    assert "query" in cards[0].input_schema["required"]
+
+
+def test_tool_registry_exposes_external_tool_cards_when_enabled() -> None:
+    """外部工具显式启用后才能出现在工具卡片中。"""
+    settings = Settings(agentic_external_tools_enabled=True, websearch_enabled=True)
+    registry = build_default_tool_registry(settings)
+
+    cards = registry.tool_cards(["websearch", "legal_status"])
+
+    assert [card.name for card in cards] == ["websearch"]
+    assert cards[0].description
+    assert "query" in cards[0].input_schema["required"]

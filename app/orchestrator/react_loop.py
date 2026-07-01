@@ -2,6 +2,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.orchestrator.react_policy import HeuristicReActPolicy, ReActDecision, ReActPolicy, ReActPolicyError, ToolCard
+
 
 @dataclass
 class ReActBudget:
@@ -34,6 +36,8 @@ class ReActOutcome:
     tool_calls: int
     trace_events: list[dict[str, Any]]
     external_tools_used: list[str] = field(default_factory=list)
+    driver: str = "heuristic"
+    fallback_used: bool = False
 
 
 class ReActTool(Protocol):
@@ -54,17 +58,35 @@ class ReActTool(Protocol):
 class BoundedReActLoop:
     """受限 ReAct 主循环。"""
 
-    def __init__(self, tools: dict[str, ReActTool], budget: ReActBudget, node_name: str = "agentic") -> None:
+    def __init__(
+        self,
+        tools: dict[str, ReActTool],
+        budget: ReActBudget,
+        node_name: str = "agentic",
+        policy: ReActPolicy | None = None,
+        heuristic_policy: ReActPolicy | None = None,
+        tool_cards: list[ToolCard] | None = None,
+        use_llm_judge: bool = True,
+    ) -> None:
         """初始化主循环。
 
         Args:
             tools: 已由代码注册的工具白名单映射。
             budget: 步数、token 和超时预算。
             node_name: 调用方节点名称,写入 trace 便于定位。
+            policy: 可选 LLM 或脚本化决策策略。
+            heuristic_policy: policy 失败时使用的确定性降级策略。
+            tool_cards: 可供 policy 决策的工具卡片。
+            use_llm_judge: 是否使用 policy 的 sufficient 判断。
         """
         self.tools = tools
         self.budget = budget
         self.node_name = node_name
+        self.policy = policy or HeuristicReActPolicy()
+        self.heuristic_policy = heuristic_policy or HeuristicReActPolicy()
+        self.tool_cards = tool_cards or [ToolCard(name=name, description="", input_schema={}) for name in tools]
+        self.use_llm_judge = use_llm_judge
+        self.emit_policy_trace = policy is not None
 
     def run(self, task_input: str, allowed_tools: list[str]) -> ReActOutcome:
         """执行 bounded ReAct 工具循环。
@@ -77,39 +99,73 @@ class BoundedReActLoop:
             主循环 outcome,包含 evidence、收敛原因和 trace。
         """
         if self.budget.max_steps <= 0:
-            return self._converge([], "max_steps", 0, 0, [])
+            return self._converge([], "max_steps", 0, 0, [], driver=self._policy_driver(), fallback_used=False)
         if self.budget.token_budget <= 0:
-            return self._converge([], "token_budget", 0, 0, [])
+            return self._converge([], "token_budget", 0, 0, [], driver=self._policy_driver(), fallback_used=False)
         if self.budget.timeout_seconds <= 0:
-            return self._converge([], "timeout", 0, 0, [])
+            return self._converge([], "timeout", 0, 0, [], driver=self._policy_driver(), fallback_used=False)
         if not allowed_tools:
-            return self._converge([], "tool_unavailable", 0, 0, [])
+            return self._converge([], "tool_unavailable", 0, 0, [], driver=self._policy_driver(), fallback_used=False)
 
         started_at = time.monotonic()
         deadline = started_at + self.budget.timeout_seconds
         evidence: list[dict[str, Any]] = []
         trace_events: list[dict[str, Any]] = []
+        scratchpad: list[dict[str, Any]] = []
         external_tools_used: list[str] = []
         reason = "max_steps"
         steps_used = 0
         tool_calls = 0
+        driver = self._policy_driver()
+        fallback_used = False
 
         for step_index in range(self.budget.max_steps):
             if time.monotonic() >= deadline:
                 reason = "timeout"
                 break
-            tool_name = allowed_tools[min(step_index, len(allowed_tools) - 1)]
-            tool = self.tools.get(tool_name)
-            if tool is None:
+
+            cards = self._allowed_tool_cards(allowed_tools)
+            if not cards:
                 reason = "tool_unavailable"
                 break
+            decision, step_driver, step_fallback = self._decide(task_input, cards, scratchpad, step_index)
+            driver = step_driver
+            fallback_used = fallback_used or step_fallback
+            if self.emit_policy_trace:
+                trace_events.append(self._build_policy_trace(step_index, decision, step_driver))
+
+            if decision.stop or decision.action is None:
+                reason = "sufficient" if decision.sufficient else "policy_stop"
+                break
+
+            tool_name = decision.action
+            tool = self.tools.get(tool_name)
+            if tool is None or tool_name not in allowed_tools:
+                decision, step_driver, _ = self._fallback_decision(task_input, cards, scratchpad, step_index)
+                driver = step_driver
+                fallback_used = True
+                tool_name = decision.action
+                tool = self.tools.get(tool_name) if tool_name else None
+            elif not self._valid_tool_input(tool_name, decision.tool_input, cards):
+                decision, step_driver, _ = self._fallback_decision(task_input, cards, scratchpad, step_index)
+                driver = step_driver
+                fallback_used = True
+                tool_name = decision.action
+                tool = self.tools.get(tool_name) if tool_name else None
+
+            if tool is None or tool_name is None:
+                reason = "tool_unavailable"
+                break
+
             try:
-                observation = tool.run({"query": task_input, "step_index": step_index})
+                observation = tool.run(decision.tool_input)
             except Exception:
                 steps_used += 1
                 tool_calls += 1
                 reason = "tool_unavailable"
+                observation = ToolObservation(tool_name=tool_name, error="tool_unavailable")
                 trace_events.append(self._build_step_trace(step_index, tool_name, task_input, 0, 0.0, False))
+                scratchpad.append(self._build_scratchpad_item(step_index, decision, observation))
                 break
 
             steps_used += 1
@@ -127,10 +183,11 @@ class BoundedReActLoop:
                     observation.external,
                 )
             )
+            scratchpad.append(self._build_scratchpad_item(step_index, decision, observation))
             if observation.error:
                 reason = "tool_unavailable"
                 break
-            if observation.sufficient:
+            if decision.sufficient or observation.sufficient:
                 reason = "sufficient"
                 break
             if self._estimate_evidence_tokens(evidence) >= self.budget.token_budget:
@@ -141,7 +198,34 @@ class BoundedReActLoop:
                 break
             reason = "max_steps"
 
-        return self._converge(evidence, reason, steps_used, tool_calls, trace_events, external_tools_used)
+        return self._converge(evidence, reason, steps_used, tool_calls, trace_events, external_tools_used, driver, fallback_used)
+
+    def _decide(
+        self,
+        task_input: str,
+        cards: list[ToolCard],
+        scratchpad: list[dict[str, Any]],
+        step_index: int,
+    ) -> tuple[ReActDecision, str, bool]:
+        """调用主 policy,失败时返回 heuristic 决策。"""
+        try:
+            decision = self.policy.decide(task_input, cards, scratchpad, step_index)
+            return decision, self._policy_driver(), False
+        except Exception:
+            return self._fallback_decision(task_input, cards, scratchpad, step_index)
+
+    def _fallback_decision(
+        self,
+        task_input: str,
+        cards: list[ToolCard],
+        scratchpad: list[dict[str, Any]],
+        step_index: int,
+    ) -> tuple[ReActDecision, str, bool]:
+        """生成 heuristic 降级决策。"""
+        try:
+            return self.heuristic_policy.decide(task_input, cards, scratchpad, step_index), "heuristic", True
+        except ReActPolicyError:
+            return ReActDecision(thought="降级策略失败", action=None, tool_input={}, stop=True, sufficient=False), "heuristic", True
 
     def _converge(
         self,
@@ -151,6 +235,8 @@ class BoundedReActLoop:
         tool_calls: int,
         trace_events: list[dict[str, Any]],
         external_tools_used: list[str] | None = None,
+        driver: str = "heuristic",
+        fallback_used: bool = False,
     ) -> ReActOutcome:
         """构造收敛结果并追加收敛 trace。"""
         external_tools = external_tools_used or []
@@ -164,6 +250,8 @@ class BoundedReActLoop:
                     "tool_calls": tool_calls,
                     "total_evidence": len(evidence),
                     "external_tools_used": external_tools,
+                    "driver": driver,
+                    "fallback_used": fallback_used,
                 },
             }
         )
@@ -174,7 +262,24 @@ class BoundedReActLoop:
             tool_calls=tool_calls,
             trace_events=trace_events,
             external_tools_used=external_tools,
+            driver=driver,
+            fallback_used=fallback_used,
         )
+
+    def _build_policy_trace(self, step_index: int, decision: ReActDecision, driver: str) -> dict[str, Any]:
+        """构造 policy 决策 trace,不记录 thought 原文。"""
+        return {
+            "event": "react_policy_step",
+            "data": {
+                "node_name": self.node_name,
+                "step_index": step_index,
+                "tool_name": decision.action,
+                "thought_len": len(decision.thought),
+                "stop": decision.stop,
+                "sufficient": decision.sufficient,
+                "driver": driver,
+            },
+        }
 
     def _build_step_trace(
         self,
@@ -195,10 +300,75 @@ class BoundedReActLoop:
                 "input_len": len(task_input),
                 "observation_count": observation_count,
                 "top_score": top_score,
-                "decision": "continue_or_converge",
                 "external": external,
             },
         }
+
+    def _build_scratchpad_item(self, step_index: int, decision: ReActDecision, observation: ToolObservation) -> dict[str, Any]:
+        """构造历史步骤摘要,避免保存完整正文。"""
+        return {
+            "step_index": step_index,
+            "tool_name": decision.action,
+            "thought_len": len(decision.thought),
+            "observation_count": len(observation.evidence),
+            "top_score": observation.top_score,
+            "error": observation.error,
+            "external": observation.external,
+        }
+
+    def _allowed_tool_cards(self, allowed_tools: list[str]) -> list[ToolCard]:
+        """筛选当前场景允许的工具卡片。"""
+        allowed = set(allowed_tools)
+        cards = [card for card in self.tool_cards if card.name in allowed and card.name in self.tools]
+        if cards:
+            return cards
+        return [ToolCard(name=name, description="", input_schema={}) for name in allowed_tools if name in self.tools]
+
+    def _valid_tool_input(self, tool_name: str, tool_input: dict[str, Any], cards: list[ToolCard]) -> bool:
+        """按工具 schema 做最小输入校验。"""
+        if not isinstance(tool_input, dict):
+            return False
+        card = next((item for item in cards if item.name == tool_name), None)
+        if card is None:
+            return False
+        schema = card.input_schema or {}
+        required = schema.get("required") or []
+        for field_name in required:
+            if field_name not in tool_input:
+                return False
+        properties = schema.get("properties") or {}
+        for field_name, field_schema in properties.items():
+            if field_name not in tool_input:
+                continue
+            if not self._matches_schema_type(tool_input[field_name], field_schema.get("type")):
+                return False
+        return True
+
+    def _matches_schema_type(self, value: Any, expected_type: Any) -> bool:
+        """校验 JSON schema 基础类型。"""
+        if expected_type is None:
+            return True
+        expected_types = expected_type if isinstance(expected_type, list) else [expected_type]
+        for item in expected_types:
+            if item == "null" and value is None:
+                return True
+            if item == "string" and isinstance(value, str):
+                return True
+            if item == "integer" and isinstance(value, int) and not isinstance(value, bool):
+                return True
+            if item == "number" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                return True
+            if item == "boolean" and isinstance(value, bool):
+                return True
+            if item == "object" and isinstance(value, dict):
+                return True
+            if item == "array" and isinstance(value, list):
+                return True
+        return False
+
+    def _policy_driver(self) -> str:
+        """读取当前主 policy driver 名称。"""
+        return str(getattr(self.policy, "driver", "heuristic"))
 
     def _accumulate_evidence(self, existing: list[dict[str, Any]], new_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """累积 evidence,按来源 key 去重并保留较高分版本。"""

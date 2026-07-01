@@ -4,7 +4,7 @@ from app.core.config import Settings
 from app.prompts.query_expand import QUERY_EXPAND_OUTPUT_SCHEMA, QUERY_EXPAND_SYSTEM_PROMPT, build_query_expand_user_prompt
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
 from app.tools.llm import FakeLLMClient, LLMResponse, InMemoryLLMTraceSink
-from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LLMQueryRewriter, LocalLexicalSparseEncoder, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, ServiceSparseEncoder, _QdrantHTTPClient, _build_sparse_encoder, build_retriever
+from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LLMQueryRewriter, LocalLexicalSparseEncoder, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, ServiceSparseEncoder, _QdrantHTTPClient, _build_query_rewriter, _build_sparse_encoder, build_retriever
 
 
 class FakeQdrantHit:
@@ -556,6 +556,13 @@ def test_http_query_rewriter_builds_request() -> None:
     assert captured["payload"] == {"model": "rewrite-model", "query": "创造性要求", "mode": "hyde", "count": 2}
 
 
+def test_build_query_rewriter_dispatches_configured_backends() -> None:
+    """查询改写器工厂应按配置分发后端。"""
+    assert isinstance(_build_query_rewriter(Settings(query_rewrite_backend="llm")), LLMQueryRewriter)
+    assert isinstance(_build_query_rewriter(Settings(query_rewrite_backend="service")), HTTPQueryRewriter)
+    assert isinstance(_build_query_rewriter(Settings(query_rewrite_backend="unknown")), LLMQueryRewriter)
+
+
 def test_build_sparse_encoder_dispatches_configured_backends() -> None:
     """稀疏编码器工厂应按配置分发后端。"""
     assert _build_sparse_encoder(Settings(retrieval_use_hybrid=False)) is None
@@ -598,6 +605,22 @@ def test_build_retriever_returns_qdrant_backend_with_injected_dependencies() -> 
     )
 
     assert isinstance(retriever, QdrantRetriever)
+
+
+def test_build_retriever_uses_llm_query_rewriter_by_default_when_enabled() -> None:
+    """开启查询改写时默认应使用 LLM 查询改写器。"""
+    retriever = build_retriever(Settings(retrieval_use_query_rewrite=True))
+
+    assert isinstance(retriever, MultiQueryRetriever)
+    assert isinstance(retriever.query_rewriter, LLMQueryRewriter)
+
+
+def test_build_retriever_uses_service_query_rewriter_when_configured() -> None:
+    """service backend 应保留旧 HTTP 查询改写器。"""
+    retriever = build_retriever(Settings(retrieval_use_query_rewrite=True, query_rewrite_backend="service"))
+
+    assert isinstance(retriever, MultiQueryRetriever)
+    assert isinstance(retriever.query_rewriter, HTTPQueryRewriter)
 
 
 def test_build_retriever_composes_hybrid_query_rewrite_then_rerank() -> None:

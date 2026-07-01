@@ -906,6 +906,14 @@ class MultiQueryRetriever:
         return queries or [query]
 
 
+def _build_query_rewriter(settings: Settings) -> QueryRewriter:
+    """按配置构建查询改写器。"""
+    backend = (settings.query_rewrite_backend or "llm").strip().lower()
+    if backend == "service":
+        return HTTPQueryRewriter(settings)
+    return LLMQueryRewriter(settings)
+
+
 def _build_sparse_encoder(settings: Settings) -> SparseEncoder | None:
     """按配置构建稀疏编码器。"""
     if not settings.retrieval_use_hybrid:
@@ -963,7 +971,7 @@ def build_retriever(
             base = LocalRetrievalTool(settings=resolved_settings)
     retriever = base
     if resolved_settings.retrieval_use_query_rewrite:
-        retriever = MultiQueryRetriever(retriever, query_rewriter or HTTPQueryRewriter(resolved_settings), settings=resolved_settings)
+        retriever = MultiQueryRetriever(retriever, query_rewriter or _build_query_rewriter(resolved_settings), settings=resolved_settings)
     if resolved_settings.retrieval_use_rerank:
         retriever = RerankingRetriever(retriever, reranker or HTTPReranker(resolved_settings), settings=resolved_settings)
     return retriever

@@ -62,8 +62,11 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.sparse_model == ""
     assert settings.hybrid_fusion == "rrf"
     assert settings.retrieval_use_query_rewrite is False
+    assert settings.query_rewrite_backend == "llm"
     assert settings.query_rewrite_mode == "multi"
     assert settings.query_rewrite_count == 3
+    assert settings.query_rewrite_model is None
+    assert settings.query_rewrite_temperature == 0.3
     assert settings.law_stale_days == 365
     assert settings.qdrant_url is None
     assert settings.qdrant_api_key is None
@@ -151,8 +154,11 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_SPARSE_MODEL", "Qdrant/bm42-all-minilm-l6-v2-attentions")
     monkeypatch.setenv("PAGENT_HYBRID_FUSION", "rrf")
     monkeypatch.setenv("PAGENT_RETRIEVAL_USE_QUERY_REWRITE", "true")
+    monkeypatch.setenv("PAGENT_QUERY_REWRITE_BACKEND", "service")
     monkeypatch.setenv("PAGENT_QUERY_REWRITE_MODE", "hyde")
     monkeypatch.setenv("PAGENT_QUERY_REWRITE_COUNT", "5")
+    monkeypatch.setenv("PAGENT_QUERY_REWRITE_MODEL", "rewrite-model")
+    monkeypatch.setenv("PAGENT_QUERY_REWRITE_TEMPERATURE", "0.4")
     monkeypatch.setenv("PAGENT_LAW_STALE_DAYS", "180")
     monkeypatch.setenv("PAGENT_QDRANT_URL", "http://qdrant.example.test")
     monkeypatch.setenv("PAGENT_QDRANT_API_KEY", "qdrant-secret")
@@ -216,8 +222,11 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.sparse_model == "Qdrant/bm42-all-minilm-l6-v2-attentions"
     assert settings.hybrid_fusion == "rrf"
     assert settings.retrieval_use_query_rewrite is True
+    assert settings.query_rewrite_backend == "service"
     assert settings.query_rewrite_mode == "hyde"
     assert settings.query_rewrite_count == 5
+    assert settings.query_rewrite_model == "rewrite-model"
+    assert settings.query_rewrite_temperature == 0.4
     assert settings.law_stale_days == 180
     assert settings.qdrant_url == "http://qdrant.example.test"
     assert settings.qdrant_api_key == "qdrant-secret"
@@ -290,8 +299,11 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert fastembed_values["sparse_encoder"] == "fastembed"
     assert fastembed_values["sparse_model"] == "Qdrant/bm25"
     assert public_values["retrieval_use_query_rewrite"] == "False"
+    assert public_values["query_rewrite_backend"] == "llm"
     assert public_values["query_rewrite_mode"] == "multi"
     assert public_values["query_rewrite_count"] == "3"
+    assert public_values["query_rewrite_model"] is None
+    assert public_values["query_rewrite_temperature"] == "0.3"
     assert public_values["law_stale_days"] == "365"
     assert public_values["qdrant_url"] is None
     assert public_values["qdrant_collection"] == "patent_kb"

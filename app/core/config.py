@@ -65,8 +65,11 @@ class Settings(BaseModel):
         sparse_model: 外部稀疏编码模型名。
         hybrid_fusion: 混合检索融合方式。
         retrieval_use_query_rewrite: 是否启用查询改写。
+        query_rewrite_backend: 查询改写后端,llm 走 chat completions,service 走旧 HTTP 服务。
         query_rewrite_mode: 查询改写模式。
         query_rewrite_count: 改写式或假设文档数量。
+        query_rewrite_model: 查询改写模型,为空时回退便宜模型或默认模型。
+        query_rewrite_temperature: 查询改写采样温度。
         law_stale_days: 法规检索时间超过该天数后提示核对。
         qdrant_url: Qdrant 服务地址。
         qdrant_api_key: 可选 Qdrant API Key。
@@ -136,8 +139,11 @@ class Settings(BaseModel):
     sparse_model: str = ""
     hybrid_fusion: str = "rrf"
     retrieval_use_query_rewrite: bool = False
+    query_rewrite_backend: str = "llm"
     query_rewrite_mode: str = "multi"
     query_rewrite_count: int = 3
+    query_rewrite_model: str | None = None
+    query_rewrite_temperature: float = 0.3
     law_stale_days: int = 365
     qdrant_url: str | None = None
     qdrant_api_key: str | None = Field(default=None, exclude=True)
@@ -208,8 +214,11 @@ class Settings(BaseModel):
             "sparse_model": self.sparse_model,
             "hybrid_fusion": self.hybrid_fusion,
             "retrieval_use_query_rewrite": str(self.retrieval_use_query_rewrite),
+            "query_rewrite_backend": self.query_rewrite_backend,
             "query_rewrite_mode": self.query_rewrite_mode,
             "query_rewrite_count": str(self.query_rewrite_count),
+            "query_rewrite_model": self.query_rewrite_model,
+            "query_rewrite_temperature": str(self.query_rewrite_temperature),
             "law_stale_days": str(self.law_stale_days),
             "qdrant_url": self.qdrant_url,
             "qdrant_collection": self.qdrant_collection,
@@ -333,8 +342,11 @@ def get_settings() -> Settings:
         sparse_model=os.getenv("PAGENT_SPARSE_MODEL", ""),
         hybrid_fusion=os.getenv("PAGENT_HYBRID_FUSION", "rrf"),
         retrieval_use_query_rewrite=_get_bool_env("PAGENT_RETRIEVAL_USE_QUERY_REWRITE", False),
+        query_rewrite_backend=os.getenv("PAGENT_QUERY_REWRITE_BACKEND", "llm"),
         query_rewrite_mode=os.getenv("PAGENT_QUERY_REWRITE_MODE", "multi"),
         query_rewrite_count=int(os.getenv("PAGENT_QUERY_REWRITE_COUNT", "3")),
+        query_rewrite_model=os.getenv("PAGENT_QUERY_REWRITE_MODEL"),
+        query_rewrite_temperature=float(os.getenv("PAGENT_QUERY_REWRITE_TEMPERATURE", "0.3")),
         law_stale_days=int(os.getenv("PAGENT_LAW_STALE_DAYS", "365")),
         qdrant_url=os.getenv("PAGENT_QDRANT_URL"),
         qdrant_api_key=os.getenv("PAGENT_QDRANT_API_KEY"),

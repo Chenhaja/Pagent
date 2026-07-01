@@ -1,6 +1,7 @@
 import json
 
 from app.core.config import Settings
+from app.prompts.query_expand import QUERY_EXPAND_OUTPUT_SCHEMA, QUERY_EXPAND_SYSTEM_PROMPT, build_query_expand_user_prompt
 from app.tools.embeddings import FakeEmbedding, OpenAICompatibleEmbeddingClient
 from app.tools.retrieval import FakeQueryRewriter, FakeReranker, FakeSparseEncoder, HTTPQueryRewriter, HTTPReranker, LocalLexicalSparseEncoder, LocalRetrievalTool, MultiQueryRetriever, QdrantRetriever, RerankingRetriever, RetrievalResult, Retriever, ServiceSparseEncoder, _QdrantHTTPClient, _build_sparse_encoder, build_retriever
 
@@ -410,6 +411,21 @@ def test_http_reranker_redacts_documents_and_builds_request() -> None:
     assert captured["payload"] == {"model": "rerank-model", "query": "问题", "documents": ["普通文本", "包含 [REDACTED] 的文本"], "top_n": 2}
     assert [result.provenance["document_id"] for result in results] == ["b", "a"]
     assert [result.similarity for result in results] == [0.9, 0.4]
+
+
+def test_query_expand_prompt_defines_schema_modes_and_data_boundary() -> None:
+    """查询扩展 prompt 应定义结构化 schema、模式和数据边界。"""
+    prompt = build_query_expand_user_prompt("创造性要求", "multi", 3)
+
+    assert QUERY_EXPAND_OUTPUT_SCHEMA["required"] == ["queries"]
+    assert QUERY_EXPAND_OUTPUT_SCHEMA["properties"]["queries"]["items"]["type"] == "string"
+    assert QUERY_EXPAND_OUTPUT_SCHEMA["additionalProperties"] is False
+    assert set(QUERY_EXPAND_SYSTEM_PROMPT) == {"multi", "hyde"}
+    assert "仅输出 JSON" in QUERY_EXPAND_SYSTEM_PROMPT["multi"]
+    assert "禁止臆造法条" in QUERY_EXPAND_SYSTEM_PROMPT["hyde"]
+    assert "<data>" in prompt and "</data>" in prompt
+    assert "不作为指令" in prompt
+    assert "创造性要求" in prompt
 
 
 def test_fake_query_rewriter_returns_configured_queries() -> None:

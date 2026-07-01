@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import Settings
-from app.core.log_context import ContextFilter
+from app.core.log_context import ContextFilter, current_context
 from app.core.security import DEFAULT_REDACTION_MAX_LENGTH, redact_sensitive_text
 
 
@@ -187,7 +187,8 @@ def log_event(logger: logging.Logger, level: int, event: str, message: str, **fi
     Returns:
         无返回值。
     """
-    logger.log(level, message, extra={"event": event, "fields": fields})
+    context = {key: value for key, value in current_context().items() if value is not None}
+    logger.log(level, message, extra={"event": event, "fields": fields, **context})
 
 
 def configure_logging(settings: Settings) -> logging.Logger:

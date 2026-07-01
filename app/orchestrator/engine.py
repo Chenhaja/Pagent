@@ -1,6 +1,14 @@
+import logging
+import time
+
+from app.core.log_context import bind_context, reset_context
+from app.core.logging import log_event
 from app.models.schemas import NodeResult, WorkflowState
 from app.orchestrator.node_base import Node
 from app.orchestrator.workflow_defs import WorkflowDef
+
+
+logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
@@ -40,8 +48,28 @@ class Orchestrator:
             if node is None:
                 return NodeResult.failed(errors=[f"unknown_node:{node_name}"])
 
-            result = node.run(state)
+            token = bind_context(node_name=node_name)
+            started_at = time.perf_counter()
+            log_event(logger, logging.INFO, "node_start", "节点开始", node_name=node_name)
+            try:
+                result = node.run(state)
+            finally:
+                reset_context(token)
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
             self._record_trace_events(state, result)
+            if result.status == "success":
+                log_event(logger, logging.INFO, "node_end", "节点完成", node_name=node_name, status=result.status, duration_ms=duration_ms)
+            else:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "node_error",
+                    "节点失败",
+                    node_name=node_name,
+                    status=result.status,
+                    duration_ms=duration_ms,
+                    error_count=len(result.errors),
+                )
 
             if result.status != "success":
                 return result

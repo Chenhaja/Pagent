@@ -1,8 +1,13 @@
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.core.logging import log_event
 from app.orchestrator.react_policy import HeuristicReActPolicy, ReActDecision, ReActPolicy, ReActPolicyError, ReflectResult, ToolCard
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -173,6 +178,7 @@ class BoundedReActLoop:
                 steps_used += 1
                 tool_calls += 1
                 reason = "tool_unavailable"
+                log_event(logger, logging.WARNING, "tool_error", "工具调用失败", node_name=self.node_name, step_index=step_index, tool_name=tool_name)
                 observation = ToolObservation(tool_name=tool_name, error="tool_unavailable")
                 observation_digest = self._build_observation_digest(observation)
                 trace_events.append(self._build_step_trace(step_index, tool_name, task_input, 0, 0.0, False))
@@ -187,6 +193,20 @@ class BoundedReActLoop:
             observation_digest = self._build_observation_digest(observation)
             reflection, reflect_driver, reflect_fallback = self._reflect(task_input, observation_digest, scratchpad, step_index, not step_fallback)
             fallback_used = fallback_used or reflect_fallback
+            log_event(
+                logger,
+                logging.INFO,
+                "react_step",
+                "ReAct 单步完成",
+                node_name=self.node_name,
+                step_index=step_index,
+                tool_name=tool_name,
+                observation_count=len(observation.evidence),
+                top_score=observation.top_score,
+                external=observation.external,
+                driver=driver,
+                fallback_used=fallback_used,
+            )
             trace_events.append(
                 self._build_step_trace(
                     step_index,
@@ -278,6 +298,20 @@ class BoundedReActLoop:
     ) -> ReActOutcome:
         """构造收敛结果并追加收敛 trace。"""
         external_tools = external_tools_used or []
+        log_event(
+            logger,
+            logging.INFO,
+            "react_converged",
+            "ReAct 收敛",
+            node_name=self.node_name,
+            reason=reason,
+            steps_used=steps_used,
+            tool_calls=tool_calls,
+            result_count=len(evidence),
+            external_tools_used=external_tools,
+            driver=driver,
+            fallback_used=fallback_used,
+        )
         trace_events.append(
             {
                 "event": "react_main_converged",

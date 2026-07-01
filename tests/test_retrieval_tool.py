@@ -539,6 +539,9 @@ def test_multi_query_retriever_falls_back_to_original_query_on_expand_error(capl
     assert inner.calls == [{"method": "recall", "query": "原始问题", "fetch_k": 2, "as_of": None}]
     assert [result.provenance["document_id"] for result in results] == ["a"]
     assert caplog.records[0].event == "query_rewrite_failed"
+    assert caplog.records[0].fields["degraded"] is True
+    assert caplog.records[0].fields["degrade_reason"] == "expand_error"
+    assert "原始问题" not in str(caplog.records[0].fields)
 
 
 def test_multi_query_retriever_logs_empty_rewrite_and_filters_blank_queries(caplog) -> None:
@@ -550,6 +553,9 @@ def test_multi_query_retriever_logs_empty_rewrite_and_filters_blank_queries(capl
 
     assert empty_inner.calls == [{"method": "recall", "query": "原始问题", "fetch_k": 2, "as_of": None}]
     assert caplog.records[0].event == "query_rewrite_empty"
+    assert caplog.records[0].fields["degraded"] is True
+    assert caplog.records[0].fields["degrade_reason"] == "empty_queries"
+    assert "原始问题" not in str(caplog.records[0].fields)
 
     inner = FakeInnerRetriever([RetrievalResult(content="B", provenance={"document_id": "b"})])
     MultiQueryRetriever(inner, FakeQueryRewriter(["", "有效改写", "  "]), settings=Settings(retrieval_fetch_k=2)).search("原始问题", top_k=1)

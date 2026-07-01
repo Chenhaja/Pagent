@@ -1,3 +1,5 @@
+import logging
+
 from fastapi.testclient import TestClient
 
 from app.api import routes
@@ -82,6 +84,31 @@ def test_agent_api_returns_common_error_for_unknown_intent() -> None:
         "message": "您希望我处理哪类专利任务？可以选择撰写权利要求、修改权利要求、翻译专利文本，或咨询专利问答。",
         "disclaimer": DISCLAIMER,
     }
+
+
+def test_agent_api_logs_request_lifecycle_with_session_context(monkeypatch, caplog) -> None:
+    """统一 Agent API 应输出请求生命周期日志并绑定 session_id。"""
+    class StubAgentDispatchService:
+        """测试用 dispatch 服务。"""
+
+        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+            """返回成功响应。"""
+            return {"status": "success", "intent": "claim_generation", "workflow": "claim_generation", "trace": []}
+
+    monkeypatch.setattr(routes, "AgentDispatchService", StubAgentDispatchService)
+    client = TestClient(app)
+
+    with caplog.at_level(logging.INFO, logger="app.api.routes"):
+        response = client.post("/agent", json={"raw_input": "继续", "session_id": "s1"})
+
+    assert response.status_code == 200
+    events = [record for record in caplog.records if getattr(record, "event", None) in {"request_start", "request_end"}]
+    assert [record.event for record in events] == ["request_start", "request_end"]
+    assert events[0].fields["path"] == "/agent"
+    assert events[0].fields["session_id"] == "s1"
+    assert events[1].fields["status"] == "success"
+    assert events[1].fields["status_code"] == 200
+    assert events[0].request_id
 
 
 def test_agent_api_accepts_and_forwards_session_id(monkeypatch) -> None:

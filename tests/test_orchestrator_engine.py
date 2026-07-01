@@ -1,3 +1,5 @@
+import logging
+
 from app.models.schemas import NodeResult, WorkflowState
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.node_base import Node
@@ -91,6 +93,37 @@ def test_orchestrator_runs_nodes_in_order_and_records_trace() -> None:
         {"event": "first_completed", "data": {}},
         {"event": "second_completed", "data": {}},
     ]
+
+
+def test_orchestrator_logs_node_lifecycle_events(caplog) -> None:
+    """Orchestrator 应输出节点开始和完成事件日志。"""
+    state = WorkflowState(raw_input="一种方法")
+    orchestrator = Orchestrator(nodes={"first": RecordingNode("first", "first_done")})
+
+    with caplog.at_level(logging.INFO, logger="app.orchestrator.engine"):
+        result = orchestrator.run(state, workflow_def=["first"])
+
+    assert result.status == "success"
+    events = [record for record in caplog.records if getattr(record, "event", None) in {"node_start", "node_end"}]
+    assert [record.event for record in events] == ["node_start", "node_end"]
+    assert events[0].fields["node_name"] == "first"
+    assert events[1].fields["node_name"] == "first"
+    assert events[1].fields["status"] == "success"
+
+
+def test_orchestrator_logs_node_error_event(caplog) -> None:
+    """节点失败时 Orchestrator 应输出 node_error 事件。"""
+    state = WorkflowState(raw_input="一种方法")
+    orchestrator = Orchestrator(nodes={"fail": FailingNode("fail")})
+
+    with caplog.at_level(logging.WARNING, logger="app.orchestrator.engine"):
+        result = orchestrator.run(state, workflow_def=["fail"])
+
+    assert result.status == "failed"
+    error_record = next(record for record in caplog.records if getattr(record, "event", None) == "node_error")
+    assert error_record.fields["node_name"] == "fail"
+    assert error_record.fields["status"] == "failed"
+    assert error_record.fields["error_count"] == 1
 
 
 def test_orchestrator_stops_on_failed_node() -> None:

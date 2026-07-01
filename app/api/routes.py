@@ -1,7 +1,11 @@
+import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from app.core.log_context import bind_context, new_request_id, reset_context
+from app.core.logging import log_event
 from app.api.schemas import (
     AgentRequest,
     ClaimGenerationRequest,
@@ -17,6 +21,7 @@ from app.services.translate_service import TranslateService
 from app.services.workflow_service import WorkflowService
 
 DISCLAIMER = "辅助初稿，不等同于专利代理师法律意见。"
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -60,13 +65,44 @@ def dispatch_agent(request: AgentRequest) -> dict[str, Any]:
     Raises:
         HTTPException: 当分发服务返回非成功状态时抛出。
     """
-    result = AgentDispatchService().dispatch(request.raw_input, claims_draft=request.claims_draft, session_id=request.session_id)
-    if result["status"] != "success":
-        raise HTTPException(status_code=400, detail=build_error_detail(result))
-    if "patch" in result:
-        result["diff"] = result.pop("patch")
-    result["disclaimer"] = DISCLAIMER
-    return result
+    request_id = new_request_id()
+    token = bind_context(request_id=request_id, session_id=request.session_id)
+    started_at = time.perf_counter()
+    log_event(logger, logging.INFO, "request_start", "请求开始", method="POST", path="/agent", session_id=request.session_id)
+    try:
+        result = AgentDispatchService().dispatch(request.raw_input, claims_draft=request.claims_draft, session_id=request.session_id)
+        if result["status"] != "success":
+            log_event(
+                logger,
+                logging.WARNING,
+                "request_end",
+                "请求失败",
+                method="POST",
+                path="/agent",
+                status=result["status"],
+                status_code=400,
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+                session_id=request.session_id,
+            )
+            raise HTTPException(status_code=400, detail=build_error_detail(result))
+        if "patch" in result:
+            result["diff"] = result.pop("patch")
+        result["disclaimer"] = DISCLAIMER
+        log_event(
+            logger,
+            logging.INFO,
+            "request_end",
+            "请求完成",
+            method="POST",
+            path="/agent",
+            status=result["status"],
+            status_code=200,
+            duration_ms=int((time.perf_counter() - started_at) * 1000),
+            session_id=request.session_id,
+        )
+        return result
+    finally:
+        reset_context(token)
 
 
 @router.post("/claims/generate", response_model=ClaimGenerationResponse)

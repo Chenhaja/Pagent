@@ -8,6 +8,7 @@ from urllib import request
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
+from app.core.logging import log_event
 from app.core.security import redact_sensitive_text
 from app.prompts.query_expand import QUERY_EXPAND_OUTPUT_SCHEMA, QUERY_EXPAND_SYSTEM_PROMPT, build_query_expand_user_prompt
 from app.tools.embeddings import EmbeddingClient, OpenAICompatibleEmbeddingClient
@@ -902,10 +903,10 @@ class MultiQueryRetriever:
         try:
             queries = [item for item in self.query_rewriter.expand(query) if item.strip()]
         except Exception:
-            logger.warning("查询改写失败，降级为单查询", extra={"event": "query_rewrite_failed"})
+            log_event(logger, logging.WARNING, "query_rewrite_failed", "查询改写失败，降级为单查询", degraded=True, degrade_reason="expand_error")
             return [query]
         if not queries:
-            logger.info("查询改写为空，降级为单查询", extra={"event": "query_rewrite_empty"})
+            log_event(logger, logging.INFO, "query_rewrite_empty", "查询改写为空，降级为单查询", degraded=True, degrade_reason="empty_queries")
             return [query]
         return queries
 

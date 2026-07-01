@@ -1,3 +1,4 @@
+import logging
 import time
 
 from app.orchestrator.react_loop import BoundedReActLoop, ReActBudget, ToolObservation
@@ -88,6 +89,39 @@ def test_agentic_loop_converges_when_first_observation_is_sufficient() -> None:
     assert outcome.tool_calls == 1
     assert outcome.evidence == [{"content": "证据", "provenance": {"source": "local://doc"}}]
     assert [event["event"] for event in outcome.trace_events] == ["react_main_step", "react_reflect_step", "react_main_converged"]
+
+
+def test_agentic_loop_logs_step_and_convergence_events(caplog) -> None:
+    """ReAct 主循环应输出单步和收敛结构化日志。"""
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], sufficient=True, top_score=0.8)])
+    loop = make_loop(tool)
+
+    with caplog.at_level(logging.INFO, logger="app.orchestrator.react_loop"):
+        outcome = loop.run("敏感问题", allowed_tools=["fake"])
+
+    assert outcome.reason == "sufficient"
+    events = [record for record in caplog.records if getattr(record, "event", None) in {"react_step", "react_converged"}]
+    assert [record.event for record in events] == ["react_step", "react_converged"]
+    assert events[0].fields["node_name"] == "qa"
+    assert events[0].fields["tool_name"] == "fake"
+    assert events[0].fields["observation_count"] == 1
+    assert events[1].fields["reason"] == "sufficient"
+    assert "敏感问题" not in str(events[0].fields)
+
+
+def test_agentic_loop_logs_tool_error_event(caplog) -> None:
+    """工具异常时 ReAct 主循环应输出 tool_error 事件。"""
+    tool = FakeTool([], should_raise=True)
+    loop = make_loop(tool)
+
+    with caplog.at_level(logging.WARNING, logger="app.orchestrator.react_loop"):
+        outcome = loop.run("问题", allowed_tools=["fake"])
+
+    assert outcome.reason == "tool_unavailable"
+    error_record = next(record for record in caplog.records if getattr(record, "event", None) == "tool_error")
+    assert error_record.fields["node_name"] == "qa"
+    assert error_record.fields["tool_name"] == "fake"
+    assert error_record.fields["step_index"] == 0
 
 
 def test_agentic_loop_continues_until_max_steps_when_insufficient() -> None:

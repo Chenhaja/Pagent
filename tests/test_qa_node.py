@@ -4,7 +4,7 @@ import app.nodes.qa as qa_module
 from app.nodes.qa import INSUFFICIENT_EVIDENCE_WARNING, QANode
 from app.orchestrator.react_loop import ReActOutcome
 from app.skills.patent_qa import PatentQASkill
-from app.tools.llm import FakeLLMClient
+from app.tools.llm import FakeLLMClient, LLMResponse
 from app.tools.retrieval import LocalRetrievalTool, RetrievalResult
 
 
@@ -62,6 +62,21 @@ class FakeReactLoop:
         return self.outcome
 
 
+class SequenceLLMClient:
+    """测试用 LLM client,按顺序返回 ReAct 决策。"""
+
+    def __init__(self, responses: list[dict]) -> None:
+        self.responses = responses
+        self.calls = []
+
+    def generate(self, **kwargs) -> LLMResponse:
+        """记录调用并返回下一条结构化响应。"""
+        self.calls.append(kwargs)
+        index = len(self.calls) - 1
+        response = self.responses[index] if index < len(self.responses) else self.responses[-1]
+        return LLMResponse(content=response)
+
+
 def make_outcome(evidence: list[dict] | None = None, reason: str = "sufficient") -> ReActOutcome:
     """构造测试用 ReActOutcome。"""
     items = evidence or []
@@ -108,9 +123,9 @@ def test_qa_node_uses_retriever_factory_by_default(monkeypatch) -> None:
     assert calls == ["qdrant"]
 
 
-def test_qa_node_inherits_retrieval_budget_values_from_settings(monkeypatch) -> None:
-    """QA node 未显式传预算参数时应继承通用检索预算。"""
-    settings = Settings(retrieval_max_steps=2, retrieval_token_budget=300, retrieval_timeout_seconds=7, retrieval_top_k=4)
+def test_qa_node_inherits_react_budget_values_from_settings(monkeypatch) -> None:
+    """QA node 未显式传预算参数时应继承 ReAct 预算。"""
+    settings = Settings(react_max_steps=2, react_token_budget=300, react_timeout_seconds=7, retrieval_top_k=4)
     retrieval_tool = CountingRetrievalTool([RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc"}, score=1)])
 
     monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
@@ -145,6 +160,27 @@ def test_qa_node_writes_structured_answer_to_state() -> None:
     assert state.dialog_context["qa_result"]["next_steps"] == ["补充材料"]
     assert loop.calls == [{"task_input": "这个权利要求有什么风险？", "allowed_tools": ["kb_retrieval"]}]
     assert trace_event(result, "qa_completed")["data"] == {"basis_count": 1, "has_retrieval": False, "evidence_versions": []}
+
+
+def test_qa_node_preserves_explicit_zero_budget_over_settings(monkeypatch) -> None:
+    """QA node 显式传入 0 预算时不应被 settings 默认值覆盖。"""
+    settings = Settings(react_max_steps=3, react_token_budget=300, react_timeout_seconds=7)
+    retrieval_tool = CountingRetrievalTool([RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc"}, score=1)])
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+
+    node = QANode(skill=RecordingQASkill(), max_steps=0, token_budget=0, timeout_seconds=0)
+    result = node.run(WorkflowState(raw_input="问题", normalized_input="问题"))
+
+    assert retrieval_tool.calls == []
+    assert trace_event(result, "react_main_converged")["data"]["reason"] == "max_steps"
+    assert trace_event(result, "qa_retrieval_completed")["data"] == {
+        "steps_used": 0,
+        "result_count": 0,
+        "token_budget": 0,
+        "timeout_seconds": 0,
+    }
 
 
 def test_qa_node_passes_provenance_evidence_to_skill() -> None:
@@ -289,6 +325,106 @@ def test_qa_node_continues_when_retrieval_raises() -> None:
     assert result.status == "success"
     assert result.output["qa_result"]["basis"] == ["依据不足: 未检索到可引用材料"]
     assert trace_event(result, "qa_retrieval_completed")["data"]["result_count"] == 0
+
+
+def test_qa_node_uses_llm_react_policy_for_decision_sequence(monkeypatch) -> None:
+    """QA 默认 loop 应按 react policy 配置使用 LLM 决策和改写 query。"""
+    settings = Settings(
+        llm_base_url="https://llm.example.test/v1",
+        llm_model="base-model",
+        llm_api_key="secret",
+        llm_cheap_model="cheap-model",
+        react_policy_driver="llm",
+        react_policy_temperature=0.1,
+        react_timeout_seconds=5,
+        retrieval_top_k=3,
+    )
+    llm_client = SequenceLLMClient([
+        {"thought": "先宽泛检索", "action": "kb_retrieval", "tool_input": {"query": "宽泛问题"}, "stop": False, "sufficient": False},
+        {"thought": "缩小问题", "action": "kb_retrieval", "tool_input": {"query": "缩小问题"}, "stop": False, "sufficient": True},
+    ])
+    retrieval_tool = CountingRetrievalTool([
+        RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc", "locator": "doc"}, score=1)
+    ])
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+    monkeypatch.setattr(qa_module, "build_llm_client", lambda settings: llm_client)
+
+    node = QANode(skill=RecordingQASkill(), max_steps=2)
+    result = node.run(WorkflowState(raw_input="原问题", normalized_input="原问题"))
+
+    assert retrieval_tool.calls == [{"query": "宽泛问题", "top_k": 3, "as_of": None, "fetch_k": None}]
+    assert len(llm_client.calls) == 1
+    assert llm_client.calls[0]["model"] == "cheap-model"
+    assert llm_client.calls[0]["temperature"] == 0.1
+    assert trace_event(result, "react_policy_step")["data"]["driver"] == "llm"
+    assert trace_event(result, "react_main_converged")["data"]["driver"] == "llm"
+
+
+def test_qa_node_falls_back_to_heuristic_without_llm_config(monkeypatch) -> None:
+    """无完整 LLM 配置时 QA 默认 loop 应自动 heuristic 且不构建 LLM client。"""
+    settings = Settings(react_policy_driver="llm", react_max_steps=1)
+    retrieval_tool = CountingRetrievalTool([RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc"}, score=1)])
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+    monkeypatch.setattr(qa_module, "build_llm_client", lambda settings: (_ for _ in ()).throw(AssertionError("unexpected llm client")))
+
+    node = QANode(skill=RecordingQASkill())
+    result = node.run(WorkflowState(raw_input="问题", normalized_input="问题"))
+
+    assert retrieval_tool.calls == [{"query": "问题", "top_k": 3, "as_of": None, "fetch_k": None}]
+    assert trace_event(result, "react_main_converged")["data"]["driver"] == "heuristic"
+
+
+def test_qa_node_rejects_disabled_external_policy_tool(monkeypatch) -> None:
+    """外部工具关闭时 LLM 选择 websearch 也不应被调用,应降级到 KB 检索。"""
+    settings = Settings(
+        llm_base_url="https://llm.example.test/v1",
+        llm_model="base-model",
+        llm_api_key="secret",
+        react_max_steps=1,
+        agentic_default_tools="kb_retrieval,websearch",
+        agentic_external_tools_enabled=False,
+        websearch_enabled=True,
+    )
+    llm_client = SequenceLLMClient([
+        {"thought": "尝试外部搜索", "action": "websearch", "tool_input": {"query": "外部问题"}, "stop": False, "sufficient": False},
+    ])
+    retrieval_tool = CountingRetrievalTool([RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc"}, score=1)])
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+    monkeypatch.setattr(qa_module, "build_llm_client", lambda settings: llm_client)
+
+    node = QANode(skill=RecordingQASkill())
+    result = node.run(WorkflowState(raw_input="原问题", normalized_input="原问题"))
+
+    assert retrieval_tool.calls == [{"query": "原问题", "top_k": 3, "as_of": None, "fetch_k": None}]
+    converged = trace_event(result, "react_main_converged")["data"]
+    assert converged["fallback_used"] is True
+    assert converged["external_tools_used"] == []
+
+
+def test_qa_node_keeps_basis_from_real_evidence_after_policy_rewrite(monkeypatch) -> None:
+    """policy 改写 query 后最终 basis 仍应引用真实 evidence 来源。"""
+    settings = Settings(llm_base_url="https://llm.example.test/v1", llm_model="base-model", llm_api_key="secret", react_max_steps=1)
+    llm_client = SequenceLLMClient([
+        {"thought": "改写", "action": "kb_retrieval", "tool_input": {"query": "改写问题"}, "stop": False, "sufficient": True},
+    ])
+    retrieval_tool = CountingRetrievalTool([
+        RetrievalResult(content="材料", provenance={"source": "local://doc", "document_id": "doc", "locator": "真实出处"}, score=1)
+    ])
+
+    monkeypatch.setattr(qa_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(qa_module, "build_retriever", lambda settings: retrieval_tool)
+    monkeypatch.setattr(qa_module, "build_llm_client", lambda settings: llm_client)
+
+    result = QANode(skill=RecordingQASkill()).run(WorkflowState(raw_input="原问题", normalized_input="原问题"))
+
+    assert retrieval_tool.calls[0]["query"] == "改写问题"
+    assert result.output["qa_result"]["basis"] == ["真实出处"]
 
 
 def test_qa_node_returns_failed_when_skill_output_invalid() -> None:

@@ -7,8 +7,10 @@ from app.core.config import get_settings
 from app.models.schemas import NodeResult, SkillContext, WorkflowState
 from app.orchestrator.node_base import Node
 from app.orchestrator.react_loop import BoundedReActLoop, ReActBudget, ReActOutcome
+from app.orchestrator.react_policy import HeuristicReActPolicy, LLMReActPolicy, ReActPolicy
 from app.orchestrator.tool_registry import build_default_tool_registry
 from app.skills.patent_qa import PatentQASkill
+from app.tools.llm import build_llm_client
 from app.tools.retrieval import Retriever, build_retriever
 
 
@@ -48,15 +50,16 @@ class QANode(Node):
         self.settings = settings
         self.skill = skill or PatentQASkill()
         self.retrieval_tool = retrieval_tool or build_retriever(settings)
-        self.max_steps = settings.retrieval_max_steps if max_steps is None else max_steps
-        self.token_budget = settings.retrieval_token_budget if token_budget is None else token_budget
-        self.timeout_seconds = settings.retrieval_timeout_seconds if timeout_seconds is None else timeout_seconds
+        self.max_steps = settings.react_max_steps if max_steps is None else max_steps
+        self.token_budget = settings.react_token_budget if token_budget is None else token_budget
+        self.timeout_seconds = settings.react_timeout_seconds if timeout_seconds is None else timeout_seconds
         self.top_k = settings.retrieval_top_k if top_k is None else top_k
         self.react_loop = react_loop or self._build_react_loop()
 
     def _build_react_loop(self) -> BoundedReActLoop:
         """构建 QA 默认使用的 R7 主循环。"""
         registry = build_default_tool_registry(self.settings, retriever=self.retrieval_tool)
+        allowed_tools = self._allowed_tools()
         return BoundedReActLoop(
             tools=registry.available_tools(),
             budget=ReActBudget(
@@ -65,7 +68,27 @@ class QANode(Node):
                 timeout_seconds=self.timeout_seconds,
             ),
             node_name=self.name,
+            policy=self._build_react_policy(),
+            tool_cards=registry.tool_cards(allowed_tools),
+            use_llm_judge=self.settings.react_use_llm_judge,
         )
+
+    def _build_react_policy(self) -> ReActPolicy:
+        """按配置构建 QA ReAct policy,配置不完整时安全降级。"""
+        if self.settings.react_policy_driver != "llm" or not self._has_llm_config():
+            return HeuristicReActPolicy()
+        model = self.settings.react_policy_model or self.settings.llm_cheap_model or self.settings.llm_model
+        return LLMReActPolicy(
+            llm_client=build_llm_client(self.settings),
+            node_name=self.name,
+            model=model,
+            temperature=self.settings.react_policy_temperature,
+            timeout=self.settings.react_timeout_seconds,
+        )
+
+    def _has_llm_config(self) -> bool:
+        """判断是否具备真实 LLM 调用所需配置。"""
+        return bool(self.settings.llm_base_url and self.settings.llm_model and self.settings.llm_api_key)
 
     def run(self, state: WorkflowState) -> NodeResult:
         """生成专利问答结果。

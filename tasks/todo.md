@@ -127,25 +127,25 @@
 
 ## Phase 5 — QA 接入 policy 驱动主循环
 
-- [ ] 修改 `QANode.__init__` 默认预算来源。
+- [x] 修改 `QANode.__init__` 默认预算来源。
   - 验收：默认继承 `react_max_steps`、`react_token_budget`、`react_timeout_seconds`。
-- [ ] 保持 QANode 构造参数覆盖语义。
+- [x] 保持 QANode 构造参数覆盖语义。
   - 验收：`0` / `False` 等有效值不被 `or` 吞掉。
-- [ ] 修改 `QANode._build_react_loop` 构建 policy。
+- [x] 修改 `QANode._build_react_loop` 构建 policy。
   - 验收：按 `react_policy_driver` 选择 LLM 或 heuristic。
-- [ ] 无 LLM 配置时自动 heuristic。
+- [x] 无 LLM 配置时自动 heuristic。
   - 验收：默认测试不触网。
-- [ ] QA 构建 loop 时传入 tool cards / registry metadata。
+- [x] QA 构建 loop 时传入 tool cards / registry metadata。
   - 验收：policy 可见工具描述和 schema。
-- [ ] QA 注入 FakeLLMClient 决策序列测试。
+- [x] QA 注入 FakeLLMClient 决策序列测试。
   - 验收：工具调用顺序、query 改写、收敛 reason 可断言。
-- [ ] QA 无 LLM 回归测试。
+- [x] QA 无 LLM 回归测试。
   - 验收：行为与旧确定性循环一致。
-- [ ] QA 外部工具关闭测试。
+- [x] QA 外部工具关闭测试。
   - 验收：LLM 选择外部工具也不会调用。
-- [ ] QA basis 回链测试。
+- [x] QA basis 回链测试。
   - 验收：最终 basis 仍只引用真实 evidence 来源。
-- [ ] 验证 Phase 5。
+- [x] 验证 Phase 5。
   - 命令：`conda run -n autoGLM pytest tests/test_qa_node.py tests/test_agentic_loop.py`
 
 ## Phase 6 — Trace、安全与旧行为清理

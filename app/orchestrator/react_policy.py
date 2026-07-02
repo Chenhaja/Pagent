@@ -13,8 +13,7 @@ class ReActDecision:
         thought: 决策短摘要,仅用于内部 trace 摘要。
         action: 选中的工具名;None 表示停止。
         tool_input: 传给工具的结构化输入。
-        stop: 是否停止主循环。
-        sufficient: 是否认为证据已充分。
+        stop: 是否停止主循环。。
 
     Returns:
         可被主循环校验和执行的结构化决策。
@@ -24,7 +23,6 @@ class ReActDecision:
     action: str | None
     tool_input: dict[str, Any] = field(default_factory=dict)
     stop: bool = False
-    sufficient: bool = False
 
 
 @dataclass
@@ -76,6 +74,7 @@ class ReActPolicy(Protocol):
         allowed_tools: list[ToolCard],
         scratchpad: list[dict[str, Any]],
         step_index: int,
+        max_steps: int,
     ) -> ReActDecision:
         """生成下一步 ReAct 决策。
 
@@ -84,6 +83,7 @@ class ReActPolicy(Protocol):
             allowed_tools: 当前白名单工具卡片。
             scratchpad: 历史步骤摘要。
             step_index: 当前步数。
+            max_steps: 当前主循环最大步数。
 
         Returns:
             结构化 ReAct 决策。
@@ -130,6 +130,7 @@ class HeuristicReActPolicy:
         allowed_tools: list[ToolCard],
         scratchpad: list[dict[str, Any]],
         step_index: int,
+        max_steps: int,
     ) -> ReActDecision:
         """按工具顺序生成确定性决策。
 
@@ -138,19 +139,19 @@ class HeuristicReActPolicy:
             allowed_tools: 当前白名单工具卡片。
             scratchpad: 历史步骤摘要。
             step_index: 当前步数。
+            max_steps: 当前主循环最大步数。
 
         Returns:
             旧逻辑等价的 ReAct 决策。
         """
         if not allowed_tools:
-            return ReActDecision(thought="无可用工具", action=None, tool_input={}, stop=True, sufficient=False)
+            return ReActDecision(thought="无可用工具", action=None, tool_input={}, stop=True)
         tool = allowed_tools[min(step_index, len(allowed_tools) - 1)]
         return ReActDecision(
             thought="使用确定性降级策略选择工具",
             action=tool.name,
             tool_input={"query": task_input, "step_index": step_index},
             stop=False,
-            sufficient=False,
         )
 
     def reflect(
@@ -216,6 +217,7 @@ class LLMReActPolicy:
         allowed_tools: list[ToolCard],
         scratchpad: list[dict[str, Any]],
         step_index: int,
+        max_steps: int,
     ) -> ReActDecision:
         """调用 LLM 生成下一步 ReAct 决策。
 
@@ -224,6 +226,7 @@ class LLMReActPolicy:
             allowed_tools: 当前白名单工具卡片。
             scratchpad: 历史步骤摘要。
             step_index: 当前步数。
+            max_steps: 当前主循环最大步数。
 
         Returns:
             结构化 ReAct 决策。
@@ -232,7 +235,7 @@ class LLMReActPolicy:
             ReActPolicyError: LLM 调用失败或输出结构不合规。
         """
         response = self.llm_client.generate(
-            messages=build_react_policy_messages(task_input, allowed_tools, scratchpad, step_index),
+            messages=build_react_policy_messages(task_input, allowed_tools, scratchpad, step_index, max_steps),
             output_schema=REACT_DECISION_SCHEMA,
             model=self.model,
             temperature=self.temperature,
@@ -288,16 +291,15 @@ def _parse_decision(payload: dict[str, Any]) -> ReActDecision:
     action = payload.get("action")
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
     stop = payload["stop"]
-    sufficient = payload.get("sufficient", False)
     if not isinstance(thought, str):
         raise ReActPolicyError("invalid_thought")
     if action is not None and not isinstance(action, str):
         raise ReActPolicyError("invalid_action")
     if not isinstance(tool_input, dict):
         raise ReActPolicyError("invalid_tool_input")
-    if not isinstance(stop, bool) or not isinstance(sufficient, bool):
+    if not isinstance(stop, bool):
         raise ReActPolicyError("invalid_flags")
-    return ReActDecision(thought=thought, action=action, tool_input=tool_input, stop=stop, sufficient=sufficient)
+    return ReActDecision(thought=thought, action=action, tool_input=tool_input, stop=stop)
 
 
 def _parse_reflection(payload: dict[str, Any]) -> ReflectResult:

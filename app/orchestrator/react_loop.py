@@ -245,7 +245,7 @@ class BoundedReActLoop:
     ) -> tuple[ReActDecision, str, bool]:
         """调用主 policy,失败时返回 heuristic 决策。"""
         try:
-            decision = self.policy.decide(task_input, cards, scratchpad, step_index)
+            decision = self.policy.decide(task_input, cards, scratchpad, step_index, self.budget.max_steps)
             return decision, self._policy_driver(), False
         except Exception:
             return self._fallback_decision(task_input, cards, scratchpad, step_index)
@@ -259,9 +259,9 @@ class BoundedReActLoop:
     ) -> tuple[ReActDecision, str, bool]:
         """生成 heuristic 降级决策。"""
         try:
-            return self.heuristic_policy.decide(task_input, cards, scratchpad, step_index), "heuristic", True
+            return self.heuristic_policy.decide(task_input, cards, scratchpad, step_index, self.budget.max_steps), "heuristic", True
         except ReActPolicyError:
-            return ReActDecision(thought="降级策略失败", action=None, tool_input={}, stop=True, sufficient=False), "heuristic", True
+            return ReActDecision(thought="降级策略失败", action=None, tool_input={}, stop=True), "heuristic", True
 
     def _reflect(
         self,
@@ -348,7 +348,6 @@ class BoundedReActLoop:
                 "tool_name": decision.action,
                 "thought_len": len(decision.thought),
                 "stop": decision.stop,
-                "sufficient": decision.sufficient,
                 "driver": driver,
             },
         }

@@ -1,7 +1,9 @@
 from typing import Any
 
 from app.models.schemas import NodeResult, WorkflowState
+from app.nodes.intent_router import IntentRouterNode
 from app.services.agent_dispatch_service import AgentDispatchService
+from app.tools.llm import FakeLLMClient
 
 
 class FixedRewriteNode:
@@ -148,6 +150,7 @@ def test_agent_dispatch_routes_claim_revision_workflow() -> None:
 def test_agent_dispatch_routes_qa_workflow() -> None:
     """统一 Agent 入口应路由到 QA workflow。"""
     service = AgentDispatchService()
+    service._run_qa = lambda state, workflow_def: {"status": "failed", "errors": ["qa_failed"], "message": "问答失败"}
 
     result = service.dispatch("请说明创造性的判断思路？")
 
@@ -209,6 +212,7 @@ def test_agent_dispatch_routes_claim_problem_to_revision_not_qa() -> None:
 def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:
     """统一 Agent 入口遇到未知意图时应返回补充输入提示。"""
     service = AgentDispatchService()
+    service.intent_router_node = IntentRouterNode(llm_client=FakeLLMClient(response={"intent": "unknown", "confidence": 0.1}))
 
     result = service.dispatch("你好")
 

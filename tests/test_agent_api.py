@@ -57,8 +57,16 @@ def test_agent_api_routes_claim_revision() -> None:
     assert payload["disclaimer"] == DISCLAIMER
 
 
-def test_agent_api_routes_qa() -> None:
-    """统一 Agent API 应支持 QA,默认无真实 LLM 时返回结构化失败。"""
+def test_agent_api_routes_qa(monkeypatch) -> None:
+    """统一 Agent API 应支持 QA 失败响应。"""
+    class StubAgentDispatchService:
+        """测试用 QA 失败 dispatch 服务。"""
+
+        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+            """返回 QA 失败响应。"""
+            return {"status": "failed", "errors": ["qa_failed"], "intent": "qa", "workflow": "qa"}
+
+    monkeypatch.setattr(routes, "AgentDispatchService", StubAgentDispatchService)
     client = TestClient(app)
 
     response = client.post("/agent", json={"raw_input": "请说明创造性的判断思路？"})

@@ -19,6 +19,9 @@ def test_fake_llm_returns_fixed_response() -> None:
     assert response.raw_text is None
     assert response.errors == []
     assert response.trace["provider"] == "fake"
+    assert response.reasoning_text is None
+    assert response.trace["has_reasoning"] is False
+    assert response.trace["reasoning_chars"] == 0
 
 
 def test_fake_llm_returns_structured_error_without_raising() -> None:
@@ -30,6 +33,18 @@ def test_fake_llm_returns_structured_error_without_raising() -> None:
     assert response.content == {}
     assert response.errors[0]["code"] == "timeout"
     assert response.trace["fallback_used"] is True
+
+
+def test_fake_llm_injects_reasoning_text_without_trace_body() -> None:
+    """Fake LLM 应支持注入 reasoning_text 且 trace 不含正文。"""
+    client = FakeLLMClient(response={"answer": "ok"}, reasoning_text="内部推理正文")
+
+    response = client.generate(prompt="test")
+
+    assert response.reasoning_text == "内部推理正文"
+    assert response.trace["has_reasoning"] is True
+    assert response.trace["reasoning_chars"] == len("内部推理正文")
+    assert "内部推理正文" not in str(response.trace)
 
 
 def test_fake_llm_accepts_openai_style_messages() -> None:
@@ -69,6 +84,8 @@ def test_llm_trace_sink_records_sanitized_trace_only() -> None:
             "input_chars": 9,
             "output_chars": 16,
             "fallback_used": False,
+            "has_reasoning": False,
+            "reasoning_chars": 0,
             "node_name": "qa",
         }
     ]
@@ -225,6 +242,43 @@ def test_openai_compatible_client_posts_chat_completion_request() -> None:
     assert response.content == {"answer": "ok"}
     assert response.trace["token_usage"]["total_tokens"] == 5
     assert response.trace["node_name"] == "feature_extract"
+
+
+def test_openai_compatible_client_extracts_reasoning_content() -> None:
+    """OpenAI 兼容 client 应提取 reasoning_content 且 trace 只含元数据。"""
+    opener = FakeURLOpener(
+        {
+            "choices": [{"message": {"content": '{"answer": "ok"}', "reasoning_content": "原生推理正文"}}],
+            "usage": {"total_tokens": 5},
+        }
+    )
+    client = OpenAICompatibleClient(
+        settings=Settings(llm_base_url="https://llm.example.test/v1", llm_model="test-model", llm_api_key="sk-test-secret"),
+        urlopen=opener,
+    )
+
+    response = client.generate(prompt="test", output_schema={"type": "object"})
+
+    assert response.content == {"answer": "ok"}
+    assert response.reasoning_text == "原生推理正文"
+    assert response.trace["has_reasoning"] is True
+    assert response.trace["reasoning_chars"] == len("原生推理正文")
+    assert "原生推理正文" not in str(response.trace)
+
+
+def test_openai_compatible_client_extracts_reasoning_field() -> None:
+    """OpenAI 兼容 client 应兼容 reasoning 字段。"""
+    opener = FakeURLOpener({"choices": [{"message": {"content": '{"answer": "ok"}', "reasoning": "推理摘要"}}]})
+    client = OpenAICompatibleClient(
+        settings=Settings(llm_base_url="https://llm.example.test/v1", llm_model="test-model", llm_api_key="sk-test-secret"),
+        urlopen=opener,
+    )
+
+    response = client.generate(prompt="test", output_schema={"type": "object"})
+
+    assert response.reasoning_text == "推理摘要"
+    assert response.trace["has_reasoning"] is True
+    assert response.trace["reasoning_chars"] == len("推理摘要")
 
 
 def test_openai_compatible_client_returns_structured_provider_error() -> None:

@@ -54,6 +54,7 @@ class LLMResponse(BaseModel):
         raw_text: 可选原始文本,测试默认不依赖。
         errors: 结构化错误列表。
         trace: 不含敏感正文和密钥的调用摘要。
+        reasoning_text: 可选原生推理文本,仅在进程内传递。
 
     Returns:
         LLM tool 的标准响应。
@@ -63,6 +64,7 @@ class LLMResponse(BaseModel):
     raw_text: str | None = None
     errors: list[dict[str, Any]] = Field(default_factory=list)
     trace: dict[str, Any] = Field(default_factory=dict)
+    reasoning_text: str | None = None
 
 
 class LLMTraceSink(Protocol):
@@ -178,6 +180,7 @@ class FakeLLMClient:
     Args:
         response: 固定结构化响应。
         error: 可选错误码,用于模拟调用失败。
+        reasoning_text: 可选推理文本,用于测试 CoT 采集。
 
     Returns:
         可替代真实 LLM 的 fake client。
@@ -188,10 +191,12 @@ class FakeLLMClient:
         response: dict[str, Any] | None = None,
         error: str | None = None,
         trace_sink: LLMTraceSink | None = None,
+        reasoning_text: str | None = None,
     ) -> None:
         self.response = response or {}
         self.error = error
         self.trace_sink = trace_sink
+        self.reasoning_text = reasoning_text
 
     def generate(
         self,
@@ -226,6 +231,8 @@ class FakeLLMClient:
             "input_chars": input_chars,
             "output_chars": len(str(self.response)),
             "fallback_used": bool(self.error),
+            "has_reasoning": bool(self.reasoning_text),
+            "reasoning_chars": len(self.reasoning_text or ""),
         }
         if temperature is not None:
             trace["temperature"] = temperature
@@ -243,8 +250,9 @@ class FakeLLMClient:
                 content={},
                 errors=[LLMError(code=self.error, message=f"LLM 调用失败:{self.error}", retryable=_is_retryable(self.error)).model_dump()],
                 trace=trace,
+                reasoning_text=self.reasoning_text,
             )
-        return LLMResponse(content=self.response, trace=trace)
+        return LLMResponse(content=self.response, trace=trace, reasoning_text=self.reasoning_text)
 
 
 class OpenAICompatibleClient:
@@ -339,14 +347,16 @@ class OpenAICompatibleClient:
         usage = response_payload.get("usage", {})
         trace["token_usage"] = usage
         raw_text = _extract_openai_text(response_payload)
+        reasoning_text = _extract_openai_reasoning(response_payload)
+        _apply_reasoning_trace(trace, reasoning_text)
         if not raw_text:
-            return self._error_response("empty_response", "LLM 返回空内容", trace, started_at)
+            return self._error_response("empty_response", "LLM 返回空内容", trace, started_at, reasoning_text=reasoning_text)
         try:
             parsed = json.loads(raw_text)
         except json.JSONDecodeError:
-            return self._error_response("json_parse_failed", "LLM 返回内容不是合法 JSON", trace, started_at, raw_text=raw_text)
+            return self._error_response("json_parse_failed", "LLM 返回内容不是合法 JSON", trace, started_at, raw_text=raw_text, reasoning_text=reasoning_text)
         trace["output_chars"] = len(raw_text)
-        return LLMResponse(content=parsed, raw_text=raw_text, trace=trace)
+        return LLMResponse(content=parsed, raw_text=raw_text, trace=trace, reasoning_text=reasoning_text)
 
     def _chat_completions_url(self) -> str:
         """生成 chat completions 请求地址。
@@ -381,6 +391,8 @@ class OpenAICompatibleClient:
             "input_chars": _count_input_chars(prompt=None, messages=messages),
             "output_chars": 0,
             "fallback_used": fallback_used,
+            "has_reasoning": False,
+            "reasoning_chars": 0,
         }
         if trace_context:
             trace.update({key: value for key, value in trace_context.items() if key not in {"api_key", "raw_input"}})
@@ -393,6 +405,7 @@ class OpenAICompatibleClient:
         trace: dict[str, Any],
         started_at: float,
         raw_text: str | None = None,
+        reasoning_text: str | None = None,
     ) -> LLMResponse:
         """构造结构化错误响应。
 
@@ -402,17 +415,20 @@ class OpenAICompatibleClient:
             trace: 调用 trace。
             started_at: 调用开始时间。
             raw_text: 可选原始响应文本。
+            reasoning_text: 可选原生推理文本。
 
         Returns:
             包含结构化错误的 LLMResponse。
         """
         trace["fallback_used"] = True
         trace["duration_ms"] = int((time.perf_counter() - started_at) * 1000)
+        _apply_reasoning_trace(trace, reasoning_text)
         return LLMResponse(
             content={},
             raw_text=raw_text,
             errors=[LLMError(code=code, message=message, retryable=_is_retryable(code)).model_dump()],
             trace=trace,
+            reasoning_text=reasoning_text,
         )
 
 
@@ -445,6 +461,31 @@ def _extract_openai_text(payload: dict[str, Any]) -> str:
         return ""
     message = choices[0].get("message") or {}
     return str(message.get("content") or "")
+
+
+def _extract_openai_reasoning(payload: dict[str, Any]) -> str | None:
+    """从 OpenAI 兼容响应中提取原生推理文本。
+
+    Args:
+        payload: provider 返回的 JSON 响应。
+
+    Returns:
+        原生推理文本;缺失时返回 None。
+    """
+    choices = payload.get("choices") or []
+    if not choices:
+        return None
+    message = choices[0].get("message") or {}
+    reasoning = message.get("reasoning_content") or message.get("reasoning")
+    if reasoning is None:
+        return None
+    return str(reasoning)
+
+
+def _apply_reasoning_trace(trace: dict[str, Any], reasoning_text: str | None) -> None:
+    """向 trace 写入无正文 reasoning 元数据。"""
+    trace["has_reasoning"] = bool(reasoning_text)
+    trace["reasoning_chars"] = len(reasoning_text or "")
 
 
 def _count_input_chars(prompt: str | None, messages: list[LLMMessage] | None) -> int:

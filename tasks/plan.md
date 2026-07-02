@@ -1,102 +1,111 @@
-# 日志与可观测性实施计划
+# R9 CoT 推理链采集与分析实施计划
 
 ## 背景
 
-当前项目已有 `app/core/logging.py::JsonLineFormatter`，默认输出 JSON Lines 基础字段；`app/core/security.py::redact_sensitive_text()` 只覆盖 `sk-` 样式密钥；`app/tools/llm.py` 已有 `LLMTraceSink` 协议和不含完整输入输出的 trace；`app/tools/retrieval.py::MultiQueryRetriever._expand_queries()` 已记录 `query_rewrite_failed` / `query_rewrite_empty` 事件名但字段较少；API 入口、编排器、ReAct 主循环尚未统一注入 `request_id / node_name` 等上下文。
+本计划基于根目录 `SPEC.md` 生成，用于落地 R9「CoT 推理链采集与分析」。目标是在不改变 ReAct 决策、反思、检索与收敛业务行为的前提下，将模型推理信号作为只读观测数据接入现有 R8 结构化日志体系，并提供离线 eval 分析能力。
 
-本阶段目标是按 `SPEC.md` 建立统一结构化事件日志：同一套埋点支持 `json` 与 `pretty` 两种渲染，通过 `contextvars` 关联请求、节点和 LLM 调用；补齐配置、脱敏、LLM trace sink、请求/Node/ReAct/检索降级事件。实现阶段不改变检索、ReAct、QA 或编排业务语义。
+当前代码基线：
 
-本计划只拆解实现路径与验收任务；实现阶段再修改业务代码。
+- `app/core/logging.py` 已有 `JsonLineFormatter`、`PrettyFormatter`、`log_event()`、上下文注入、字段脱敏截断和 `llm_call` 日志基础。
+- `app/core/log_context.py` 已有 request/session/trace/node/task 上下文字段。
+- `app/core/security.py` 已有 `redact_sensitive_text()`，覆盖 `sk-...`、`Bearer ...`、`password=...`、`token=...`、`api_key=...` 并支持截断。
+- `app/core/config.py` 已有 R8 日志配置、环境变量读取和 `to_public_dict()`，尚无 `cot_*` 配置。
+- `app/tools/llm.py` 已有 `LLMResponse`、`FakeLLMClient`、`OpenAICompatibleClient`、`LLMTraceSink`、`LoggingLLMTraceSink`，尚无 `reasoning_text` 与 reasoning 元数据。
+- `app/orchestrator/react_policy.py` 中 `LLMReActPolicy.decide()` / `reflect()` 当前只返回结构化 `ReActDecision` / `ReflectResult`，未暴露 LLM response 的原生 reasoning。
+- `app/orchestrator/react_loop.py` 已在 scratchpad/trace 中只记录 thought/reason 长度，适合作为只读旁路采集点。
+- `eval/` 目录当前不存在，需要新增离线分析模块。
 
-## 当前代码基线
+本计划只拆解实现路径与验收任务；实现阶段再修改代码。
 
-- `app/core/logging.py`
-  - 已有 `MAX_LOG_MESSAGE_LENGTH=205`、`sanitize_log_message()`、`JsonLineFormatter`、`configure_logging(settings)`。
-  - `JsonLineFormatter` 当前只输出 `timestamp / level / service / environment / logger / event / message / exception`。
-  - 尚未平铺 `extra={"fields": ...}`，未注入上下文字段，未支持 pretty/auto。
-- `app/core/config.py`
-  - `Settings` 已有 `service_name / environment / log_level`。
-  - 缺 `log_format / log_include_context / log_max_field_length / log_sample_llm_call`。
-  - `get_settings()` 已有 `_get_bool_env()`，可复用读取布尔配置。
-  - `to_public_dict()` 已排除 key 类敏感字段，需要加入日志非敏感配置。
-- `app/core/security.py`
-  - `redact_sensitive_text()` 只覆盖 `sk-` 并按长度截断。
-  - 可作为日志 message 与 fields 清洗的底层能力。
-- `app/tools/llm.py`
-  - 已有 `LLMTraceSink`、`InMemoryLLMTraceSink`、`FakeLLMClient(trace_sink=...)`。
-  - `FakeLLMClient` 和 `OpenAICompatibleClient` 已构造 `provider/model/input_chars/output_chars/fallback_used/...` trace，并调用 sink。
-  - 缺 `LoggingLLMTraceSink`。
-- `app/api/routes.py`
-  - API handler 是请求生命周期事件和 `request_id/session_id` 绑定的合适入口。
-  - `/agent` 请求包含 `session_id`；其他接口可仅绑定 `request_id`。
-- `app/orchestrator/engine.py`
-  - `Orchestrator.run()` 按 node 执行，是 `node_start/node_end/node_error` 的集中埋点点。
-  - `NodeResult` 已包含状态、错误、trace_events，可用于输出 outcome 和统计。
-- `app/orchestrator/react_loop.py`
-  - `BoundedReActLoop.run()` 已维护 `step_index/tool_name/reason/steps_used/tool_calls/fallback_used` 等信息。
-  - 可在不改变决策语义的前提下补 `react_step`、`react_converged` 日志。
-- `app/tools/retrieval.py`
-  - `MultiQueryRetriever._expand_queries()` 已使用 `logger.warning/info(..., extra={"event": ...})` 记录查询改写降级。
-  - 需要按统一 `fields` schema 补 `degrade_reason` 等字段，且不记录完整 query。
-- `tests/`
-  - `tests/test_core_config_logging.py` 已覆盖配置、JSON formatter、敏感配置不公开。
-  - `tests/test_security_compliance.py` 已覆盖 `sk-` 脱敏和长文本截断。
-  - 缺 `tests/test_log_context.py`。
+---
 
 ## 依赖图
 
 ```text
 SPEC.md
-  -> Config contract
-      -> app/core/config.py                    # Settings 字段、env 读取、to_public_dict
-      -> tests/test_core_config_logging.py
-      -> app/core/logging.py                   # formatter 选择依赖 log_format/log_include_context/log_max_field_length
-
-  -> Redaction contract
-      -> app/core/security.py                  # 扩展敏感模式与截断
-      -> app/core/logging.py                   # 清洗 message 和 fields
+  -> Safety boundary
+      -> app/core/security.py                    # 复用脱敏截断
+      -> app/core/logging.py                     # 主日志不得含正文
       -> tests/test_security_compliance.py
 
-  -> Context contract
-      -> app/core/log_context.py               # contextvars、ContextFilter、bind/reset/current
-      -> app/core/logging.py                   # configure_logging 挂 filter
-      -> app/api/routes.py                     # request_id/session_id 绑定
-      -> app/orchestrator/engine.py            # node_name/task_type 绑定
-      -> tests/test_log_context.py
-
-  -> Structured formatter contract
-      -> app/core/logging.py                   # JsonLineFormatter 扩展、PrettyFormatter、log_event
+  -> CoT config contract
+      -> app/core/config.py                      # cot_* 默认值、env、public dict
       -> tests/test_core_config_logging.py
-      -> tests/test_log_context.py
+      -> app/core/reasoning_sink.py              # max chars、sink path、local gate
+      -> app/orchestrator/react_loop.py          # capture enabled/source/local 判断
 
-  -> LLM trace logging contract
-      -> app/tools/llm.py                      # LoggingLLMTraceSink
-      -> app/core/logging.py                   # llm_call 字段平铺和脱敏
-      -> tests/test_log_context.py 或 tests/test_llm_tool.py
+  -> Reasoning sink contract
+      -> app/core/reasoning_sink.py              # ReasoningRecord、Noop、Jsonl
+      -> tests/test_reasoning_sink.py
+      -> app/orchestrator/react_loop.py          # 旁路写入 sink
 
-  -> Runtime event instrumentation
-      -> app/api/routes.py                     # request_start/request_end
-      -> app/orchestrator/engine.py            # node_start/node_end/node_error
-      -> app/orchestrator/react_loop.py        # react_step/react_converged/tool_error
-      -> app/tools/retrieval.py                # query_rewrite_failed/query_rewrite_empty fields
-      -> existing service/node/react/retrieval tests
+  -> LLM reasoning extraction contract
+      -> app/tools/llm.py                        # LLMResponse.reasoning_text、trace 元数据
+      -> tests/test_cot_capture.py
+      -> app/orchestrator/react_policy.py        # 需要把 LLM response reasoning 暴露给 loop
+      -> app/orchestrator/react_loop.py          # 采集 native_cot
+      -> app/tools/llm.py::LoggingLLMTraceSink   # llm_call 增补 has_reasoning/reasoning_chars
 
-  -> final verification
-      -> tests/test_core_config_logging.py
-      -> tests/test_log_context.py
-      -> tests/test_security_compliance.py
-      -> pytest / compileall
+  -> ReAct observation path
+      -> app/orchestrator/react_policy.py        # policy/reflect 返回值或旁路元数据载体
+      -> app/orchestrator/react_loop.py          # Act/Reflect 后采集 thought/reason/native_cot
+      -> tests/test_agentic_loop.py
+      -> tests/test_cot_capture.py
+
+  -> Eval offline analysis
+      -> eval/cot_analysis.py                    # 信号消费检测、归因报告
+      -> tests 或 eval 测试样本                 # 不触网、不依赖真实模型
+
+  -> Final verification
+      -> targeted pytest
+      -> full pytest
+      -> compileall app tests scripts eval
 ```
 
-## 垂直切片原则
+---
 
-每个阶段交付一条可验证路径，而不是只改一层：
+## 关键设计决策
 
-1. 先补配置与脱敏，使后续 formatter/context/LLM sink 共用稳定开关和清洗能力。
-2. 再实现上下文与双模式 formatter，形成“写一条事件 → 自动上下文 → json/pretty 输出”的基础闭环。
-3. 再接 LLM trace sink，证明现有 LLM trace 可进入统一日志管道且不改变 LLMResponse 契约。
-4. 再接请求、Node、ReAct、检索降级埋点，逐步覆盖关键链路。
-5. 最后运行目标测试、全量测试、编译检查，并按项目规范分阶段提交。
+### 1. trace 契约变更检查点
+
+`LLMResponse.trace` 会按 SPEC 新增可选无正文字段：
+
+- `reasoning_chars: int`
+- `has_reasoning: bool`
+
+这是向后兼容增量字段，但属于 SPEC 标注的 Ask first 项。实现前需要用户明确确认可以落地该 trace 字段扩展。
+
+### 2. 原生 reasoning 的传递方式
+
+`LLMResponse.reasoning_text` 在 `app/tools/llm.py` 产生，但当前 `LLMReActPolicy.decide()` / `reflect()` 只返回 `ReActDecision` / `ReflectResult`。为了让 `react_loop.py` 采集 native CoT，有两种实现口径：
+
+- 推荐：在 `react_policy.py` 内部用私有属性记录最近一次 `LLMResponse.reasoning_text` 与 trace 元数据，例如 `last_decision_reasoning` / `last_reflect_reasoning`。这不改变公开 dataclass 契约，改动小。
+- 备选：新增包装返回类型，携带 decision/result 与 response 元数据。该方式更显式，但会扩大 `ReActPolicy` 协议变更面。
+
+实施阶段优先采用推荐方案，除非 review 发现现有测试或架构更适合显式包装类型。
+
+### 3. 只读旁路原则
+
+推理正文只允许从 LLM response / thought / reason 流向 reasoning sink，不能反向进入：
+
+- `task_input`
+- `scratchpad`
+- observation digest
+- 后续 `decide` / `reflect` prompt
+- `LLMResponse.trace`
+- 主 stdout 日志
+- 用户返回
+
+### 4. 纵向切片原则
+
+每个阶段交付一条可验证闭环，而不是只改一层：
+
+1. 先做 reasoning sink：正文脱敏截断写入的最小安全闭环。
+2. 再做 `cot_*` 配置：默认关闭、local gate、public dict 的控制闭环。
+3. 再做 LLM extraction：真实 / fake LLM response 都能产生 reasoning 元数据。
+4. 再做 ReAct 旁路：Act/Reflect 后采集三类信号，但不改变收敛。
+5. 再做 eval：离线读取样本，做信号消费检测与 outcome 关联。
+6. 最后做安全合规与全量验证。
 
 ---
 
@@ -104,286 +113,371 @@ SPEC.md
 
 ### 目标
 
-确认本需求只做日志与可观测性增强，不改变业务语义、不引入外部依赖、不新增日志存储或上报。
+确认本轮只做观测/评估用途的 CoT 采集与分析，不改变在线控制路径。
 
 ### 实施要点
 
-- 默认仍使用标准库 `logging` 和 `contextvars`。
-- `log_format=auto` 在 `environment=local` 时走 pretty，其他环境走 json。
-- `log_sample_llm_call` 本轮只作为公开配置占位，不实际采样丢弃。
-- 不记录完整 query、prompt、检索正文、原始 LLM 输入输出、密钥或隐私数据。
-- 默认测试不触网、不调用真实模型。
+- 确认允许新增 `LLMResponse.trace.reasoning_chars` / `has_reasoning`。
+- 不引入第三方依赖。
+- 不修改 ReAct 收敛逻辑、检索算法、工具注册、会话记忆链路。
+- 默认不采集推理正文。
+- 生产环境强制不采集正文。
+- 默认测试不触网、不调用真实 LLM。
 
 ### 验收标准
 
-- plan / todo 明确上述边界。
-- 后续任务不包含 OTel/Prometheus/外部日志系统、业务逻辑重写或真实 LLM 调用。
+- `tasks/plan.md` / `tasks/todo.md` 明确边界。
+- 用户确认 trace 可选字段扩展后，才进入实现阶段。
 
-### Checkpoint 0
+### 验证步骤
 
-确认计划后进入测试优先实现。
+- 人工 review 本计划。
+- 人工确认 Ask first 项。
+
+### 检查点
+
+- Checkpoint 0：确认 `LLMResponse.trace` 可新增无正文元数据字段。
 
 ---
 
-## Phase 1 — 配置与脱敏基础闭环
+## Phase 1 — Reasoning sink 安全写入闭环
 
 ### 目标
 
-建立日志开关和字段清洗能力，为 formatter、context filter、LLM trace sink 共用。
+新增独立 reasoning sink，使推理正文在允许采集时能脱敏、截断并写入 JSONL；默认实现不写任何正文。
 
-### 任务
+### 触达文件
 
-1. 扩展 `Settings` 日志配置。
-   - 新增 `log_format: str = "auto"`。
-   - 新增 `log_include_context: bool = True`。
-   - 新增 `log_max_field_length: int = 205`。
-   - 新增 `log_sample_llm_call: bool = False`。
-   - 更新 `Settings` docstring、`get_settings()` 环境变量读取、`to_public_dict()`。
-2. 补配置测试。
-   - 默认值测试。
-   - `PAGENT_LOG_FORMAT`、`PAGENT_LOG_INCLUDE_CONTEXT`、`PAGENT_LOG_MAX_FIELD_LENGTH`、`PAGENT_LOG_SAMPLE_LLM_CALL` 环境变量读取。
-   - public dict 包含新增非敏感日志配置，不包含 key/token/secret/password。
-3. 扩展脱敏能力。
-   - 在 `redact_sensitive_text()` 或共用清洗函数中覆盖 `sk-...`、`Bearer ...`、`password=...`、`token=...`、`api_key=...`。
-   - 保持可传入 `max_length` 并追加稳定截断标记。
-4. 补脱敏测试。
-   - 覆盖 Bearer、password、token、api_key。
-   - 覆盖超长字段截断。
+- 新增 `app/core/reasoning_sink.py`
+- 新增 `tests/test_reasoning_sink.py`
+- 复用 `app/core/security.py`
+
+### 实施任务
+
+1. 定义 `ReasoningRecord`，字段包含 `request_id`、`node_name`、`task_type`、`step_index`、`source`、`text`、`outcome`。
+2. 定义 `ReasoningTraceSink` 协议。
+3. 实现 `NoopReasoningSink.write()`。
+4. 实现 `JsonlReasoningSink.write()`。
+5. 写入前调用 `redact_sensitive_text(text, max_length=cot_max_chars)`。
+6. sink 内部捕获异常并吞掉。
+7. 不写 stdout，不混入主日志。
 
 ### 验收标准
 
-- 日志配置可通过环境变量覆盖，并安全进入 `to_public_dict()`。
-- 脱敏函数不输出密钥类原文。
-- 不新增依赖，不触网。
+- JSONL sink 写入合法 JSON Lines。
+- 正文已脱敏且按上限截断。
+- Noop sink 不产生副作用。
+- sink 异常不向外抛出。
 
 ### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_security_compliance.py
+conda run -n autoGLM pytest tests/test_reasoning_sink.py
 ```
 
-### Checkpoint 1
+### 检查点
 
-配置和脱敏通过后，再实现上下文与 formatter，避免重复清洗逻辑。
+- Checkpoint 1：可以独立验证“安全写正文到独立 sink”的最小能力。
 
 ---
 
-## Phase 2 — 上下文与双模式 formatter 闭环
+## Phase 2 — CoT 配置控制闭环
 
 ### 目标
 
-实现“绑定上下文 → 记录结构化事件 → json/pretty 两种渲染”的基础日志管道。
+新增 `cot_*` 配置，控制正文采集开关、来源、截断长度、sink 路径和 local 环境限制。
 
-### 任务
+### 触达文件
 
-1. 新增 `app/core/log_context.py`。
-   - 定义 `request_id_var / session_id_var / trace_id_var / node_name_var / task_type_var`。
-   - 实现 `new_request_id()`。
-   - 实现 `bind_context(**fields)` 和 `reset_context(token)`，支持回滚多个字段。
-   - 实现 `current_context()`。
-   - 实现 `ContextFilter(logging.Filter)`，将上下文字段注入 record。
-2. 扩展 `app/core/logging.py`。
-   - 复用统一脱敏/截断清洗 message。
-   - 支持 `extra={"event": ..., "fields": {...}}`，将 fields 清洗后平铺到输出 payload。
-   - 扩展 `JsonLineFormatter` 输出上下文字段和 fields。
-   - 新增 `PrettyFormatter`，使用同一字段来源输出人类可读单行。
-   - 新增 `log_event(logger, level, event, message, **fields)` 或等价 helper，降低埋点重复。
-   - `configure_logging(settings)` 根据 `log_format` 选择 formatter，并按 `log_include_context` 挂载 `ContextFilter`。
-3. 补 `tests/test_log_context.py`。
-   - bind/reset/current_context。
-   - 兄弟 Node 上下文不串。
-   - ContextFilter 注入 record。
-   - 未绑定字段安全为 `None` 或按配置省略。
-   - json 输出可 `json.loads`。
-   - pretty 输出包含 `event`、`node_name`、`request_id` 前缀和关键字段。
-   - auto + local -> pretty；auto + prod -> json。
+- `app/core/config.py`
+- `tests/test_core_config_logging.py`
+
+### 实施任务
+
+1. `Settings` 新增：
+   - `cot_capture_enabled: bool = False`
+   - `cot_capture_sources: list[str] | str = ["native_cot", "thought", "reason"]` 或保持字符串并提供解析 helper
+   - `cot_max_chars: int = 1200`
+   - `cot_sink_path: str = "logs/reasoning.jsonl"`
+   - `cot_require_local_env: bool = True`
+2. 更新 `Settings` 中文 docstring。
+3. `get_settings()` 读取：
+   - `PAGENT_COT_CAPTURE_ENABLED`
+   - `PAGENT_COT_CAPTURE_SOURCES`
+   - `PAGENT_COT_MAX_CHARS`
+   - `PAGENT_COT_SINK_PATH`
+   - `PAGENT_COT_REQUIRE_LOCAL_ENV`
+4. 新增来源列表解析，支持逗号分隔字符串。
+5. 更新 `to_public_dict()`，加入非敏感 `cot_*` 配置。
 
 ### 验收标准
 
-- json 与 pretty 字段来源一致。
-- formatter/filter 异常不影响主流程。
-- `log_include_context=false` 时日志仍可正常输出。
-- 结构化字段经过脱敏和截断。
+- 默认关闭正文采集。
+- env 可覆盖每个配置项。
+- `to_public_dict()` 包含 `cot_*` 且不暴露敏感字段。
+- 配置项保持全局通用作用域。
 
 ### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_log_context.py tests/test_security_compliance.py
+conda run -n autoGLM pytest tests/test_core_config_logging.py
 ```
 
-### Checkpoint 2
+### 检查点
 
-基础日志管道通过后，再接 LLM trace sink。
+- Checkpoint 2：可以从配置层证明默认安全、local gate 可控。
 
 ---
 
-## Phase 3 — LLM trace 日志闭环
+## Phase 3 — LLM reasoning 提取与 trace 元数据闭环
 
 ### 目标
 
-将现有 `LLMTraceSink` 接入统一日志管道，形成 `llm_call` 事件，不修改 `LLMResponse.trace` 字段契约。
+让真实 OpenAI 兼容 client 与 Fake client 都能携带可选 `reasoning_text`，并在 trace / llm_call 中只暴露无正文元数据。
 
-### 任务
+### 触达文件
 
-1. 在 `app/tools/llm.py` 新增 `LoggingLLMTraceSink`。
-   - 实现 `write(trace)`。
-   - 输出 `event="llm_call"`。
-   - `fallback_used=True` 时使用 WARNING，否则 INFO。
-   - 将 trace 作为 `fields` 输出，不添加完整 prompt/response/raw_input/api_key。
-   - sink 内部异常吞掉，不影响 LLM 调用返回。
-2. 补 LLM trace sink 测试。
-   - `FakeLLMClient(trace_sink=LoggingLLMTraceSink(...))` 或直接调用 sink 产生 `llm_call`。
-   - 断言 `provider/model/input_chars/output_chars/fallback_used/duration_ms` 等字段输出。
-   - 断言 fallback 升级 WARNING。
-   - 断言 sink 写日志异常不抛出。
-   - 断言日志不含 `api_key/raw_input` 或完整正文。
-3. 根据需要调整 `build_llm_client()`。
-   - 若 SPEC 要求默认接入日志 sink，则在真实 client 构造时传入或保持显式注入路径。
-   - 不改变默认缺配置时返回 Fake 的安全行为。
+- `app/tools/llm.py`
+- `tests/test_llm_tool.py`
+- `tests/test_cot_capture.py`
+
+### 实施任务
+
+1. `LLMResponse` 新增 `reasoning_text: str | None = None`。
+2. `FakeLLMClient` 支持构造时注入 `reasoning_text`。
+3. Fake trace 增加 `has_reasoning` / `reasoning_chars`。
+4. `OpenAICompatibleClient.generate()` 从 response payload 提取：
+   - `choices[0].message.reasoning_content`
+   - `choices[0].message.reasoning`
+   - 如有 streaming/delta 测试样本，再兼容 delta 聚合结构
+5. `OpenAICompatibleClient` 成功和错误响应都保证 trace 含 reasoning 元数据默认值。
+6. `LoggingLLMTraceSink` 继续通过 `_DROPPED_TRACE_FIELDS` 排除正文，允许输出新增元数据。
+7. 测试断言 trace 不含 `reasoning_text` 正文。
 
 ### 验收标准
 
-- LLM trace 可进入统一结构化日志。
-- 不改变 `LLMClient.generate(...)` 返回结构和 trace 字段契约。
-- sink 失败不影响调用方。
+- 有 reasoning 字段时 `LLMResponse.reasoning_text` 被提取。
+- 无 reasoning 字段时为 `None` 且不报错。
+- trace 只含 `has_reasoning` / `reasoning_chars`。
+- `llm_call` 日志能显示新增元数据且不含正文。
+- 默认测试不触网。
 
 ### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_log_context.py tests/test_llm_tool.py
+conda run -n autoGLM pytest tests/test_llm_tool.py tests/test_cot_capture.py
 ```
 
-### Checkpoint 3
+### 检查点
 
-LLM trace 日志闭环通过后，再接请求、Node、ReAct 和检索降级埋点。
+- Checkpoint 3：可以独立验证“模型响应 → 进程内 reasoning_text → 无正文 trace 元数据”。
 
 ---
 
-## Phase 4 — 运行链路事件埋点闭环
+## Phase 4 — ReAct 旁路采集闭环
 
 ### 目标
 
-在关键执行路径补稳定事件，覆盖请求生命周期、Node 生命周期、ReAct 步骤与检索降级，同时不改变业务结果。
+在 ReAct Act / Reflect 后采集 `native_cot`、`thought`、`reason` 三类信号，写 `cot_captured` 元数据事件，并在开关允许时写独立 sink；不改变主循环行为。
 
-### 任务
+### 触达文件
 
-1. API 请求生命周期埋点。
-   - 在 `app/api/routes.py` 或 FastAPI middleware 中为请求绑定 `request_id`。
-   - `/agent` 额外绑定 `session_id=request.session_id`。
-   - 输出 `request_start` / `request_end`，包含 `duration_ms`、`outcome`，不含完整请求正文。
-   - 异常路径保留现有 HTTPException 行为并输出失败 outcome。
-2. Node 生命周期埋点。
-   - 在 `app/orchestrator/engine.py::Orchestrator.run()` 执行每个 node 前绑定 `node_name`。
-   - 输出 `node_start` / `node_end` / `node_error`。
-   - 字段包含 `duration_ms`、`outcome`、`error_count`、`trace_event_count` 等统计。
-   - 确保 reset_context 在成功、失败、异常路径都会执行。
-3. ReAct 主循环埋点。
-   - 在 `app/orchestrator/react_loop.py::BoundedReActLoop.run()` 每步输出 `react_step`。
-   - 收敛时输出 `react_converged`，包含 `reason`、`steps`、`tool_calls`、`fallback_used`。
-   - 工具异常路径输出 `tool_error`，不记录 task_input 原文。
-4. 检索查询改写降级事件收编。
-   - 调整 `MultiQueryRetriever._expand_queries()` 的 `extra` 为 `{"event": ..., "fields": {"degrade_reason": ...}}`。
-   - 不记录完整 query 或扩展 query。
-5. 补/调整测试。
-   - API 请求日志可通过 caplog 或测试 client 捕获事件。
-   - Orchestrator 成功/失败节点事件。
-   - ReAct 成功、工具异常、收敛事件。
-   - Query rewrite failed/empty 事件字段。
+- `app/orchestrator/react_policy.py`
+- `app/orchestrator/react_loop.py`
+- `app/core/reasoning_sink.py`
+- `tests/test_agentic_loop.py`
+- `tests/test_cot_capture.py`
+
+### 实施任务
+
+1. 在 `LLMReActPolicy` 中保留最近一次 decide/reflect 的 `reasoning_text` 和 reasoning 元数据，供 loop 只读读取。
+2. `BoundedReActLoop.__init__()` 接收可选 `settings` / `reasoning_sink` / cot 覆盖参数，默认继承配置；覆盖逻辑使用 `settings.xxx if arg is None else arg`。
+3. 新增私有 helper 判断当前是否允许写正文：
+   - `cot_capture_enabled=True`
+   - `source in cot_capture_sources`
+   - 若 `cot_require_local_env=True`，则 `environment == "local"`
+4. 新增私有 helper `_capture_reasoning_signal(...)`：
+   - 始终输出 `cot_captured` 元数据事件。
+   - 仅允许时写 sink 正文。
+   - 捕获异常并吞掉。
+5. Act 后采集：
+   - policy native CoT（如存在）
+   - `decision.thought`
+6. Reflect 后采集：
+   - reflect native CoT（如存在）
+   - `reflection.reason`
+7. `react_step` 增补 `has_reasoning`、`reasoning_chars` 元数据。
+8. 保持 scratchpad 仍只记录 `thought_len`、`reason_len` 等摘要。
 
 ### 验收标准
 
-- 一次请求的日志可用同一 `request_id` 聚合。
-- Node 上下文退出后不污染后续节点。
-- ReAct 日志只含步骤、工具名、数量、耗时、原因，不含完整输入正文。
-- 检索降级行为保持不变，只增强日志字段。
+- 默认配置只输出元数据，不写正文。
+- local + 开关开启时写脱敏、截断正文。
+- prod + `cot_require_local_env=True` 强制不写正文。
+- 采集失败不影响最终 outcome。
+- 推理正文不进入 scratchpad、task_input、后续 prompt。
+- 原有 ReAct 收敛结果不变。
 
 ### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_log_context.py tests/test_agent_api.py tests/test_orchestrator_engine.py tests/test_agentic_loop.py tests/test_retrieval_tool.py
+conda run -n autoGLM pytest tests/test_cot_capture.py tests/test_agentic_loop.py
 ```
 
-### Checkpoint 4
+### 检查点
 
-关键链路事件通过后，进入总体验收。
+- Checkpoint 4：可以跑通“ReAct 一步 → cot_captured 元数据 → 可选独立 sink 正文”的完整在线观测路径。
 
 ---
 
-## Phase 5 — 总体验收与提交准备
+## Phase 5 — 安全合规与不回灌证明闭环
 
 ### 目标
 
-跑完目标测试、全量测试和编译检查，确认本阶段可以独立提交。
+用测试证明 CoT / thought / reason 正文不会出现在主日志、用户输出、trace、scratchpad 或后续 prompt 中。
 
-### 任务
+### 触达文件
 
-1. 运行目标测试。
-2. 运行相关回归测试。
-3. 运行全量测试。
+- `tests/test_security_compliance.py`
+- `tests/test_agentic_loop.py`
+- `tests/test_cot_capture.py`
+
+### 实施任务
+
+1. 构造包含敏感信息的 reasoning 文本样本。
+2. 断言 reasoning sink 写入文本已脱敏。
+3. 捕获主日志，断言不包含 reasoning 正文。
+4. 捕获 LLM trace，断言不包含 reasoning 正文。
+5. 使用测试 policy / fake client 记录后续 prompt 输入，断言不包含上一步 reasoning 正文。
+6. 断言 scratchpad 不包含 reasoning 正文。
+7. 断言用户侧 outcome 不包含 reasoning 正文。
+
+### 验收标准
+
+- 主 stdout 日志无 CoT / thought / reason 正文。
+- 用户返回无 CoT / reason 正文。
+- trace 无正文。
+- scratchpad 与后续 prompt 无正文。
+- sink 正文脱敏且截断。
+
+### 验证步骤
+
+```bash
+conda run -n autoGLM pytest tests/test_security_compliance.py tests/test_agentic_loop.py tests/test_cot_capture.py
+```
+
+### 检查点
+
+- Checkpoint 5：完成 R9 最重要安全边界证明。
+
+---
+
+## Phase 6 — Eval 离线分析闭环
+
+### 目标
+
+新增 `eval/cot_analysis.py`，支持对 reasoning sink 样本做信号消费检测和 outcome 关联分析。
+
+### 触达文件
+
+- 新增 `eval/cot_analysis.py`
+- 新增或扩展 eval 相关测试文件
+
+### 实施任务
+
+1. 定义读取/标准化 `ReasoningRecord` JSONL 的函数。
+2. 实现信号消费检测：
+   - `next_query_hint` 子串/关键词命中
+   - 预算指令命中
+   - 未选工具命中
+3. 实现 outcome 关联汇总：
+   - source 维度样本数
+   - signal 命中率
+   - sufficient 分布
+   - converged_reason / steps_used 关联摘要
+4. 输出结构化 dict，便于 JSON 或表格展示。
+5. 缺失字段、空文本、未知 source 安全兜底。
+6. 测试使用注入样本，不依赖真实模型。
+
+### 验收标准
+
+- 能正确识别注入样本中的 hint / 预算 / 未选工具引用。
+- 能输出包含命中率与 outcome 关联字段的结构化结果。
+- 不修改 prompt，不进入在线路径。
+
+### 验证步骤
+
+```bash
+conda run -n autoGLM pytest tests/test_cot_capture.py
+conda run -n autoGLM python -m compileall eval
+```
+
+如新增专门测试文件，则运行：
+
+```bash
+conda run -n autoGLM pytest tests/test_cot_analysis.py
+```
+
+### 检查点
+
+- Checkpoint 6：离线分析可独立运行，且不会影响在线链路。
+
+---
+
+## Phase 7 — 全量验证与分阶段提交
+
+### 目标
+
+完成目标测试、全量测试和编译检查，并按项目规范分小步提交。
+
+### 实施任务
+
+1. 运行 reasoning 目标测试。
+2. 运行配置、ReAct、安全合规测试。
+3. 运行全量 pytest。
 4. 运行 compileall。
-5. 检查 git diff，确认只包含本需求相关文件。
-6. 如实现阶段形成可独立验证改动，按项目规范分阶段 commit。
+5. 检查 git diff，确保无无关改动、无密钥、无临时产物。
+6. 按阶段提交，不 push。
 
 ### 验收标准
 
-- 目标测试通过。
-- 全量测试通过。
-- 编译检查通过。
-- 默认测试无真实 LLM / 网络调用。
-- `environment=local` + `log_format=auto` 默认 pretty。
-- 非 local + `log_format=auto` 默认 JSON Lines。
-- 日志不输出密钥、完整 query、prompt、检索正文或原始 LLM 输入输出。
+- 所有目标测试通过。
+- 全量 pytest 通过。
+- compileall 通过。
+- 每个 commit 都是可独立验证的小功能。
 
 ### 验证步骤
 
 ```bash
-conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_log_context.py tests/test_security_compliance.py
+conda run -n autoGLM pytest tests/test_reasoning_sink.py tests/test_cot_capture.py
+conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_agentic_loop.py tests/test_security_compliance.py
 conda run -n autoGLM pytest
-conda run -n autoGLM python -m compileall app tests scripts
+conda run -n autoGLM python -m compileall app tests scripts eval
 ```
 
-### Checkpoint 5
+### 检查点
 
-提交前请用户确认是否需要：
-
-- 接入外部日志系统或 OTel。
-- 将日志写入文件。
-- 对 `llm_call` 真正开启采样丢弃。
-- 运行真实 LLM / API smoke test。
+- Checkpoint 7：进入最终 review / commit 阶段。
 
 ---
 
-## 风险与控制
+## 风险与缓解
 
-- **日志泄露敏感信息**：只记录规模、耗时、数量、原因、错误码；message 和 fields 双重脱敏截断。
-- **上下文串线**：`bind_context()` 必须配套 `reset_context()`，Node 和请求入口使用 try/finally。
-- **formatter 破坏业务**：formatter/filter/sink 内部捕获异常并降级，不向外抛。
-- **测试输出格式脆弱**：json 测试断言字段，pretty 测试只断言关键片段和字段，不依赖完整字符串。
-- **过度改造风险**：不引入外部依赖、不新增日志后端、不改变业务算法。
-- **日志量增长**：本轮不做采样丢弃，只保留配置占位；如需采样另行确认。
+| 风险 | 缓解 |
+| --- | --- |
+| CoT 正文泄漏到主日志或 prompt | 主日志字段白名单化元数据；测试 grep 正文；scratchpad 只存长度 |
+| `LLMReActPolicy` 难以把 reasoning 传回 loop | 优先使用私有 last-reasoning 属性，避免扩大 dataclass 契约 |
+| trace 字段扩展影响下游 | 仅新增可选无正文字段；实现前人工确认 |
+| sink 写入失败影响主流程 | sink 和采集 helper 全部吞掉异常 |
+| prod 误采集正文 | `cot_require_local_env=True` 默认强制 local gate；测试覆盖 prod 场景 |
+| eval 被误用于在线控制 | eval 模块不被在线代码 import；计划和测试明确不回灌 |
 
-## 文件改动清单
+---
 
-计划中的实现阶段会涉及：
+## 人工 review 清单
 
-- `app/core/config.py`：新增日志配置、环境变量读取、public dict。
-- `app/core/security.py`：扩展脱敏模式和截断能力。
-- `app/core/log_context.py`：新增上下文管理与 logging filter。
-- `app/core/logging.py`：扩展 JSON formatter、新增 pretty formatter、结构化字段清洗和平铺。
-- `app/tools/llm.py`：新增 `LoggingLLMTraceSink`。
-- `app/api/routes.py`：请求生命周期上下文和事件。
-- `app/orchestrator/engine.py`：Node 生命周期上下文和事件。
-- `app/orchestrator/react_loop.py`：ReAct step/converged/tool_error 事件。
-- `app/tools/retrieval.py`：查询改写降级事件字段规范化。
-- `tests/test_core_config_logging.py`：日志配置和 formatter 测试。
-- `tests/test_log_context.py`：新增上下文、双模式、LLM sink 测试。
-- `tests/test_security_compliance.py`：脱敏和截断测试。
-- 相关现有 API / orchestrator / react / retrieval 测试：补事件断言或更新格式断言。
-
-不计划修改：
-
-- `requirements.txt`。
-- `LLMResponse.trace` 字段契约。
-- 检索、ReAct、QA、编排的业务语义。
-- embedding / Qdrant / rerank 主逻辑。
-- 日志存储、队列、远程上报配置。
+- [ ] 是否确认允许 `LLMResponse.trace` 新增 `reasoning_chars` / `has_reasoning`？
+- [ ] 是否接受 `LLMReActPolicy` 用私有 last-reasoning 属性向 loop 暴露原生 CoT？
+- [ ] 是否确认 `cot_sink_path=logs/reasoning.jsonl` 作为默认本地路径？
+- [ ] 是否确认 eval 输出先做结构化 dict / JSON，不做 CLI 或可视化？
+- [ ] 是否确认本轮不新增第三方依赖、不引入异步 sink？

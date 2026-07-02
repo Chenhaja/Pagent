@@ -1,200 +1,226 @@
-# 日志与可观测性 Todo
+# R9 CoT 推理链采集与分析 Todo
 
 ## Phase 0 — 口径确认与基线锁定
 
-- [x] 确认本需求只做日志与可观测性增强。
-  - 验收：计划不包含检索、ReAct、QA、编排业务语义重写。
-  - 验证：review `tasks/plan.md`。
-- [x] 确认不引入第三方观测依赖。
-  - 验收：实现阶段仅使用标准库 `logging` / `contextvars` 和现有项目能力。
-  - 验证：review diff / `requirements.txt` 不变。
-- [x] 确认不新增日志存储、队列或远程上报。
-  - 验收：日志仍输出到现有 stream handler。
-  - 验证：review `app/core/logging.py`。
-- [x] 确认 `log_sample_llm_call` 本轮只占位。
-  - 验收：配置存在但不丢弃日志。
-  - 验证：配置测试 / review。
-- [x] 确认默认测试不触网、不调用真实 LLM。
-  - 验收：新增测试使用 fake/stub/caplog。
+- [ ] 确认允许扩展 `LLMResponse.trace`。
+  - 验收：仅新增可选无正文字段 `reasoning_chars`、`has_reasoning`。
+  - 验证：人工 review `tasks/plan.md` 的 Checkpoint 0。
+- [ ] 确认本轮只做观测/评估用途。
+  - 验收：不改变 ReAct 决策、反思、检索、收敛业务行为。
+  - 验证：review 计划和后续 diff。
+- [ ] 确认默认不采集推理正文。
+  - 验收：`cot_capture_enabled=False` 为默认值。
+  - 验证：配置测试。
+- [ ] 确认生产环境强制不采集正文。
+  - 验收：`cot_require_local_env=True` 且 `environment=prod` 时 sink 不写正文。
+  - 验证：CoT 采集测试。
+- [ ] 确认不新增第三方依赖。
+  - 验收：`requirements.txt` 不变。
+  - 验证：review diff。
+- [ ] 确认默认测试不触网、不调用真实 LLM。
+  - 验收：新增测试使用 fake/stub/caplog/tmp_path。
   - 验证：review 测试实现。
 
-## Phase 1 — 配置与脱敏基础闭环
+## Phase 1 — Reasoning sink 安全写入闭环
 
-- [x] 新增 `Settings.log_format`。
-  - 验收：默认 `auto`；`PAGENT_LOG_FORMAT` 可覆盖为 `pretty` / `json`。
+- [ ] 新增 `app/core/reasoning_sink.py`。
+  - 验收：模块可 import。
+  - 验证：`conda run -n autoGLM pytest tests/test_reasoning_sink.py`
+- [ ] 定义 `ReasoningRecord`。
+  - 验收：字段包含 `request_id`、`node_name`、`task_type`、`step_index`、`source`、`text`、`outcome`。
+  - 验证：reasoning sink 单测。
+- [ ] 定义 `ReasoningTraceSink` 协议。
+  - 验收：包含 `write(record: ReasoningRecord) -> None`。
+  - 验证：类型/单测 import。
+- [ ] 实现 `NoopReasoningSink`。
+  - 验收：`write()` 不产生文件、不抛异常。
+  - 验证：单测。
+- [ ] 实现 `JsonlReasoningSink`。
+  - 验收：写入合法 JSON Lines；不写 stdout。
+  - 验证：tmp_path 单测读取 JSONL。
+- [ ] 写入前脱敏正文。
+  - 验收：`sk-...`、`Bearer ...`、`password=...`、`token=...`、`api_key=...` 被替换。
+  - 验证：单测。
+- [ ] 写入前截断正文。
+  - 验收：超过 `cot_max_chars` 的正文带稳定截断标记。
+  - 验证：单测。
+- [ ] sink 异常吞掉。
+  - 验收：文件写入失败或序列化失败不影响调用方。
+  - 验证：注入异常 sink / monkeypatch 单测。
+
+## Phase 2 — CoT 配置控制闭环
+
+- [ ] `Settings` 新增 `cot_capture_enabled`。
+  - 验收：默认 `False`；`PAGENT_COT_CAPTURE_ENABLED=true/false` 可读取。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [x] 新增 `Settings.log_include_context`。
-  - 验收：默认 `True`；`PAGENT_LOG_INCLUDE_CONTEXT=false` 可读取为 `False`。
+- [ ] `Settings` 新增 `cot_capture_sources`。
+  - 验收：默认包含 `native_cot`、`thought`、`reason`；env 逗号分隔可覆盖。
   - 验证：配置测试。
-- [x] 新增 `Settings.log_max_field_length`。
-  - 验收：默认 `205`；`PAGENT_LOG_MAX_FIELD_LENGTH` 可读取为整数。
+- [ ] `Settings` 新增 `cot_max_chars`。
+  - 验收：默认 `1200`；`PAGENT_COT_MAX_CHARS` 可读取为整数。
   - 验证：配置测试。
-- [x] 新增 `Settings.log_sample_llm_call`。
-  - 验收：默认 `False`；`PAGENT_LOG_SAMPLE_LLM_CALL=true` 可读取为 `True`。
+- [ ] `Settings` 新增 `cot_sink_path`。
+  - 验收：默认 `logs/reasoning.jsonl`；`PAGENT_COT_SINK_PATH` 可覆盖。
   - 验证：配置测试。
-- [x] 更新 `Settings` docstring。
-  - 验收：新增日志配置均说明用途。
+- [ ] `Settings` 新增 `cot_require_local_env`。
+  - 验收：默认 `True`；`PAGENT_COT_REQUIRE_LOCAL_ENV=false` 可读取。
+  - 验证：配置测试。
+- [ ] 更新 `Settings` docstring。
+  - 验收：新增 `cot_*` 配置均有中文说明。
   - 验证：review。
-- [x] 更新 `get_settings()` 环境变量读取。
-  - 验收：四个 `PAGENT_LOG_*` 环境变量生效。
+- [ ] 更新 `get_settings()`。
+  - 验收：五个 `PAGENT_COT_*` 环境变量生效。
   - 验证：配置测试。
-- [x] 更新 `to_public_dict()`。
-  - 验收：新增日志配置进入 public dict；不包含 key/token/secret/password。
+- [ ] 更新 `to_public_dict()`。
+  - 验收：包含新增 `cot_*` 非敏感配置；不包含 key/token/secret/password。
   - 验证：配置测试。
-- [x] 扩展 `redact_sensitive_text()` 脱敏模式。
-  - 验收：`sk-...`、`Bearer ...`、`password=...`、`token=...`、`api_key=...` 均被脱敏。
+
+## Phase 3 — LLM reasoning 提取与 trace 元数据闭环
+
+- [ ] `LLMResponse` 新增 `reasoning_text`。
+  - 验收：默认 `None`，已有调用方不传该字段仍兼容。
+  - 验证：`conda run -n autoGLM pytest tests/test_llm_tool.py tests/test_cot_capture.py`
+- [ ] `FakeLLMClient` 支持注入 `reasoning_text`。
+  - 验收：测试可构造带原生 reasoning 的 fake response。
+  - 验证：CoT 采集测试。
+- [ ] Fake trace 增加 reasoning 元数据。
+  - 验收：`has_reasoning`、`reasoning_chars` 正确；不含正文。
+  - 验证：CoT 采集测试。
+- [ ] `OpenAICompatibleClient` 提取 `message.reasoning_content`。
+  - 验收：响应样本含该字段时进入 `LLMResponse.reasoning_text`。
+  - 验证：LLM tool / CoT 测试。
+- [ ] `OpenAICompatibleClient` 提取 `message.reasoning`。
+  - 验收：响应样本含该字段时进入 `LLMResponse.reasoning_text`。
+  - 验证：LLM tool / CoT 测试。
+- [ ] 无 reasoning 字段时安全退回。
+  - 验收：`reasoning_text is None` 且不报错。
+  - 验证：LLM tool / CoT 测试。
+- [ ] 成功响应 trace 增加 reasoning 元数据。
+  - 验收：`has_reasoning` / `reasoning_chars` 正确，不含正文。
+  - 验证：CoT 测试。
+- [ ] 错误响应 trace 增加 reasoning 元数据默认值。
+  - 验收：错误路径也包含 `has_reasoning=False`、`reasoning_chars=0`。
+  - 验证：LLM tool 测试。
+- [ ] `llm_call` 日志允许输出 reasoning 元数据。
+  - 验收：`LoggingLLMTraceSink` 不丢弃 `has_reasoning`、`reasoning_chars`，仍丢弃正文类字段。
+  - 验证：日志相关测试。
+
+## Phase 4 — ReAct 旁路采集闭环
+
+- [ ] 在 `LLMReActPolicy.decide()` 保存最近 decision reasoning。
+  - 验收：loop 可只读获取 native CoT；不改变 `ReActDecision` 字段。
+  - 验证：CoT 采集测试。
+- [ ] 在 `LLMReActPolicy.reflect()` 保存最近 reflect reasoning。
+  - 验收：loop 可只读获取 native CoT；不改变 `ReflectResult` 字段。
+  - 验证：CoT 采集测试。
+- [ ] `BoundedReActLoop` 支持注入 settings / reasoning sink。
+  - 验收：默认继承全局配置；测试可注入 Noop/InMemory/Jsonl sink。
+  - 验证：agentic loop / CoT 测试。
+- [ ] 实现正文采集允许判断 helper。
+  - 验收：同时满足 enabled、source 命中、local gate 才写正文。
+  - 验证：CoT 采集测试。
+- [ ] 实现 `_capture_reasoning_signal(...)`。
+  - 验收：始终输出 `cot_captured` 元数据；允许时写 sink；异常吞掉。
+  - 验证：CoT 采集测试。
+- [ ] Act 后采集 `native_cot`。
+  - 验收：LLM decision reasoning 存在时记录 source=`native_cot`。
+  - 验证：CoT 采集测试。
+- [ ] Act 后采集 `thought`。
+  - 验收：`ReActDecision.thought` 记录元数据；允许时写 sink。
+  - 验证：CoT 采集测试。
+- [ ] Reflect 后采集 `native_cot`。
+  - 验收：LLM reflect reasoning 存在时记录 source=`native_cot`。
+  - 验证：CoT 采集测试。
+- [ ] Reflect 后采集 `reason`。
+  - 验收：`ReflectResult.reason` 记录元数据；允许时写 sink。
+  - 验证：CoT 采集测试。
+- [ ] `react_step` 增补 reasoning 元数据。
+  - 验收：包含 `has_reasoning`、`reasoning_chars`，不含正文。
+  - 验证：agentic loop 测试。
+- [ ] 默认配置不写正文。
+  - 验收：`cot_capture_enabled=False` 时无 reasoning JSONL。
+  - 验证：CoT 采集测试。
+- [ ] local 开关开启写正文。
+  - 验收：`environment=local` 且 enabled 时写入脱敏截断正文。
+  - 验证：CoT 采集测试。
+- [ ] prod 强制不写正文。
+  - 验收：`environment=prod` 且 `cot_require_local_env=True` 时 captured=false。
+  - 验证：CoT 采集测试。
+- [ ] sink 异常不影响 ReAct 结果。
+  - 验收：异常 sink 下 outcome 与正常路径一致。
+  - 验证：agentic loop 测试。
+
+## Phase 5 — 安全合规与不回灌证明闭环
+
+- [ ] 主日志不含推理正文。
+  - 验收：caplog/stdout 中不出现注入的 CoT / thought / reason 正文。
   - 验证：`conda run -n autoGLM pytest tests/test_security_compliance.py`
-- [x] 保持脱敏后截断能力。
-  - 验收：超过 `max_length` 的文本追加稳定截断标记。
+- [ ] 用户返回不含推理正文。
+  - 验收：`ReActOutcome` / API 可见返回不出现 CoT / reason 正文。
+  - 验证：安全或 agentic 测试。
+- [ ] `LLMResponse.trace` 不含推理正文。
+  - 验收：trace 只有 `has_reasoning`、`reasoning_chars`。
+  - 验证：CoT 采集测试。
+- [ ] scratchpad 不含推理正文。
+  - 验收：scratchpad 仍只保存 thought_len / observation 摘要等字段。
+  - 验证：agentic loop 测试。
+- [ ] 后续 prompt 不含上一步推理正文。
+  - 验收：记录后续 `decide` / `reflect` 输入，grep 不到 reasoning 正文。
+  - 验证：agentic loop 测试。
+- [ ] reasoning sink 正文已脱敏。
+  - 验收：敏感样本写入后只出现 `[REDACTED]` 或等价占位。
+  - 验证：安全测试。
+- [ ] reasoning sink 正文已截断。
+  - 验收：长度不超过 `cot_max_chars` 加稳定截断标记开销。
   - 验证：安全测试。
 
-## Phase 2 — 上下文与双模式 formatter 闭环
+## Phase 6 — Eval 离线分析闭环
 
-- [x] 新增 `app/core/log_context.py`。
-  - 验收：模块可 import；公共函数/类有中文 Google 风格 docstring。
-  - 验证：`conda run -n autoGLM pytest tests/test_log_context.py`
-- [x] 定义上下文变量。
-  - 验收：包含 `request_id`、`session_id`、`trace_id`、`node_name`、`task_type`。
-  - 验证：上下文测试。
-- [x] 实现 `new_request_id()`。
-  - 验收：返回非空短 ID，连续调用不相同。
-  - 验证：单测。
-- [x] 实现 `bind_context()` / `reset_context()`。
-  - 验收：可绑定多个字段并按 token 回滚。
-  - 验证：单测。
-- [x] 实现 `current_context()`。
-  - 验收：返回当前上下文字段快照；未绑定时字段为 `None`。
-  - 验证：单测。
-- [x] 实现 `ContextFilter`。
-  - 验收：向 `LogRecord` 注入上下文字段；未绑定不抛异常。
-  - 验证：单测。
-- [x] 扩展 `JsonLineFormatter` 支持结构化 fields。
-  - 验收：`extra={"event": ..., "fields": {...}}` 被平铺到 JSON payload。
-  - 验证：formatter 测试。
-- [x] 扩展 `JsonLineFormatter` 支持上下文字段。
-  - 验收：JSON 包含 request/session/trace/node/task 字段或按配置省略。
-  - 验证：上下文日志测试。
-- [x] 新增 `PrettyFormatter`。
-  - 验收：输出人类可读单行，包含 event、message、request_id 前缀、node_name 和关键 fields。
-  - 验证：formatter 测试。
-- [x] 实现 formatter 选择逻辑。
-  - 验收：`json` 固定 JSON；`pretty` 固定 pretty；`auto + local` 为 pretty；`auto + 非 local` 为 JSON。
-  - 验证：formatter 测试。
-- [x] 在 `configure_logging()` 挂载 `ContextFilter`。
-  - 验收：`log_include_context=True` 时挂载；为 false 时不注入但日志不崩溃。
-  - 验证：上下文测试。
-- [x] 新增或实现结构化事件 helper。
-  - 验收：可统一输出 `event/message/fields`，不强制业务方字符串拼接复杂对象。
-  - 验证：formatter/helper 测试。
-- [x] 对 message 与 fields 应用脱敏截断。
-  - 验收：结构化字段中敏感值被脱敏、长字段被截断。
-  - 验证：安全与 formatter 测试。
-- [x] 确认 formatter/filter 异常不影响业务。
-  - 验收：异常场景降级输出或吞掉，不向业务抛出。
-  - 验证：单测 / review。
+- [ ] 新增 `eval/cot_analysis.py`。
+  - 验收：模块可 import；不被在线路径依赖。
+  - 验证：`conda run -n autoGLM python -m compileall eval`
+- [ ] 实现 reasoning JSONL 读取/标准化。
+  - 验收：能处理 ReasoningRecord JSONL 和缺失字段样本。
+  - 验证：eval 测试。
+- [ ] 实现 `next_query_hint` 命中检测。
+  - 验收：注入样本正确判定引用/未引用。
+  - 验证：eval 测试。
+- [ ] 实现预算指令命中检测。
+  - 验收：注入样本正确判定引用/未引用。
+  - 验证：eval 测试。
+- [ ] 实现未选工具命中检测。
+  - 验收：注入样本正确识别被提到但未选中的工具。
+  - 验证：eval 测试。
+- [ ] 实现 outcome 关联汇总。
+  - 验收：输出 source 维度样本数、命中率、sufficient 分布、steps/reason 摘要。
+  - 验证：eval 测试。
+- [ ] 输出结构化报告 dict。
+  - 验收：结果可 JSON 序列化；不自动改 prompt。
+  - 验证：eval 测试。
+- [ ] 缺失字段安全兜底。
+  - 验收：空文本、未知 source、缺 outcome 不崩溃。
+  - 验证：eval 测试。
 
-## Phase 3 — LLM trace 日志闭环
+## Phase 7 — 全量验证与分阶段提交
 
-- [x] 新增 `LoggingLLMTraceSink`。
-  - 验收：实现 `LLMTraceSink.write(trace)` 协议；公共类有中文 docstring。
-  - 验证：`conda run -n autoGLM pytest tests/test_log_context.py tests/test_llm_tool.py`
-- [x] 输出 `llm_call` 事件。
-  - 验收：trace 写入日志时 `event=llm_call`。
-  - 验证：caplog / formatter 测试。
-- [x] 实现 fallback 日志级别升级。
-  - 验收：`fallback_used=False` 为 INFO；`fallback_used=True` 为 WARNING。
-  - 验证：单测。
-- [x] 保留 trace 字段契约。
-  - 验收：不修改 `LLMResponse.trace` 现有字段结构。
-  - 验证：既有 `test_llm_tool.py` 继续通过。
-- [x] 确认 trace 不含敏感正文。
-  - 验收：不输出 `api_key`、`raw_input`、完整 prompt、完整 response。
-  - 验证：单测 / review。
-- [x] 确认 sink 异常不影响 LLM 调用。
-  - 验收：logger 抛错或格式化失败时 `write()` 不向外抛。
-  - 验证：单测。
-- [x] 明确默认接入策略。
-  - 验收：如默认接入真实 client，仍不触网；如仅提供 sink，也在计划和测试中明确。
-  - 验证：review / 测试。
-
-## Phase 4 — 运行链路事件埋点闭环
-
-- [x] API 请求入口绑定 `request_id`。
-  - 验收：每个 API 请求有 request_id；请求结束后上下文回滚。
-  - 验证：API 日志测试。
-- [x] `/agent` 绑定 `session_id`。
-  - 验收：有 `request.session_id` 时日志带 session_id；不记录 raw_input。
-  - 验证：API 测试。
-- [x] 输出 `request_start` / `request_end`。
-  - 验收：包含 `duration_ms`、`outcome`；异常路径保留现有 HTTPException 行为。
-  - 验证：API 测试。
-- [x] `Orchestrator.run()` 绑定 `node_name`。
-  - 验收：每个 node 执行期间日志带 node_name，退出后回滚。
-  - 验证：orchestrator 测试。
-- [x] 输出 `node_start` / `node_end`。
-  - 验收：包含 `duration_ms`、`outcome`、`error_count`、`trace_event_count` 等统计。
-  - 验证：orchestrator 测试。
-- [x] 输出 `node_error`。
-  - 验收：未知 node、非法 next_node、loop limit、节点非 success 或异常路径有错误事件。
-  - 验证：orchestrator 测试。
-- [x] ReAct 每步输出 `react_step`。
-  - 验收：包含 `step`、`tool`、`duration_ms` 或可获得的步骤统计；不含 task_input 原文。
-  - 验证：`conda run -n autoGLM pytest tests/test_agentic_loop.py`
-- [x] ReAct 收敛输出 `react_converged`。
-  - 验收：包含 `reason`、`steps`、`tool_calls`、`fallback_used`。
-  - 验证：ReAct 测试。
-- [x] 工具异常输出 `tool_error`。
-  - 验收：异常路径含工具名、错误码/原因，不含输入正文。
-  - 验证：ReAct 工具异常测试。
-- [x] 收编 `query_rewrite_failed` 字段。
-  - 验收：异常降级日志使用 `fields.degrade_reason`，不记录完整 query。
-  - 验证：`conda run -n autoGLM pytest tests/test_retrieval_tool.py`
-- [x] 收编 `query_rewrite_empty` 字段。
-  - 验收：空结果降级日志使用 `fields.degrade_reason`，不记录完整 query。
-  - 验证：检索测试。
-- [x] 确认业务结果不变。
-  - 验收：既有 API、orchestrator、ReAct、retrieval 测试继续通过。
-  - 验证：相关测试 + 全量测试。
-
-## Phase 5 — 总体验收与提交准备
-
-- [x] 运行日志目标测试。
-  - 命令：`conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_log_context.py tests/test_security_compliance.py`
-  - 验收：全部通过。
-- [x] 运行关键链路回归测试。
-  - 命令：`conda run -n autoGLM pytest tests/test_agent_api.py tests/test_orchestrator_engine.py tests/test_agentic_loop.py tests/test_retrieval_tool.py tests/test_llm_tool.py`
-  - 验收：全部通过。
-- [x] 运行全量测试。
-  - 命令：`conda run -n autoGLM pytest`
-  - 验收：全部通过。
-- [x] 运行编译检查。
-  - 命令：`conda run -n autoGLM python -m compileall app tests scripts`
-  - 验收：无语法错误。
-- [x] 检查本地 pretty 默认行为。
-  - 验收：`environment=local` 且 `log_format=auto` 输出 pretty。
-  - 验证：formatter 测试。
-- [x] 检查生产 JSON 默认行为。
-  - 验收：非 local 且 `log_format=auto` 输出 JSON Lines。
-  - 验证：formatter 测试。
-- [x] 检查日志脱敏。
-  - 验收：日志不含密钥、完整 query、prompt、检索正文、原始 LLM 输入输出。
-  - 验证：安全测试 / review。
-- [x] 检查 diff 范围。
-  - 验收：只包含本需求相关文件；无密钥、临时文件、调试代码。
+- [ ] 运行 reasoning 目标测试。
+  - 验收：reasoning sink 与 CoT 采集测试通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_reasoning_sink.py tests/test_cot_capture.py`
+- [ ] 运行配置、ReAct、安全合规测试。
+  - 验收：相关目标测试通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_agentic_loop.py tests/test_security_compliance.py`
+- [ ] 运行 eval 测试。
+  - 验收：如新增 `tests/test_cot_analysis.py`，该测试通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_cot_analysis.py`
+- [ ] 运行全量 pytest。
+  - 验收：全量测试通过。
+  - 验证：`conda run -n autoGLM pytest`
+- [ ] 运行 compileall。
+  - 验收：app/tests/scripts/eval 编译通过。
+  - 验证：`conda run -n autoGLM python -m compileall app tests scripts eval`
+- [ ] 检查无无关改动。
+  - 验收：git diff 仅包含本轮相关文件；无密钥、临时文件、调试代码。
   - 验证：`git status` / `git diff`。
-- [x] 阶段性提交。
-  - 验收：目标测试和 compileall 通过后，按 `<type>(scope): <summary>` 中文提交规范提交。
-  - 验证：`git status` clean。
-
-## 需用户另行确认的可选项
-
-- [x] 是否引入 OpenTelemetry / Prometheus / Jaeger / structlog。
-  - 默认：不引入。
-- [x] 是否把日志写入文件、队列或远程服务。
-  - 默认：不写入，仅沿用 stream handler。
-- [x] 是否真正实现 `llm_call` 采样丢弃。
-  - 默认：不实现，只保留配置占位。
-- [x] 是否记录完整 query / prompt / 检索正文 / LLM 输入输出用于排障。
-  - 默认：不记录。
-- [x] 是否运行真实 LLM 或真实 API smoke test。
-  - 默认：不运行。
+- [ ] 分阶段提交。
+  - 验收：每个 commit 是可独立验证的小功能；不执行 `git push`。
+  - 验证：git log / status。

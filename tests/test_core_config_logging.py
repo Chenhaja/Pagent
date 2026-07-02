@@ -15,6 +15,11 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.log_include_context is True
     assert settings.log_max_field_length == 205
     assert settings.log_sample_llm_call is False
+    assert settings.cot_capture_enabled is False
+    assert settings.cot_capture_sources == ["native_cot", "thought", "reason"]
+    assert settings.cot_max_chars == 1200
+    assert settings.cot_sink_path == "logs/reasoning.jsonl"
+    assert settings.cot_require_local_env is True
     assert settings.llm_api_key is None
     assert settings.llm_base_url is None
     assert settings.llm_model == ""
@@ -114,6 +119,11 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_LOG_INCLUDE_CONTEXT", "false")
     monkeypatch.setenv("PAGENT_LOG_MAX_FIELD_LENGTH", "128")
     monkeypatch.setenv("PAGENT_LOG_SAMPLE_LLM_CALL", "true")
+    monkeypatch.setenv("PAGENT_COT_CAPTURE_ENABLED", "true")
+    monkeypatch.setenv("PAGENT_COT_CAPTURE_SOURCES", "native_cot,reason")
+    monkeypatch.setenv("PAGENT_COT_MAX_CHARS", "640")
+    monkeypatch.setenv("PAGENT_COT_SINK_PATH", "logs/custom_reasoning.jsonl")
+    monkeypatch.setenv("PAGENT_COT_REQUIRE_LOCAL_ENV", "false")
     monkeypatch.setenv("PAGENT_LLM_TEMPERATURE", "0.3")
     monkeypatch.setenv("PAGENT_LLM_MAX_TOKENS", "1024")
     monkeypatch.setenv("PAGENT_LLM_TIMEOUT", "12.5")
@@ -186,6 +196,11 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.log_include_context is False
     assert settings.log_max_field_length == 128
     assert settings.log_sample_llm_call is True
+    assert settings.cot_capture_enabled is True
+    assert settings.cot_capture_sources == ["native_cot", "reason"]
+    assert settings.cot_max_chars == 640
+    assert settings.cot_sink_path == "logs/custom_reasoning.jsonl"
+    assert settings.cot_require_local_env is False
     assert settings.llm_temperature == 0.3
     assert settings.llm_max_tokens == 1024
     assert settings.llm_timeout == 12.5
@@ -273,6 +288,11 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["log_include_context"] == "True"
     assert public_values["log_max_field_length"] == "205"
     assert public_values["log_sample_llm_call"] == "False"
+    assert public_values["cot_capture_enabled"] == "False"
+    assert public_values["cot_capture_sources"] == "native_cot,thought,reason"
+    assert public_values["cot_max_chars"] == "1200"
+    assert public_values["cot_sink_path"] == "logs/reasoning.jsonl"
+    assert public_values["cot_require_local_env"] == "True"
     assert public_values["memory_enabled"] == "True"
     assert public_values["memory_db_path"] == "./pagent_memory.db"
     assert public_values["memory_history_window"] == "6"

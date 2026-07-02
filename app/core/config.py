@@ -16,6 +16,11 @@ class Settings(BaseModel):
         log_include_context: 是否向日志自动注入请求和节点上下文。
         log_max_field_length: 日志消息和结构化字段最大保留长度。
         log_sample_llm_call: 是否采样 LLM 调用日志;本轮仅公开配置。
+        cot_capture_enabled: 是否采集推理正文到独立 reasoning sink。
+        cot_capture_sources: 允许采集正文的推理信号来源。
+        cot_max_chars: 单条推理正文最大保留字符数。
+        cot_sink_path: 独立 reasoning sink 文件路径。
+        cot_require_local_env: 是否仅允许 local 环境采集推理正文。
         llm_base_url: OpenAI 兼容 LLM 端点地址,默认不配置。
         llm_model: 默认 LLM 模型名称。
         llm_api_key: 可选 LLM API Key,默认不配置。
@@ -94,6 +99,11 @@ class Settings(BaseModel):
     log_include_context: bool = True
     log_max_field_length: int = 205
     log_sample_llm_call: bool = False
+    cot_capture_enabled: bool = False
+    cot_capture_sources: list[str] = Field(default_factory=lambda: ["native_cot", "thought", "reason"])
+    cot_max_chars: int = 1200
+    cot_sink_path: str = "logs/reasoning.jsonl"
+    cot_require_local_env: bool = True
     llm_base_url: str | None = None
     llm_model: str = ""
     llm_api_key: str | None = Field(default=None, exclude=True)
@@ -175,6 +185,11 @@ class Settings(BaseModel):
             "log_include_context": str(self.log_include_context),
             "log_max_field_length": str(self.log_max_field_length),
             "log_sample_llm_call": str(self.log_sample_llm_call),
+            "cot_capture_enabled": str(self.cot_capture_enabled),
+            "cot_capture_sources": ",".join(self.cot_capture_sources),
+            "cot_max_chars": str(self.cot_max_chars),
+            "cot_sink_path": self.cot_sink_path,
+            "cot_require_local_env": str(self.cot_require_local_env),
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
             "llm_temperature": str(self.llm_temperature),
@@ -287,6 +302,14 @@ def _get_optional_int_env(name: str) -> int | None:
     return int(value)
 
 
+def _get_list_env(name: str, default: list[str]) -> list[str]:
+    """读取逗号分隔的字符串列表环境变量。"""
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return list(default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 @lru_cache
 def get_settings() -> Settings:
     """获取应用配置单例。
@@ -305,6 +328,11 @@ def get_settings() -> Settings:
         log_include_context=_get_bool_env("PAGENT_LOG_INCLUDE_CONTEXT", True),
         log_max_field_length=int(os.getenv("PAGENT_LOG_MAX_FIELD_LENGTH", "205")),
         log_sample_llm_call=_get_bool_env("PAGENT_LOG_SAMPLE_LLM_CALL", False),
+        cot_capture_enabled=_get_bool_env("PAGENT_COT_CAPTURE_ENABLED", False),
+        cot_capture_sources=_get_list_env("PAGENT_COT_CAPTURE_SOURCES", ["native_cot", "thought", "reason"]),
+        cot_max_chars=int(os.getenv("PAGENT_COT_MAX_CHARS", "1200")),
+        cot_sink_path=os.getenv("PAGENT_COT_SINK_PATH", "logs/reasoning.jsonl"),
+        cot_require_local_env=_get_bool_env("PAGENT_COT_REQUIRE_LOCAL_ENV", True),
         llm_base_url=os.getenv("PAGENT_LLM_BASE_URL"),
         llm_model=os.getenv("PAGENT_LLM_MODEL", ""),
         llm_api_key=os.getenv("PAGENT_LLM_API_KEY"),

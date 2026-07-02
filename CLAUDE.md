@@ -79,3 +79,4 @@
 ## agent-skills
 
 在使用agent-skills:plan时，只需要生成plan.md和todo.md文档，不需要执行到生成代码这一步。
+ /build auto 前先做plan.md和todo.md要求的需求对齐，不直接开工。

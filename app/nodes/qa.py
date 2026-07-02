@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import log_event
 from app.models.schemas import NodeResult, SkillContext, WorkflowState
 from app.orchestrator.node_base import Node
@@ -18,6 +18,20 @@ from app.tools.retrieval import Retriever, build_retriever
 
 INSUFFICIENT_EVIDENCE_WARNING = "依据可能不足，建议补充材料或核对官方来源"
 logger = logging.getLogger(__name__)
+
+
+def _react_llm_settings(settings: Settings) -> Settings:
+    """为 ReAct LLM 调用构造局部配置。"""
+    if not settings.react_thinking_enabled:
+        return settings
+    return settings.model_copy(
+        update={
+            "llm_reasoning_enabled": True,
+            "llm_reasoning_effort": settings.llm_reasoning_effort,
+            "llm_max_tokens":4096,
+            "llm_timeout": 180
+            }
+        )
 
 
 class QANode(Node):
@@ -85,7 +99,7 @@ class QANode(Node):
         model = self.settings.react_policy_model or self.settings.llm_cheap_model or self.settings.llm_model
         reflect_model = self.settings.react_reflect_model or model
         return LLMReActPolicy(
-            llm_client=build_llm_client(self.settings),
+            llm_client=build_llm_client(_react_llm_settings(self.settings)),
             node_name=self.name,
             model=model,
             reflect_model=reflect_model,

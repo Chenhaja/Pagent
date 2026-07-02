@@ -255,30 +255,7 @@ def _result_time_fields(payload: dict[str, Any]) -> dict[str, str | None]:
     """从 payload 提取法规时效字段。"""
     return {key: str(payload[key]) if payload.get(key) is not None else None for key in _TIME_FIELD_KEYS}
 
-
-def _log_retrieval_results(backend: str, retrieval_mode: str, results: list[RetrievalResult]) -> None:
-    """输出检索命中块短预览,用于本地调试。"""
-    for index, result in enumerate(results, start=1):
-        provenance = result.provenance or {}
-        log_event(
-            logger,
-            logging.DEBUG,
-            "retrieval_result",
-            "检索命中块",
-            backend=backend,
-            retrieval_mode=retrieval_mode,
-            rank=index,
-            document_id=provenance.get("document_id"),
-            source=provenance.get("source"),
-            locator=provenance.get("locator"),
-            similarity=result.similarity,
-            score=result.score,
-            content_preview=redact_sensitive_text(result.content, max_length=_RETRIEVAL_PREVIEW_CHARS),
-        )
-
-
 _TIME_FIELD_KEYS = ("law_name", "version", "effective_date", "expiry_date", "status", "source_url", "retrieved_at")
-_RETRIEVAL_PREVIEW_CHARS = 80
 logger = logging.getLogger(__name__)
 
 
@@ -429,8 +406,6 @@ class QdrantRetriever:
             按 Qdrant 相似度排序的检索结果;依赖失败时返回空列表。
         """
         results = self.recall(query, fetch_k or top_k, as_of)[:top_k]
-        retrieval_mode = "hybrid" if self.settings.retrieval_use_hybrid and self.sparse_encoder is not None else "vector"
-        _log_retrieval_results("qdrant", retrieval_mode, results)
         return results
 
     def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:
@@ -488,6 +463,9 @@ class QdrantRetriever:
                     **_result_time_fields(payload),
                 )
             )
+        
+        log_event(logger,logging.INFO,"retrieval_recall",f"{results[:fetch_k]}",backend="qdrant",retrieval_mode="hybrid" if self.settings.retrieval_use_hybrid else "vector",query=query,as_of=as_of,fetch_k=fetch_k,num_results=len(results))
+        
         return results[:fetch_k]
 
 
@@ -518,7 +496,6 @@ class LocalRetrievalTool:
             按命中分数降序排列的检索结果列表。
         """
         results = self.recall(query, fetch_k or top_k, as_of)[:top_k]
-        _log_retrieval_results("local", "keyword", results)
         return results
 
     def recall(self, query: str, fetch_k: int, as_of: str | None = None) -> list[RetrievalResult]:

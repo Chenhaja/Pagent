@@ -12,7 +12,12 @@ MAX_LOG_MESSAGE_LENGTH = DEFAULT_REDACTION_MAX_LENGTH
 _CONTEXT_FIELD_NAMES = ("request_id", "session_id", "trace_id", "node_name", "task_type")
 _PRIORITY_PRETTY_FIELDS = ("duration_ms", "input_chars", "output_chars", "result_count", "degraded", "degrade_reason")
 _DROPPED_FIELD_NAMES = {"api_key", "raw_input", "prompt", "raw_output", "response"}
-
+_NOISY_THIRD_PARTY_LOGGERS = (
+      "httpx",
+      "httpcore",
+      "huggingface_hub",
+      "fastembed",
+)
 
 def sanitize_log_message(message: str, max_length: int = MAX_LOG_MESSAGE_LENGTH) -> str:
     """脱敏并截断日志消息。
@@ -210,6 +215,10 @@ def configure_logging(settings: Settings) -> logging.Logger:
     if settings.log_include_context:
         handler.addFilter(ContextFilter())
     logger.addHandler(handler)
+
+    for logger_name in _NOISY_THIRD_PARTY_LOGGERS:
+          logging.getLogger(logger_name).setLevel(logging.WARNING)
+
     return logger
 
 

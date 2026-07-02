@@ -322,6 +322,8 @@ class OpenAICompatibleClient:
         }
         if output_schema is not None:
             payload["response_format"] = {"type": "json_object"}
+        if self.settings.llm_reasoning_enabled:
+            payload["reasoning_effort"] = self.settings.llm_reasoning_effort or "medium"
 
         try:
             http_request = request.Request(

@@ -20,6 +20,8 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.cot_max_chars == 1200
     assert settings.cot_sink_path == "logs/reasoning.jsonl"
     assert settings.cot_require_local_env is True
+    assert settings.llm_reasoning_enabled is False
+    assert settings.llm_reasoning_effort is None
     assert settings.llm_api_key is None
     assert settings.llm_base_url is None
     assert settings.llm_model == ""
@@ -124,6 +126,8 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_COT_MAX_CHARS", "640")
     monkeypatch.setenv("PAGENT_COT_SINK_PATH", "logs/custom_reasoning.jsonl")
     monkeypatch.setenv("PAGENT_COT_REQUIRE_LOCAL_ENV", "false")
+    monkeypatch.setenv("PAGENT_LLM_REASONING_ENABLED", "true")
+    monkeypatch.setenv("PAGENT_LLM_REASONING_EFFORT", "high")
     monkeypatch.setenv("PAGENT_LLM_TEMPERATURE", "0.3")
     monkeypatch.setenv("PAGENT_LLM_MAX_TOKENS", "1024")
     monkeypatch.setenv("PAGENT_LLM_TIMEOUT", "12.5")
@@ -201,6 +205,8 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.cot_max_chars == 640
     assert settings.cot_sink_path == "logs/custom_reasoning.jsonl"
     assert settings.cot_require_local_env is False
+    assert settings.llm_reasoning_enabled is True
+    assert settings.llm_reasoning_effort == "high"
     assert settings.llm_temperature == 0.3
     assert settings.llm_max_tokens == 1024
     assert settings.llm_timeout == 12.5
@@ -293,6 +299,8 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["cot_max_chars"] == "1200"
     assert public_values["cot_sink_path"] == "logs/reasoning.jsonl"
     assert public_values["cot_require_local_env"] == "True"
+    assert public_values["llm_reasoning_enabled"] == "False"
+    assert public_values["llm_reasoning_effort"] is None
     assert public_values["memory_enabled"] == "True"
     assert public_values["memory_db_path"] == "./pagent_memory.db"
     assert public_values["memory_history_window"] == "6"

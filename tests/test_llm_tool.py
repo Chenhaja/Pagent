@@ -244,6 +244,26 @@ def test_openai_compatible_client_posts_chat_completion_request() -> None:
     assert response.trace["node_name"] == "feature_extract"
 
 
+def test_openai_compatible_client_requests_reasoning_when_enabled() -> None:
+    """OpenAI 兼容 client 开启 reasoning 时应在请求中携带思考参数。"""
+    opener = FakeURLOpener({"choices": [{"message": {"content": '{"answer": "ok"}'}}]})
+    client = OpenAICompatibleClient(
+        settings=Settings(
+            llm_base_url="https://llm.example.test/v1",
+            llm_model="test-model",
+            llm_api_key="sk-test-secret",
+            llm_reasoning_enabled=True,
+            llm_reasoning_effort="high",
+        ),
+        urlopen=opener,
+    )
+
+    client.generate(prompt="test", output_schema={"type": "object"})
+
+    body = json.loads(opener.requests[0][0].data.decode("utf-8"))
+    assert body["reasoning_effort"] == "high"
+
+
 def test_openai_compatible_client_extracts_reasoning_content() -> None:
     """OpenAI 兼容 client 应提取 reasoning_content 且 trace 只含元数据。"""
     opener = FakeURLOpener(

@@ -21,6 +21,8 @@ class Settings(BaseModel):
         cot_max_chars: 单条推理正文最大保留字符数。
         cot_sink_path: 独立 reasoning sink 文件路径。
         cot_require_local_env: 是否仅允许 local 环境采集推理正文。
+        llm_reasoning_enabled: 是否在 LLM 请求中启用 provider 原生思考参数。
+        llm_reasoning_effort: 可选原生思考强度,如 low、medium、high。
         llm_base_url: OpenAI 兼容 LLM 端点地址,默认不配置。
         llm_model: 默认 LLM 模型名称。
         llm_api_key: 可选 LLM API Key,默认不配置。
@@ -104,6 +106,8 @@ class Settings(BaseModel):
     cot_max_chars: int = 1200
     cot_sink_path: str = "logs/reasoning.jsonl"
     cot_require_local_env: bool = True
+    llm_reasoning_enabled: bool = False
+    llm_reasoning_effort: str | None = None
     llm_base_url: str | None = None
     llm_model: str = ""
     llm_api_key: str | None = Field(default=None, exclude=True)
@@ -190,6 +194,8 @@ class Settings(BaseModel):
             "cot_max_chars": str(self.cot_max_chars),
             "cot_sink_path": self.cot_sink_path,
             "cot_require_local_env": str(self.cot_require_local_env),
+            "llm_reasoning_enabled": str(self.llm_reasoning_enabled),
+            "llm_reasoning_effort": self.llm_reasoning_effort,
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
             "llm_temperature": str(self.llm_temperature),
@@ -333,6 +339,8 @@ def get_settings() -> Settings:
         cot_max_chars=int(os.getenv("PAGENT_COT_MAX_CHARS", "1200")),
         cot_sink_path=os.getenv("PAGENT_COT_SINK_PATH", "logs/reasoning.jsonl"),
         cot_require_local_env=_get_bool_env("PAGENT_COT_REQUIRE_LOCAL_ENV", True),
+        llm_reasoning_enabled=_get_bool_env("PAGENT_LLM_REASONING_ENABLED", False),
+        llm_reasoning_effort=os.getenv("PAGENT_LLM_REASONING_EFFORT"),
         llm_base_url=os.getenv("PAGENT_LLM_BASE_URL"),
         llm_model=os.getenv("PAGENT_LLM_MODEL", ""),
         llm_api_key=os.getenv("PAGENT_LLM_API_KEY"),

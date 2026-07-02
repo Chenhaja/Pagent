@@ -1,6 +1,6 @@
 import pytest
 
-from app.orchestrator.react_policy import HeuristicReActPolicy, LLMReActPolicy, ReActPolicyError, ReflectResult
+from app.orchestrator.react_policy import HeuristicReActPolicy, LLMReActPolicy, ReActPolicyError, ReflectResult, ReflectResultEnvelope
 from app.prompts.react_policy import REACT_REFLECT_SCHEMA, build_react_reflect_messages
 from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink
 
@@ -57,7 +57,8 @@ def test_llm_react_policy_reflect_parses_valid_result() -> None:
 
     result = policy.reflect("原问题", {"evidence_count": 0, "top_score": 0.0}, [], 0)
 
-    assert result == ReflectResult(sufficient=False, reason="证据不足", next_query_hint="缩小问题")
+    assert isinstance(result, ReflectResultEnvelope)
+    assert result.result == ReflectResult(sufficient=False, reason="证据不足", next_query_hint="缩小问题")
     trace = trace_sink.records[0]
     assert trace["task_type"] == "react_reflect"
     assert trace["node_name"] == "qa"

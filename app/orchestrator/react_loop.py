@@ -3,8 +3,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.core.config import Settings, get_settings
+from app.core.log_context import current_context
 from app.core.logging import log_event
-from app.orchestrator.react_policy import HeuristicReActPolicy, ReActDecision, ReActPolicy, ReActPolicyError, ReflectResult, ToolCard
+from app.core.reasoning_sink import JsonlReasoningSink, NoopReasoningSink, ReasoningRecord, ReasoningTraceSink
+from app.orchestrator.react_policy import HeuristicReActPolicy, ReActDecision, ReActDecisionEnvelope, ReActPolicy, ReActPolicyError, ReflectResult, ReflectResultEnvelope, ToolCard
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +77,8 @@ class BoundedReActLoop:
         use_llm_judge: bool = True,
         sufficient_score_threshold: float = 0.5,
         observation_digest_chars: int = 600,
+        settings: Settings | None = None,
+        reasoning_sink: ReasoningTraceSink | None = None,
     ) -> None:
         """初始化主循环。
 
@@ -87,6 +92,8 @@ class BoundedReActLoop:
             use_llm_judge: 是否使用 policy 的 reflect 判断。
             sufficient_score_threshold: 确定性阈值兜底的 top_score 门槛。
             observation_digest_chars: observation 摘要字符上限。
+            settings: 可选应用配置,未传入时读取全局配置。
+            reasoning_sink: 可选推理轨迹 sink,未传入时按配置构造。
         """
         self.tools = tools
         self.budget = budget
@@ -98,6 +105,8 @@ class BoundedReActLoop:
         self.sufficient_score_threshold = sufficient_score_threshold
         self.observation_digest_chars = observation_digest_chars
         self.emit_policy_trace = policy is not None
+        self.settings = settings or get_settings()
+        self.reasoning_sink = reasoning_sink if reasoning_sink is not None else self._build_reasoning_sink()
 
     def run(self, task_input: str, allowed_tools: list[str]) -> ReActOutcome:
         """执行 bounded ReAct 工具循环。
@@ -140,9 +149,11 @@ class BoundedReActLoop:
             if not cards:
                 reason = "tool_unavailable"
                 break
-            decision, step_driver, step_fallback = self._decide(task_input, cards, scratchpad, step_index)
+            decision, decision_reasoning, step_driver, step_fallback = self._decide(task_input, cards, scratchpad, step_index)
             driver = step_driver
             fallback_used = fallback_used or step_fallback
+            self._capture_reasoning_signal("react_policy", step_index, "native_cot", decision_reasoning.get("text"), decision_reasoning, {})
+            self._capture_reasoning_signal("react_policy", step_index, "thought", decision.thought, {}, {"action": decision.action, "stop": decision.stop})
             if self.emit_policy_trace:
                 trace_events.append(self._build_policy_trace(step_index, decision, step_driver))
 
@@ -191,8 +202,11 @@ class BoundedReActLoop:
             if observation.external and tool_name not in external_tools_used:
                 external_tools_used.append(tool_name)
             observation_digest = self._build_observation_digest(observation)
-            reflection, reflect_driver, reflect_fallback = self._reflect(task_input, observation_digest, scratchpad, step_index, not step_fallback)
+            reflection, reflect_reasoning, reflect_driver, reflect_fallback = self._reflect(task_input, observation_digest, scratchpad, step_index, not step_fallback)
             fallback_used = fallback_used or reflect_fallback
+            reflect_outcome = {"sufficient": reflection.sufficient, "top_score": observation.top_score, "tool_name": tool_name}
+            self._capture_reasoning_signal("react_reflect", step_index, "native_cot", reflect_reasoning.get("text"), reflect_reasoning, reflect_outcome)
+            self._capture_reasoning_signal("react_reflect", step_index, "reason", reflection.reason, {}, reflect_outcome)
             log_event(
                 logger,
                 logging.INFO,
@@ -206,6 +220,8 @@ class BoundedReActLoop:
                 external=observation.external,
                 driver=driver,
                 fallback_used=fallback_used,
+                has_reasoning=bool(decision_reasoning.get("has_reasoning") or reflect_reasoning.get("has_reasoning")),
+                reasoning_chars=int(decision_reasoning.get("reasoning_chars") or 0) + int(reflect_reasoning.get("reasoning_chars") or 0),
             )
             trace_events.append(
                 self._build_step_trace(
@@ -242,13 +258,15 @@ class BoundedReActLoop:
         cards: list[ToolCard],
         scratchpad: list[dict[str, Any]],
         step_index: int,
-    ) -> tuple[ReActDecision, str, bool]:
+    ) -> tuple[ReActDecision, dict[str, Any], str, bool]:
         """调用主 policy,失败时返回 heuristic 决策。"""
         try:
-            decision = self.policy.decide(task_input, cards, scratchpad, step_index, self.budget.max_steps)
-            return decision, self._policy_driver(), False
+            decision_result = self.policy.decide(task_input, cards, scratchpad, step_index, self.budget.max_steps)
+            decision, reasoning = self._unwrap_decision(decision_result)
+            return decision, reasoning, self._policy_driver(), False
         except Exception:
-            return self._fallback_decision(task_input, cards, scratchpad, step_index)
+            decision, driver, fallback = self._fallback_decision(task_input, cards, scratchpad, step_index)
+            return decision, {}, driver, fallback
 
     def _fallback_decision(
         self,
@@ -270,14 +288,92 @@ class BoundedReActLoop:
         scratchpad: list[dict[str, Any]],
         step_index: int,
         can_use_policy: bool = True,
-    ) -> tuple[ReflectResult, str, bool]:
+    ) -> tuple[ReflectResult, dict[str, Any], str, bool]:
         """执行 observation 反思,失败时用阈值策略降级。"""
         if not self.use_llm_judge or not can_use_policy:
-            return self.heuristic_policy.reflect(task_input, observation_digest, scratchpad, step_index), "heuristic", False
+            return self.heuristic_policy.reflect(task_input, observation_digest, scratchpad, step_index), {}, "heuristic", False
         try:
-            return self.policy.reflect(task_input, observation_digest, scratchpad, step_index), self._policy_driver(), False
+            reflection_result = self.policy.reflect(task_input, observation_digest, scratchpad, step_index)
+            reflection, reasoning = self._unwrap_reflection(reflection_result)
+            return reflection, reasoning, self._policy_driver(), False
         except Exception:
-            return self.heuristic_policy.reflect(task_input, observation_digest, scratchpad, step_index), "fallback", True
+            return self.heuristic_policy.reflect(task_input, observation_digest, scratchpad, step_index), {}, "fallback", True
+
+    def _unwrap_decision(self, value: ReActDecision | ReActDecisionEnvelope) -> tuple[ReActDecision, dict[str, Any]]:
+        """拆包决策与旁路推理元数据。"""
+        if isinstance(value, ReActDecisionEnvelope):
+            reasoning = dict(value.reasoning_trace)
+            reasoning["text"] = value.reasoning_text
+            return value.decision, reasoning
+        return value, {}
+
+    def _unwrap_reflection(self, value: ReflectResult | ReflectResultEnvelope) -> tuple[ReflectResult, dict[str, Any]]:
+        """拆包反思结果与旁路推理元数据。"""
+        if isinstance(value, ReflectResultEnvelope):
+            reasoning = dict(value.reasoning_trace)
+            reasoning["text"] = value.reasoning_text
+            return value.result, reasoning
+        return value, {}
+
+    def _build_reasoning_sink(self) -> ReasoningTraceSink:
+        """按配置构造默认 reasoning sink。"""
+        if not self.settings.cot_capture_enabled:
+            return NoopReasoningSink()
+        return JsonlReasoningSink(self.settings.cot_sink_path, self.settings.cot_max_chars)
+
+    def _capture_reasoning_signal(
+        self,
+        task_type: str,
+        step_index: int,
+        source: str,
+        text: str | None,
+        reasoning_trace: dict[str, Any],
+        outcome: dict[str, Any],
+    ) -> None:
+        """旁路采集推理信号,不影响主流程。"""
+        try:
+            reasoning_chars = len(text or "") if text is not None else int(reasoning_trace.get("reasoning_chars") or 0)
+            has_reasoning = bool(text) or bool(reasoning_trace.get("has_reasoning"))
+            captured = self._should_capture_reasoning_text(source) and bool(text)
+            log_event(
+                logger,
+                logging.INFO,
+                "cot_captured",
+                "推理信号已采集",
+                node_name=self.node_name,
+                task_type=task_type,
+                step_index=step_index,
+                source=source,
+                reasoning_chars=reasoning_chars,
+                has_reasoning=has_reasoning,
+                captured=captured,
+            )
+            if not captured or text is None:
+                return
+            context = current_context()
+            self.reasoning_sink.write(
+                ReasoningRecord(
+                    request_id=context.get("request_id"),
+                    node_name=self.node_name,
+                    task_type=task_type,
+                    step_index=step_index,
+                    source=source,
+                    text=text,
+                    outcome=outcome,
+                )
+            )
+        except Exception:
+            return
+
+    def _should_capture_reasoning_text(self, source: str) -> bool:
+        """判断当前来源是否允许写入推理正文。"""
+        if not self.settings.cot_capture_enabled:
+            return False
+        if source not in self.settings.cot_capture_sources:
+            return False
+        if self.settings.cot_require_local_env and self.settings.environment != "local":
+            return False
+        return True
 
     def _apply_next_query_hint(self, tool_input: dict[str, Any], next_query_hint: str | None) -> dict[str, Any]:
         """在存在下一步 query hint 时改写工具输入中的 query。"""

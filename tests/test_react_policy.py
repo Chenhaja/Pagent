@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.orchestrator.react_policy import HeuristicReActPolicy, LLMReActPolicy, ReActDecision, ReActPolicyError
+from app.orchestrator.react_policy import HeuristicReActPolicy, LLMReActPolicy, ReActDecision, ReActDecisionEnvelope, ReActPolicyError
 from app.prompts.react_policy import REACT_DECISION_SCHEMA, build_react_policy_messages
 from app.orchestrator.tool_registry import ToolCard
 from app.tools.llm import FakeLLMClient, InMemoryLLMTraceSink
@@ -55,7 +55,8 @@ def test_llm_react_policy_parses_valid_decision() -> None:
 
     decision = policy.decide("敏感原问题", [tool_card()], [], 0, 4)
 
-    assert decision == ReActDecision(
+    assert isinstance(decision, ReActDecisionEnvelope)
+    assert decision.decision == ReActDecision(
         thought="需要先检索本地知识库",
         action="kb_retrieval",
         tool_input={"query": "改写后的问题"},

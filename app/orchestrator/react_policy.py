@@ -26,6 +26,15 @@ class ReActDecision:
 
 
 @dataclass
+class ReActDecisionEnvelope:
+    """携带 LLM 推理旁路信息的 ReAct 决策包装。"""
+
+    decision: ReActDecision
+    reasoning_text: str | None = None
+    reasoning_trace: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ReflectResult:
     """ReAct 观察后反思结果。
 
@@ -41,6 +50,15 @@ class ReflectResult:
     sufficient: bool
     reason: str
     next_query_hint: str | None = None
+
+
+@dataclass
+class ReflectResultEnvelope:
+    """携带 LLM 推理旁路信息的 ReAct 反思包装。"""
+
+    result: ReflectResult
+    reasoning_text: str | None = None
+    reasoning_trace: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -75,7 +93,7 @@ class ReActPolicy(Protocol):
         scratchpad: list[dict[str, Any]],
         step_index: int,
         max_steps: int,
-    ) -> ReActDecision:
+    ) -> ReActDecision | ReActDecisionEnvelope:
         """生成下一步 ReAct 决策。
 
         Args:
@@ -96,7 +114,7 @@ class ReActPolicy(Protocol):
         observation_digest: dict[str, Any],
         scratchpad: list[dict[str, Any]],
         step_index: int,
-    ) -> ReflectResult:
+    ) -> ReflectResult | ReflectResultEnvelope:
         """生成 observation 反思结果。
 
         Args:
@@ -131,7 +149,7 @@ class HeuristicReActPolicy:
         scratchpad: list[dict[str, Any]],
         step_index: int,
         max_steps: int,
-    ) -> ReActDecision:
+    ) -> ReActDecision | ReActDecisionEnvelope:
         """按工具顺序生成确定性决策。
 
         Args:
@@ -218,7 +236,7 @@ class LLMReActPolicy:
         scratchpad: list[dict[str, Any]],
         step_index: int,
         max_steps: int,
-    ) -> ReActDecision:
+    ) -> ReActDecision | ReActDecisionEnvelope:
         """调用 LLM 生成下一步 ReAct 决策。
 
         Args:
@@ -244,7 +262,14 @@ class LLMReActPolicy:
         )
         if response.errors:
             raise ReActPolicyError("llm_error")
-        return _parse_decision(response.content)
+        return ReActDecisionEnvelope(
+            decision=_parse_decision(response.content),
+            reasoning_text=response.reasoning_text,
+            reasoning_trace={
+                "has_reasoning": bool(response.trace.get("has_reasoning")),
+                "reasoning_chars": int(response.trace.get("reasoning_chars") or 0),
+            },
+        )
 
     def reflect(
         self,
@@ -277,7 +302,14 @@ class LLMReActPolicy:
         )
         if response.errors:
             raise ReActPolicyError("llm_error")
-        return _parse_reflection(response.content)
+        return ReflectResultEnvelope(
+            result=_parse_reflection(response.content),
+            reasoning_text=response.reasoning_text,
+            reasoning_trace={
+                "has_reasoning": bool(response.trace.get("has_reasoning")),
+                "reasoning_chars": int(response.trace.get("reasoning_chars") or 0),
+            },
+        )
 
 
 def _parse_decision(payload: dict[str, Any]) -> ReActDecision:

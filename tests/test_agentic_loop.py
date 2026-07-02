@@ -1,8 +1,9 @@
 import logging
 import time
 
+from app.core.config import Settings
 from app.orchestrator.react_loop import BoundedReActLoop, ReActBudget, ToolObservation
-from app.orchestrator.react_policy import ReActDecision, ReActPolicyError, ReflectResult
+from app.orchestrator.react_policy import ReActDecision, ReActDecisionEnvelope, ReActPolicyError, ReflectResult, ReflectResultEnvelope
 from app.orchestrator.tool_registry import ToolCard
 
 
@@ -234,6 +235,97 @@ def test_agentic_loop_policy_trace_does_not_expose_thought_or_query() -> None:
     policy_step = outcome.trace_events[0]["data"]
     assert policy_step["thought_len"] == len("敏感推理全文")
     assert "thought" not in policy_step
+
+
+def test_agentic_loop_captures_reasoning_metadata_without_body(caplog, tmp_path) -> None:
+    """ReAct 旁路采集应只在主日志记录 reasoning 元数据。"""
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], top_score=0.8)])
+    policy = ScriptedPolicy(
+        decisions=[
+            ReActDecisionEnvelope(
+                decision=ReActDecision(thought="结构化敏感 thought", action="fake", tool_input={"query": "问题"}, stop=False),
+                reasoning_text="原生敏感 CoT",
+                reasoning_trace={"has_reasoning": True, "reasoning_chars": len("原生敏感 CoT")},
+            )
+        ],
+        reflections=[
+            ReflectResultEnvelope(
+                result=ReflectResult(sufficient=True, reason="结构化敏感 reason"),
+                reasoning_text="反思敏感 CoT",
+                reasoning_trace={"has_reasoning": True, "reasoning_chars": len("反思敏感 CoT")},
+            )
+        ],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=1, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+        settings=Settings(cot_capture_enabled=False),
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.orchestrator.react_loop"):
+        outcome = loop.run("原始问题", allowed_tools=["fake"])
+
+    assert outcome.reason == "sufficient"
+    cot_records = [record for record in caplog.records if getattr(record, "event", None) == "cot_captured"]
+    assert [record.fields["source"] for record in cot_records] == ["native_cot", "thought", "native_cot", "reason"]
+    assert all("reasoning_chars" in record.fields for record in cot_records)
+    log_text = str([(record.msg, record.fields) for record in cot_records])
+    assert "原生敏感 CoT" not in log_text
+    assert "结构化敏感 thought" not in log_text
+    assert "反思敏感 CoT" not in log_text
+    assert "结构化敏感 reason" not in log_text
+
+
+def test_agentic_loop_writes_reasoning_sink_only_when_local_enabled(tmp_path) -> None:
+    """仅 local 且开关开启时才写 reasoning sink 正文。"""
+    path = tmp_path / "reasoning.jsonl"
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], top_score=0.8)])
+    policy = ScriptedPolicy(
+        decisions=[ReActDecisionEnvelope(ReActDecision(thought="token=secret-thought", action="fake", tool_input={"query": "问题"}, stop=False))],
+        reflections=[ReflectResult(sufficient=True, reason="password=secret-reason")],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=1, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+        settings=Settings(cot_capture_enabled=True, cot_sink_path=str(path), cot_max_chars=80),
+    )
+
+    loop.run("原始问题", allowed_tools=["fake"])
+
+    text = path.read_text(encoding="utf-8")
+    assert "secret-thought" not in text
+    assert "secret-reason" not in text
+    assert "[REDACTED]" in text
+    assert '"source": "thought"' in text
+    assert '"source": "reason"' in text
+
+
+def test_agentic_loop_does_not_write_reasoning_sink_in_prod(tmp_path) -> None:
+    """生产环境即使开启采集也不应写 reasoning 正文。"""
+    path = tmp_path / "reasoning.jsonl"
+    tool = FakeTool([ToolObservation(tool_name="fake", evidence=[{"content": "证据"}], top_score=0.8)])
+    policy = ScriptedPolicy(
+        decisions=[ReActDecision(thought="敏感 thought", action="fake", tool_input={"query": "问题"}, stop=False)],
+        reflections=[ReflectResult(sufficient=True, reason="敏感 reason")],
+    )
+    loop = BoundedReActLoop(
+        tools={"fake": tool},
+        budget=ReActBudget(max_steps=1, token_budget=100, timeout_seconds=5),
+        node_name="qa",
+        policy=policy,
+        tool_cards=[ToolCard("fake", "测试工具", {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]})],
+        settings=Settings(environment="prod", cot_capture_enabled=True, cot_sink_path=str(path)),
+    )
+
+    loop.run("原始问题", allowed_tools=["fake"])
+
+    assert not path.exists()
 
 
 def test_agentic_loop_uses_policy_decision_and_rewritten_query() -> None:

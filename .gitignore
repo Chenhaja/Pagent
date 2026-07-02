@@ -6,3 +6,5 @@ __pycache__*
 pagent_memory.db
 *.sqlite
 *.sqlite3
+*.jsonl
+*.json

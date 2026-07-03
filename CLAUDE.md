@@ -66,7 +66,7 @@
 ## 参数配置规范
 
 - 全局配置只表达通用能力或系统级约束,不要绑定单个 Node/临时场景。
-  - 推荐: `retrieval_max_steps`、`retrieval_token_budget`、`retrieval_timeout_seconds`。
+  - 推荐: `llm_max_tokens`、`llm_timeout`、`llm_retry_count`。
   - 避免: `qa_max_steps`、`qa_token_budget` 这类单 Node 命名。
 - Node/模块可通过构造参数覆盖全局配置;默认继承配置时用 `None` 表示未传值。
   - 推荐: `settings.xxx if arg is None else arg`。

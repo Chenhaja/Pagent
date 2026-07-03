@@ -324,8 +324,6 @@ def get_settings() -> Settings:
         从环境变量读取后的应用配置对象。
     """
     _load_local_dotenv()
-    retrieval_token_budget = int(os.getenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "1000"))
-    retrieval_timeout_seconds = int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10"))
     return Settings(
         service_name=os.getenv("PAGENT_SERVICE_NAME", "patent-agent"),
         environment=os.getenv("PAGENT_ENVIRONMENT", "local"),
@@ -362,8 +360,8 @@ def get_settings() -> Settings:
         retrieval_backend=os.getenv("PAGENT_RETRIEVAL_BACKEND", "qdrant"),
         retrieval_top_k=int(os.getenv("PAGENT_RETRIEVAL_TOP_K", "3")),
         retrieval_max_steps=int(os.getenv("PAGENT_RETRIEVAL_MAX_STEPS", "1")),
-        retrieval_token_budget=retrieval_token_budget,
-        retrieval_timeout_seconds=retrieval_timeout_seconds,
+        retrieval_token_budget=int(os.getenv("PAGENT_RETRIEVAL_TOKEN_BUDGET", "1000")),
+        retrieval_timeout_seconds=int(os.getenv("PAGENT_RETRIEVAL_TIMEOUT_SECONDS", "10")),
         react_policy_driver=os.getenv("PAGENT_REACT_POLICY_DRIVER", "llm"),
         react_max_steps=int(os.getenv("PAGENT_REACT_MAX_STEPS", "4")),
         react_policy_model=os.getenv("PAGENT_REACT_POLICY_MODEL"),
@@ -372,8 +370,8 @@ def get_settings() -> Settings:
         react_sufficient_score_threshold=float(os.getenv("PAGENT_REACT_SUFFICIENT_SCORE_THRESHOLD", "0.5")),
         react_observation_digest_chars=int(os.getenv("PAGENT_REACT_OBSERVATION_DIGEST_CHARS", "600")),
         react_reflect_model=os.getenv("PAGENT_REACT_REFLECT_MODEL"),
-        react_token_budget=int(os.getenv("PAGENT_REACT_TOKEN_BUDGET", str(retrieval_token_budget))),
-        react_timeout_seconds=int(os.getenv("PAGENT_REACT_TIMEOUT_SECONDS", str(retrieval_timeout_seconds))),
+        react_token_budget=int(os.getenv("PAGENT_REACT_TOKEN_BUDGET", 2000)),
+        react_timeout_seconds=int(os.getenv("PAGENT_REACT_TIMEOUT_SECONDS", 30)),
         agentic_enabled=_get_bool_env("PAGENT_AGENTIC_ENABLED", True),
         agentic_external_tools_enabled=_get_bool_env("PAGENT_AGENTIC_EXTERNAL_TOOLS_ENABLED", False),
         agentic_default_tools=os.getenv("PAGENT_AGENTIC_DEFAULT_TOOLS", "kb_retrieval"),

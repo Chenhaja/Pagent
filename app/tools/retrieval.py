@@ -662,7 +662,8 @@ class HTTPReranker:
         for item in response_payload.get("results", []):
             index = int(item.get("index", -1))
             if 0 <= index < len(documents):
-                ranked.append(documents[index].model_copy(update={"similarity": float(item.get("relevance_score") or 0.0)}))
+                score = item.get("relevance_score", item.get("score", 0.0))
+                ranked.append(documents[index].model_copy(update={"similarity": float(score or 0.0)}))
         return ranked[: top_n or len(ranked)]
 
 
@@ -805,7 +806,7 @@ class LLMQueryRewriter:
             output_schema=QUERY_EXPAND_OUTPUT_SCHEMA,
             model=self.settings.query_rewrite_model or self.settings.llm_cheap_model or self.settings.llm_model,
             temperature=self.settings.query_rewrite_temperature,
-            timeout=self.settings.llm_timeout,
+            timeout=self.settings.retrieval_timeout_seconds,
             trace_context={"node_name": "retrieval", "task_type": "query_expand"},
         )
         if response.errors or not isinstance(response.content, dict):

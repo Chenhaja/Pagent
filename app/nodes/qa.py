@@ -22,8 +22,6 @@ logger = logging.getLogger(__name__)
 
 def _react_llm_settings(settings: Settings) -> Settings:
     """为 ReAct LLM 调用构造局部配置。"""
-    if not settings.react_thinking_enabled:
-        return settings
     return settings.model_copy(
         update={
             "llm_reasoning_enabled": True,

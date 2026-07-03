@@ -337,11 +337,14 @@ class OpenAICompatibleClient:
             with self.urlopen(http_request, timeout=call_timeout) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
         except TimeoutError:
+            log_event(logger, logging.WARNING, "llm_call", "LLM 调用超时", **trace)
             return self._error_response("timeout", "LLM 调用超时", trace, started_at)
         except error.HTTPError as exc:
+            log_event(logger, logging.WARNING, "llm_call", f"LLM provider HTTP 错误:{exc.code}", **trace)
             code = "rate_limited" if exc.code == 429 else "provider_error"
             return self._error_response(code, f"LLM provider HTTP 错误:{exc.code}", trace, started_at)
         except Exception as exc:
+            log_event(logger, logging.ERROR, "llm_call", f"LLM provider 调用失败:{exc}", **trace)
             return self._error_response("provider_error", f"LLM provider 调用失败:{exc}", trace, started_at)
 
         trace["duration_ms"] = int((time.perf_counter() - started_at) * 1000)

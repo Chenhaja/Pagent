@@ -10,9 +10,7 @@ from app.nodes.query_rewrite import QueryRewriteNode
 from app.services.attachment_service import AttachmentService, AttachmentServiceError
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
-from app.services.revision_service import RevisionService
 from app.services.translate_service import TranslateService
-from app.services.workflow_service import WorkflowService
 
 
 class AgentDispatchService:
@@ -96,13 +94,6 @@ class AgentDispatchService:
 
         workflow_def = self.workflow_registry.get_workflow_def(state.intent or "")
         remaining_nodes = self._remaining_nodes_after(workflow_def, route_result.next_node)
-        if state.intent == "claim_generation":
-            result = WorkflowService().generate_claims(
-                state.normalized_input or state.raw_input,
-                state=state,
-                workflow_def=remaining_nodes,
-            )
-            return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "claim_generation", **result})
         if state.intent == "translation":
             result = TranslateService().translate(
                 state.normalized_input or state.raw_input,
@@ -110,15 +101,6 @@ class AgentDispatchService:
                 workflow_def=remaining_nodes,
             )
             return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "translation", **result})
-        if state.intent == "claim_revision":
-            state.user_feedback = state.normalized_input or state.raw_input
-            result = RevisionService().revise_claim(
-                state.claims_draft,
-                state.user_feedback,
-                state=state,
-                workflow_def=remaining_nodes,
-            )
-            return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "claim_revision", **result})
         if state.intent == "qa":
             result = self._run_qa(state, remaining_nodes)
             return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "qa", **result})

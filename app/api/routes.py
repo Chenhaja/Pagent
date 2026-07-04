@@ -9,18 +9,12 @@ from app.core.logging import log_event
 from app.api.schemas import (
     AgentRequest,
     AttachmentUploadBatchResponse,
-    ClaimGenerationRequest,
-    ClaimGenerationResponse,
-    ClaimRevisionRequest,
-    ClaimRevisionResponse,
     TranslateRequest,
     TranslateResponse,
 )
 from app.services.agent_dispatch_service import AgentDispatchService
 from app.services.attachment_service import AttachmentService, AttachmentServiceError
-from app.services.revision_service import RevisionService
 from app.services.translate_service import TranslateService
-from app.services.workflow_service import WorkflowService
 
 DISCLAIMER = "辅助初稿，不等同于专利代理师法律意见。"
 logger = logging.getLogger(__name__)
@@ -152,57 +146,6 @@ def dispatch_agent(request: AgentRequest) -> dict[str, Any]:
     finally:
         reset_context(token)
 
-
-@router.post("/claims/generate", response_model=ClaimGenerationResponse)
-def generate_claims(request: ClaimGenerationRequest) -> dict[str, Any]:
-    """生成权利要求初稿。
-
-    Args:
-        request: 权利要求生成请求。
-
-    Returns:
-        权利要求初稿、校验报告、下一步建议和 trace。
-
-    Raises:
-        HTTPException: 当服务层返回非成功状态时抛出。
-    """
-    result = WorkflowService().generate_claims(request.raw_input)
-    if result["status"] != "success":
-        raise HTTPException(status_code=400, detail=build_error_detail(result))
-    result["disclaimer"] = DISCLAIMER
-    return result
-
-
-@router.post("/claims/revise", response_model=ClaimRevisionResponse)
-def revise_claim(request: ClaimRevisionRequest) -> dict[str, Any]:
-    """修改单条权利要求。
-
-    Args:
-        request: 单条权利要求修改请求。
-
-    Returns:
-        修改后的权利要求、差异、风险提示、新版本号和校验报告。
-
-    Raises:
-        HTTPException: 当服务层返回非成功状态或校验失败时抛出。
-    """
-    result = RevisionService().revise_claim(request.claims_draft, request.user_feedback)
-    if result["status"] != "success":
-        raise HTTPException(status_code=400, detail=build_error_detail(result))
-    if result["validation_report"]["reference_errors"]:
-        raise HTTPException(
-            status_code=400,
-            detail=build_error_detail(
-                {
-                    "status": "failed",
-                    "errors": result["validation_report"]["reference_errors"],
-                    "message": "权利要求引用关系需要修正。",
-                }
-            ),
-        )
-    result["diff"] = result.pop("patch")
-    result["disclaimer"] = DISCLAIMER
-    return result
 
 
 @router.post("/translate", response_model=TranslateResponse)

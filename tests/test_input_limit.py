@@ -16,10 +16,10 @@ def test_input_limit_allows_exact_limit(monkeypatch) -> None:
     monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: Settings(input_max_chars=4))
     service = AgentDispatchService()
 
-    result = service.dispatch("  生成权利  ")
+    result = service.dispatch("  翻译文本  ")
 
     assert result["status"] == "success"
-    assert result["intent"] == "claim_generation"
+    assert result["intent"] == "translation"
 
 
 def test_input_limit_rejects_before_downstream_nodes(monkeypatch) -> None:

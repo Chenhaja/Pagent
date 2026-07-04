@@ -45,8 +45,7 @@ class IntentRouterNode(Node):
         """用关键词快路识别高置信意图。"""
         routes = [
             ("translation", ["翻译", "译文"]),
-            ("claim_revision", ["修改", "修订", "权利要求有什么问题", "权利要求有啥问题", "权利要求问题"]),
-            ("claim_generation", ["权利要求", "撰写", "生成"]),
+            ("patent_drafting", ["权利要求", "撰写", "生成", "专利文书", "说明书"]),
             ("qa", ["创造性", "新颖性", "IPC", "说明", "？", "?"]),
         ]
         for intent, keywords in routes:
@@ -81,8 +80,7 @@ class IntentRouterNode(Node):
     def _route_success(self, state: WorkflowState, classification: IntentClassification, source: str) -> NodeResult:
         """写入分类结果并返回固定路由。"""
         next_nodes = {
-            "claim_generation": "completeness_gate",
-            "claim_revision": "claim_revise",
+            "patent_drafting": "drafting_leader",
             "translation": "translate",
             "qa": "qa",
         }
@@ -104,8 +102,8 @@ class IntentRouterNode(Node):
     def _clarify(self, reason: str, classification: IntentClassification | None = None) -> NodeResult:
         """生成意图不明确时的澄清结果。"""
         output = {
-            "message": "您希望我处理哪类专利任务？可以选择撰写权利要求、修改权利要求、翻译专利文本，或咨询专利问答。",
-            "supported_intents": ["claim_generation", "claim_revision", "translation", "qa"],
+            "message": "您希望我处理哪类专利任务？可以选择撰写专利文书、翻译专利文本，或咨询专利问答。",
+            "supported_intents": ["patent_drafting", "translation", "qa"],
         }
         data = {"reason": reason}
         if classification is not None:

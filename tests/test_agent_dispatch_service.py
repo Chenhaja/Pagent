@@ -11,7 +11,7 @@ class FixedRewriteNode:
 
     def run(self, state: WorkflowState) -> NodeResult:
         """写入固定改写结果。"""
-        state.normalized_input = "请根据技术方案生成权利要求"
+        state.normalized_input = "请翻译一种控制方法"
         return NodeResult.success(
             output={"normalized_input": state.normalized_input},
             trace_events=[{"event": "query_rewrite_completed", "data": {"confidence": 1.0, "uncertain": False}}],
@@ -39,7 +39,7 @@ class InspectingRewriteNode:
         """记录 history 并模拟有历史时完成改写。"""
         self.seen_history = list(state.dialog_context.get("history", []))
         if self.seen_history:
-            state.normalized_input = "请根据技术方案生成权利要求"
+            state.normalized_input = "请翻译一种控制方法"
             return NodeResult.success(
                 output={"normalized_input": state.normalized_input},
                 trace_events=[{"event": "query_rewrite_completed", "data": {"confidence": 0.9, "uncertain": False}}],
@@ -96,30 +96,6 @@ class SimpleSummaryResult:
         self.covered_turn_index = covered_turn_index
 
 
-def test_agent_dispatch_routes_claim_generation_workflow() -> None:
-    """统一 Agent 入口应路由到权利要求生成 workflow。"""
-    service = AgentDispatchService()
-
-    result = service.dispatch("请根据技术方案生成权利要求")
-
-    assert result["status"] == "success"
-    assert result["intent"] == "claim_generation"
-    assert result["workflow"] == "claim_generation"
-    assert result["claims_draft"][0]["text"] == "一种控制方法。"
-    assert [event["event"] for event in result["trace"]] == [
-        "session_memory_skipped",
-        "normalize_input_completed",
-        "query_rewrite_skipped",
-        "intent_router_completed",
-        "completeness_gate_completed",
-        "feature_extract_completed",
-        "claim_plan_completed",
-        "claim_generate_completed",
-        "claim_check_completed",
-    ]
-    assert [event["event"] for event in result["trace"]].count("normalize_input_completed") == 1
-
-
 def test_agent_dispatch_routes_translation_workflow() -> None:
     """统一 Agent 入口应路由到翻译 workflow。"""
     service = AgentDispatchService()
@@ -130,21 +106,6 @@ def test_agent_dispatch_routes_translation_workflow() -> None:
     assert result["intent"] == "translation"
     assert result["workflow"] == "translation"
     assert result["translated_text"] == "A control method."
-
-
-def test_agent_dispatch_routes_claim_revision_workflow() -> None:
-    """统一 Agent 入口应路由到权利要求修改 workflow。"""
-    service = AgentDispatchService()
-
-    result = service.dispatch(
-        "修改权利要求1",
-        claims_draft=[{"number": 1, "claim_type": "independent", "text": "一种控制方法。"}],
-    )
-
-    assert result["status"] == "success"
-    assert result["intent"] == "claim_revision"
-    assert result["workflow"] == "claim_revision"
-    assert result["claim"]["text"] == "一种改进的控制方法。"
 
 
 def test_agent_dispatch_routes_qa_workflow() -> None:
@@ -160,17 +121,16 @@ def test_agent_dispatch_routes_qa_workflow() -> None:
     assert result["errors"] == ["qa_failed"]
 
 
-
 def test_agent_dispatch_uses_rewritten_input_for_intent_router() -> None:
     """query rewrite 的改写结果应影响后续 intent router。"""
     service = AgentDispatchService()
     service.query_rewrite_node = FixedRewriteNode()
 
-    result = service.dispatch("把它写出来")
+    result = service.dispatch("处理它")
 
     assert result["status"] == "success"
-    assert result["intent"] == "claim_generation"
-    assert [event["event"] for event in result["trace"]][:4] == [
+    assert result["intent"] == "translation"
+    assert [event["event"] for event in result["workflow_trace"]][:4] == [
         "session_memory_skipped",
         "normalize_input_completed",
         "query_rewrite_completed",
@@ -183,11 +143,11 @@ def test_agent_dispatch_continues_after_query_rewrite_fallback() -> None:
     service = AgentDispatchService()
     service.query_rewrite_node = FallbackRewriteNode()
 
-    result = service.dispatch("请根据技术方案生成权利要求")
+    result = service.dispatch("请翻译一种控制方法")
 
     assert result["status"] == "success"
-    assert result["intent"] == "claim_generation"
-    assert [event["event"] for event in result["trace"]][:4] == [
+    assert result["intent"] == "translation"
+    assert [event["event"] for event in result["workflow_trace"]][:4] == [
         "session_memory_skipped",
         "normalize_input_completed",
         "query_rewrite_failed_fallback",
@@ -195,18 +155,14 @@ def test_agent_dispatch_continues_after_query_rewrite_fallback() -> None:
     ]
 
 
-def test_agent_dispatch_routes_claim_problem_to_revision_not_qa() -> None:
-    """权利要求问题类输入不应进入 QA workflow。"""
+def test_agent_dispatch_returns_user_input_request_for_old_claim_intent() -> None:
+    """旧 claim 意图在 P0 删除后不应进入旧 workflow。"""
     service = AgentDispatchService()
 
-    result = service.dispatch(
-        "我的权利要求有什么问题",
-        claims_draft=[{"number": 1, "claim_type": "independent", "text": "一种控制方法。"}],
-    )
+    result = service.dispatch("请根据技术方案生成权利要求")
 
-    assert result["status"] == "success"
-    assert result["intent"] == "claim_revision"
-    assert result["workflow"] == "claim_revision"
+    assert result["status"] == "requires_user_input"
+    assert result["errors"] == ["unknown_intent"]
 
 
 def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:
@@ -234,23 +190,23 @@ def test_agent_dispatch_injects_session_history_before_query_rewrite() -> None:
     service = AgentDispatchService(session_store=store)
     service.query_rewrite_node = rewrite_node
 
-    result = service.dispatch("把它写成权利要求", session_id="s1")
+    result = service.dispatch("翻译它", session_id="s1")
 
     assert result["status"] == "success"
     assert rewrite_node.seen_history == [{"role": "user", "content": "我有一个夹爪方案"}]
-    assert result["trace"][0]["event"] == "session_memory_loaded"
-    assert "query_rewrite_completed" in [event["event"] for event in result["trace"]]
+    assert result["workflow_trace"][0]["event"] == "session_memory_loaded"
+    assert "query_rewrite_completed" in [event["event"] for event in result["workflow_trace"]]
 
 
 def test_agent_dispatch_without_session_id_keeps_old_no_history_behavior() -> None:
-    """无 session_id 时应跳过会话记忆并保持旧 no_history 行为。"""
+    """无 session_id 时应跳过会话记忆并保持 no_history 行为。"""
     rewrite_node = InspectingRewriteNode()
     service = AgentDispatchService(session_store=RecordingSessionStore())
     service.query_rewrite_node = rewrite_node
 
-    result = service.dispatch("请根据技术方案生成权利要求")
+    result = service.dispatch("请翻译一种控制方法")
 
-    events = [event["event"] for event in result["trace"]]
+    events = [event["event"] for event in result["workflow_trace"]]
     assert "session_memory_skipped" in events
     assert "query_rewrite_skipped" in events
     assert rewrite_node.seen_history == []
@@ -261,13 +217,11 @@ def test_agent_dispatch_appends_user_and_assistant_turns_after_success() -> None
     store = RecordingSessionStore()
     service = AgentDispatchService(session_store=store)
 
-    result = service.dispatch("请根据技术方案生成权利要求", session_id="s1")
+    result = service.dispatch("请翻译一种控制方法", session_id="s1")
 
     assert result["status"] == "success"
-    assert store.appended[0] == ("s1", "user", "请根据技术方案生成权利要求")
-    assert store.appended[1][0] == "s1"
-    assert store.appended[1][1] == "assistant"
-    assert "一种控制方法" in store.appended[1][2]
+    assert store.appended[0] == ("s1", "user", "请翻译一种控制方法")
+    assert store.appended[1] == ("s1", "assistant", "A control method.")
     assert store.summary_called is True
 
 
@@ -276,8 +230,8 @@ def test_agent_dispatch_continues_when_session_store_load_fails() -> None:
     store = RecordingSessionStore(should_fail_load=True)
     service = AgentDispatchService(session_store=store)
 
-    result = service.dispatch("请根据技术方案生成权利要求", session_id="s1")
+    result = service.dispatch("请翻译一种控制方法", session_id="s1")
 
     assert result["status"] == "success"
-    events = [event["event"] for event in result["trace"]]
+    events = [event["event"] for event in result["workflow_trace"]]
     assert "session_memory_unavailable" in events

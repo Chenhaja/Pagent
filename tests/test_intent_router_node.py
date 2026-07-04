@@ -36,18 +36,18 @@ def test_intent_classification_validates_confidence_range() -> None:
     assert classification.confidence == 1.0
 
 
-def test_intent_router_routes_claim_generation_without_llm() -> None:
-    """意图路由 node 应用关键词快路识别权利要求生成 workflow。"""
-    state = WorkflowState(raw_input="", normalized_input="请根据技术方案生成权利要求")
+def test_intent_router_routes_patent_drafting_without_llm() -> None:
+    """意图路由 node 应用关键词快路识别专利文书生成。"""
+    state = WorkflowState(raw_input="", normalized_input="请根据技术方案生成专利文书")
     node = IntentRouterNode(llm_client=RaisingLLMClient())
 
     result = node.run(state)
 
     assert result.status == "success"
-    assert state.intent == "claim_generation"
-    assert result.next_node == "completeness_gate"
+    assert state.intent == "patent_drafting"
+    assert result.next_node == "drafting_leader"
     assert state.dialog_context["intent_classification"]["source"] == "keyword"
-    assert result.trace_events[0]["data"] == {"intent": "claim_generation", "source": "keyword", "confidence": 0.95}
+    assert result.trace_events[0]["data"] == {"intent": "patent_drafting", "source": "keyword", "confidence": 0.95}
 
 
 def test_intent_router_routes_translation_without_llm() -> None:
@@ -63,16 +63,16 @@ def test_intent_router_routes_translation_without_llm() -> None:
     assert state.dialog_context["intent_classification"]["source"] == "keyword"
 
 
-def test_intent_router_prioritizes_claim_revision_over_qa_keywords() -> None:
-    """权利要求问题类输入应优先进入权利要求修改,不能被 QA 宽泛词抢占。"""
-    state = WorkflowState(raw_input="", normalized_input="我的权利要求有什么问题")
+def test_intent_router_routes_claim_problem_to_patent_drafting() -> None:
+    """权利要求撰写或修改诉求在 R11 统一进入 patent_drafting。"""
+    state = WorkflowState(raw_input="", normalized_input="我的权利要求有什么问题，帮我修改")
     node = IntentRouterNode(llm_client=RaisingLLMClient())
 
     result = node.run(state)
 
     assert result.status == "success"
-    assert state.intent == "claim_revision"
-    assert result.next_node == "claim_revise"
+    assert state.intent == "patent_drafting"
+    assert result.next_node == "drafting_leader"
 
 
 def test_intent_router_routes_question_answering_without_llm() -> None:
@@ -116,7 +116,7 @@ def test_intent_router_requires_user_input_for_low_confidence() -> None:
     assert result.status == "requires_user_input"
     assert result.errors == ["unknown_intent"]
     assert "您希望我处理哪类专利任务" in result.output["message"]
-    assert "claim_generation" in result.output["supported_intents"]
+    assert result.output["supported_intents"] == ["patent_drafting", "translation", "qa"]
 
 
 def test_intent_router_requires_user_input_for_unknown_intent() -> None:

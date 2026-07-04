@@ -29,23 +29,11 @@ class WorkflowRegistry:
 
     def __init__(self) -> None:
         self.workflow_defs = {
-            "claim_generation": WorkflowDef(
-                intent="claim_generation",
-                nodes=["normalize_input", "completeness_gate", "feature_extract", "claim_plan", "claim_generate", "claim_check"],
-                start_node="normalize_input",
-                max_loop_count=2,
-            ),
             "translation": WorkflowDef(
                 intent="translation",
                 nodes=["normalize_input", "translate"],
                 start_node="normalize_input",
                 max_loop_count=0,
-            ),
-            "claim_revision": WorkflowDef(
-                intent="claim_revision",
-                nodes=["claim_revise", "claim_check"],
-                start_node="claim_revise",
-                max_loop_count=1,
             ),
             "qa": WorkflowDef(
                 intent="qa",

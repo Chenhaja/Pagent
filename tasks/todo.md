@@ -2,25 +2,25 @@
 
 ## Phase 0 — 删除旧 claim 流程
 
-- [ ] 新增 `tests/test_claim_code_removed.py`。
+- [x] 新增 `tests/test_claim_code_removed.py`。
   - 验收：测试覆盖旧 intent 不可路由、旧 workflow 不存在、旧模块无 import 残留。
   - 验证：`conda run -n autoGLM pytest tests/test_claim_code_removed.py`
-- [ ] 删除旧 claim nodes / skills / services。
+- [x] 删除旧 claim nodes / skills / services。
   - 验收：旧 `claim_generation` / `claim_revision` 执行入口不存在。
   - 验证：旧代码删除守卫测试与 compileall。
-- [ ] 清理 `workflow_defs` 中旧 claim workflow 注册。
+- [x] 清理 `workflow_defs` 中旧 claim workflow 注册。
   - 验收：registry 不再包含 `claim_generation` / `claim_revision`。
   - 验证：`conda run -n autoGLM pytest tests/test_workflow_registry.py tests/test_claim_code_removed.py`
-- [ ] 清理 dispatch 中旧 claim 分支。
+- [x] 清理 dispatch 中旧 claim 分支。
   - 验收：`AgentDispatchService` 不再 import/use `WorkflowService`、`RevisionService` 或旧 claim workflow。
   - 验证：`conda run -n autoGLM pytest tests/test_agent_dispatch_service.py tests/test_claim_code_removed.py`
-- [ ] 清理 intent router / prompts / schemas 中旧 claim intent。
+- [x] 清理 intent router / prompts / schemas 中旧 claim intent。
   - 验收：旧 claim intent 不可分类或执行。
   - 验证：`conda run -n autoGLM pytest tests/test_intent_router_node.py tests/test_claim_code_removed.py`
-- [ ] 删除或迁移旧 claim 测试。
+- [x] 删除或迁移旧 claim 测试。
   - 验收：pytest 收集不引用已删除模块。
   - 验证：`conda run -n autoGLM pytest tests/test_claim_code_removed.py`
-- [ ] 运行 P0 验证命令。
+- [x] 运行 P0 验证命令。
   - 验收：P0 目标测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_claim_code_removed.py && conda run -n autoGLM python -m compileall app tests`
 

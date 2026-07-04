@@ -26,19 +26,19 @@
 
 ## Phase 1 — 配置与 WorkflowState
 
-- [ ] 更新 `app/core/config.py`。
+- [x] 更新 `app/core/config.py`。
   - 验收：新增 drafting 系统级配置、默认值、`PAGENT_*` 环境变量读取。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] 更新 `to_public_dict()`。
+- [x] 更新 `to_public_dict()`。
   - 验收：非敏感 drafting 配置进入公开配置；敏感项不暴露。
   - 验证：配置测试。
-- [ ] 更新 `app/models/schemas.py`。
+- [x] 更新 `app/models/schemas.py`。
   - 验收：`WorkflowState` 新增 `input_points_md`、`prior_art_md`、`outline_md`、`abstract_md`、`claims_md`、`description_md`、`figures_md`、`complete_patent_md`、`drafting_incomplete`。
   - 验证：`conda run -n autoGLM pytest tests/test_workflow_state.py`
-- [ ] 更新配置与 state 测试。
+- [x] 更新配置与 state 测试。
   - 验收：默认值、环境变量覆盖、公开配置、state 默认初始化均被覆盖。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_workflow_state.py`
-- [ ] 运行 P1 验证命令。
+- [x] 运行 P1 验证命令。
   - 验收：P1 目标测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_workflow_state.py && conda run -n autoGLM python -m compileall app tests`
 

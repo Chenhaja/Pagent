@@ -10,6 +10,16 @@ def test_workflow_state_contains_core_fields() -> None:
     assert state.intent is None
     assert state.dialog_context == {}
     assert state.invention_disclosure == {}
+    assert state.documents == []
+    assert state.input_points_md == ""
+    assert state.prior_art_md == ""
+    assert state.outline_md == ""
+    assert state.abstract_md == ""
+    assert state.claims_md == ""
+    assert state.description_md == ""
+    assert state.figures_md == ""
+    assert state.complete_patent_md == ""
+    assert state.drafting_incomplete is False
     assert state.technical_features == []
     assert state.claim_plan == {}
     assert state.claims_draft == []

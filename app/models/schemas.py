@@ -274,6 +274,15 @@ class WorkflowState(BaseModel):
         dialog_context: 会话上下文快照。
         invention_disclosure: 结构化技术交底。
         documents: 用户上传附件抽取后的文档列表。
+        input_points_md: 输入要点 Markdown 产物。
+        prior_art_md: 现有技术 Markdown 产物。
+        outline_md: 专利文书提纲 Markdown 产物。
+        abstract_md: 摘要 Markdown 产物。
+        claims_md: 权利要求 Markdown 产物。
+        description_md: 说明书 Markdown 产物。
+        figures_md: 附图说明 Markdown 产物。
+        complete_patent_md: 完整专利文书 Markdown 产物。
+        drafting_incomplete: 文书生成是否因预算或子任务失败而未完成。
         technical_features: 技术特征列表。
         claim_plan: 权利要求布局规划。
         claims_draft: 当前权利要求草稿。
@@ -293,6 +302,15 @@ class WorkflowState(BaseModel):
     dialog_context: dict[str, Any] = Field(default_factory=dict)
     invention_disclosure: dict[str, Any] = Field(default_factory=dict)
     documents: list[dict[str, Any]] = Field(default_factory=list)
+    input_points_md: str = ""
+    prior_art_md: str = ""
+    outline_md: str = ""
+    abstract_md: str = ""
+    claims_md: str = ""
+    description_md: str = ""
+    figures_md: str = ""
+    complete_patent_md: str = ""
+    drafting_incomplete: bool = False
     technical_features: list[dict[str, Any]] = Field(default_factory=list)
     claim_plan: dict[str, Any] = Field(default_factory=dict)
     claims_draft: list[dict[str, Any]] = Field(default_factory=list)

@@ -10,6 +10,7 @@ from app.tools.official_fee import OfficialFeeTool
 from app.tools.patent_search import PatentSearchTool
 from app.tools.retrieval import Retriever, RetrievalResult, build_retriever
 from app.tools.skill_loader import ALLOWED_SKILL_DOCS, SkillLoaderTool
+from app.tools.todo import TodoTool
 from app.tools.websearch import WebSearchTool
 
 
@@ -281,6 +282,36 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
             description="受联网配置和 SerpAPI Key 门控的专利检索工具,支持 query/top_k/country/status 并默认安全降级。",
             input_schema=PATENT_SEARCH_INPUT_SCHEMA,
             external=True,
+            enabled=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="todo",
+            runner=TodoTool(),
+            description="维护 Leader 或子代理的完整 todo 列表,支持 owner 隔离与上下文渲染。",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string"},
+                    "action": {"type": "string", "enum": ["replace", "render"]},
+                    "todos": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string"},
+                                "status": {"type": "string", "enum": ["pending", "in_progress", "done"]},
+                            },
+                            "required": ["content", "status"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["owner"],
+                "additionalProperties": False,
+            },
+            external=False,
             enabled=True,
         )
     )

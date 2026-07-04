@@ -95,28 +95,28 @@
 
 ## Phase 3.5 — `todo` 工具与 `todo_prompt`
 
-- [ ] 新增 `app/prompts/todo_prompt.py`。
+- [x] 新增 `app/prompts/todo_prompt.py`。
   - 验收：包含 R12 §4.2 的规划 prompt，工具名按用户要求改为 `todo`。
   - 验证：prompt review 或 prompt 常量测试。
-- [ ] 新增 `app/tools/todo.py`。
+- [x] 新增 `app/tools/todo.py`。
   - 验收：工具名为 `todo`，输入完整 todo 列表。
   - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py`
-- [ ] 新增 `tests/test_todo_tool.py`。
+- [x] 新增 `tests/test_todo_tool.py`。
   - 验收：覆盖状态枚举、owner 隔离、完整列表覆盖、上下文渲染、非法状态拒绝。
   - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py`
-- [ ] 实现状态枚举校验。
+- [x] 实现状态枚举校验。
   - 验收：只允许 `pending`、`in_progress`、`done`。
   - 验证：todo 工具测试。
-- [ ] 实现 owner 隔离。
+- [x] 实现 owner 隔离。
   - 验收：Leader 与每个子代理 todo 状态互不污染。
   - 验证：todo owner 测试。
-- [ ] 实现 todo 上下文渲染。
+- [x] 实现 todo 上下文渲染。
   - 验收：可将当前 todo 列表注入 Leader / 子代理上下文。
   - 验证：todo 渲染测试。
-- [ ] 注册 `todo` 工具。
+- [x] 注册 `todo` 工具。
   - 验收：`ToolRegistry` 可获取 `todo`；不注册 `write_todos`。
   - 验证：registry 测试。
-- [ ] 运行 P3.5 验证命令。
+- [x] 运行 P3.5 验证命令。
   - 验收：todo 测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py && conda run -n autoGLM python -m compileall app tests`
 

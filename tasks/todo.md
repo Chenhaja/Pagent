@@ -65,22 +65,22 @@
 
 ## Phase 3 — subagent-as-tool
 
-- [ ] 新增 `app/tools/subagents/`。
+- [x] 新增 `app/tools/subagents/`。
   - 验收：目录下包含统一子代理工具接口与注册入口。
   - 验证：`conda run -n autoGLM pytest tests/test_subagent_tools.py`
-- [ ] 实现 8 个子代理工具。
+- [x] 实现 8 个子代理工具。
   - 验收：每个子代理统一返回 Markdown + `artifact_key` + `done`。
   - 验证：subagent 工具测试。
-- [ ] 实现子代理 prompt。
+- [x] 实现子代理 prompt。
   - 验收：prompt 集中维护，覆盖任务目标、上下文/判定规则、角色、受众、样例、输出格式。
   - 验证：prompt 结构测试或 review。
-- [ ] 限制子代理只按 workspace key 读取正文。
+- [x] 限制子代理只按 workspace key 读取正文。
   - 验收：工具参数不接收长正文；正文通过 `draft_workspace` 读取。
   - 验证：subagent 工具测试。
-- [ ] 新增 `tests/test_subagent_tools.py`。
+- [x] 新增 `tests/test_subagent_tools.py`。
   - 验收：覆盖成功、失败、artifact 写入、`done` 状态和参数安全。
   - 验证：`conda run -n autoGLM pytest tests/test_subagent_tools.py`
-- [ ] 运行 P3 验证命令。
+- [x] 运行 P3 验证命令。
   - 验收：P3 目标测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_subagent_tools.py && conda run -n autoGLM python -m compileall app tests`
 

@@ -264,6 +264,10 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
             enabled=True,
         )
     )
+    from app.tools.subagents import build_patent_drafting_subagent_specs
+
+    for subagent_spec in build_patent_drafting_subagent_specs(current_settings):
+        registry.register(subagent_spec)
     external_enabled = getattr(current_settings, "agentic_external_tools_enabled", False)
     registry.register(
         ToolSpec(

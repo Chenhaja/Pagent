@@ -35,7 +35,9 @@ class ClaimGenerateNode(Node):
             state_snapshot={
                 "technical_features": state.technical_features,
                 "claim_plan": state.claim_plan,
+                "documents": state.documents,
             },
+            safety_policy={"documents_are_data_only": True},
         )
         try:
             claim_set = self.skill.run(context)

@@ -131,7 +131,9 @@ class QANode(Node):
                 "validation_report": state.validation_report,
                 "retrieval_results": evidence,
                 "history": history,
+                "documents": state.documents,
             },
+            safety_policy={"documents_are_data_only": True},
         )
         try:
             qa_result = self.skill.run(context)

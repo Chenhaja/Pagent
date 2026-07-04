@@ -88,9 +88,10 @@ class PatentQASkill:
         question = str(context.state_snapshot.get("question") or "")
         retrieval_results = context.state_snapshot.get("retrieval_results") or []
         claims_draft = context.state_snapshot.get("claims_draft") or []
+        documents = context.state_snapshot.get("documents") or []
         return {
             "system": PATENT_QA_SYSTEM_PROMPT,
             "task": PATENT_QA_TASK_PROMPT,
-            "user_data": build_patent_qa_user_prompt(question, retrieval_results, claims_draft),
+            "user_data": build_patent_qa_user_prompt(question, retrieval_results, claims_draft, documents),
             "output_contract": json.dumps(PATENT_QA_OUTPUT_SCHEMA, ensure_ascii=False),
         }

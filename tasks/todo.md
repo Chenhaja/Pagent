@@ -17,31 +17,31 @@
 
 ## Phase 1 — `draft_workspace` 项目工作区
 
-- [ ] 新增或改写 `tests/test_draft_workspace.py`。
+- [x] 新增或改写 `tests/test_draft_workspace.py`。
   - 验收：覆盖内存模式、磁盘模式、目录结构、`write` / `read` / `list` / `merge`、路径安全。
   - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py`
-- [ ] 将 `DraftWorkspaceTool` 默认存储改为内存 key-store。
+- [x] 将 `DraftWorkspaceTool` 默认存储改为内存 key-store。
   - 验收：`draft_workspace_dir=""` 时不创建磁盘目录或文件。
   - 验证：workspace 测试。
-- [ ] 支持磁盘落盘模式。
+- [x] 支持磁盘落盘模式。
   - 验收：`PAGENT_DRAFT_WORKSPACE_DIR` 非空时 artifact 落在 workspace 根目录内。
   - 验证：workspace 测试。
-- [ ] 支持项目工作区目录结构。
+- [x] 支持项目工作区目录结构。
   - 验收：逻辑目录包含 `01_input`、`02_research`、`03_outline`、`04_content`、`05_final`。
   - 验证：workspace 测试。
-- [ ] 支持相对路径 artifact key。
+- [x] 支持相对路径 artifact key。
   - 验收：允许 `04_content/abstract.md` 等 key；拒绝绝对路径、`..`、非法字符。
   - 验证：workspace 路径安全测试。
-- [ ] 实现 `list` 动作。
+- [x] 实现 `list` 动作。
   - 验收：可按 prefix 枚举目录下 artifact，供 Leader 审查缺文件。
   - 验证：workspace list 测试。
-- [ ] 实现 `merge` 动作。
+- [x] 实现 `merge` 动作。
   - 验收：按输入顺序合并多个 artifact 并写入目标 key。
   - 验证：workspace merge 测试。
-- [ ] 更新 `ToolRegistry` 中 `draft_workspace` schema 与描述。
+- [x] 更新 `ToolRegistry` 中 `draft_workspace` schema 与描述。
   - 验收：schema 支持 `list` / `merge` 所需参数。
   - 验证：tool registry 相关测试。
-- [ ] 运行 P1 验证命令。
+- [x] 运行 P1 验证命令。
   - 验收：workspace 测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py && conda run -n autoGLM python -m compileall app tests`
 

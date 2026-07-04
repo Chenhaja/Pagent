@@ -228,11 +228,18 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="draft_workspace",
             runner=DraftWorkspaceTool(current_settings),
-            description="读写专利文书生成过程中的 Markdown artifact,参数只传 artifact_key 和必要正文。",
+            description="维护专利文书项目工作区 artifact,支持 read/write/list/merge,长正文只通过 workspace key 流转。",
             input_schema={
                 "type": "object",
-                "properties": {"action": {"type": "string"}, "artifact_key": {"type": "string"}, "content": {"type": "string"}},
-                "required": ["action", "artifact_key"],
+                "properties": {
+                    "action": {"type": "string", "enum": ["write", "read", "list", "merge"]},
+                    "artifact_key": {"type": "string"},
+                    "content": {"type": "string"},
+                    "prefix": {"type": "string"},
+                    "source_artifact_keys": {"type": "array", "items": {"type": "string"}},
+                    "output_artifact_key": {"type": "string"},
+                },
+                "required": ["action"],
                 "additionalProperties": False,
             },
             external=False,

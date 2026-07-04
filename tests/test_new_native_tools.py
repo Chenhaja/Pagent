@@ -13,7 +13,7 @@ def test_draft_workspace_writes_and_reads_artifacts(tmp_path) -> None:
     read = tool.run({"action": "read", "artifact_key": "input_points"})
 
     assert written.error is None
-    assert written.evidence[0]["artifact_key"] == "input_points"
+    assert written.evidence[0]["artifact_key"] == "input_points.md"
     assert written.evidence[0]["chars"] == 4
     assert read.error is None
     assert read.evidence[0]["content"] == "技术要点"

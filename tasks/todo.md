@@ -86,28 +86,28 @@
 
 ## Phase 4 — drafting_leader
 
-- [ ] 新增 `app/prompts/patent_drafting_sop.py`。
+- [x] 新增 `app/prompts/patent_drafting_sop.py`。
   - 验收：SOP prompt 集中维护，明确步骤顺序和输出约束。
   - 验证：leader 测试或 prompt review。
-- [ ] 新增 `app/nodes/drafting_leader.py`。
+- [x] 新增 `app/nodes/drafting_leader.py`。
   - 验收：复用 `QANode` bounded ReAct 模式，接入 `BoundedReActLoop`、`ReActBudget`、`ToolRegistry`。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py`
-- [ ] 实现工具白名单。
+- [x] 实现工具白名单。
   - 验收：leader 只能调用 drafting 允许的 native tools 与 subagent tools。
   - 验证：leader 测试。
-- [ ] 实现 SOP 顺序控制。
+- [x] 实现 SOP 顺序控制。
   - 验收：输入整理、现有技术、提纲、摘要、权利要求、说明书、附图说明、完整文书整合顺序可测。
   - 验证：leader 测试。
-- [ ] 实现预算与 incomplete 兜底。
+- [x] 实现预算与 incomplete 兜底。
   - 验收：预算耗尽或子代理未完成时设置 `drafting_incomplete=True`。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py tests/test_react_policy.py`
-- [ ] 实现 trace 脱敏。
+- [x] 实现 trace 脱敏。
   - 验收：trace 只含工具名、artifact key、长度、状态、错误摘要，不含正文。
   - 验证：leader 测试或安全测试。
-- [ ] 新增 `tests/test_drafting_leader.py`。
+- [x] 新增 `tests/test_drafting_leader.py`。
   - 验收：覆盖调用顺序、工具白名单、预算命中、trace 脱敏、state 字段写入。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py`
-- [ ] 运行 P4 验证命令。
+- [x] 运行 P4 验证命令。
   - 验收：P4 目标测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py tests/test_agentic_loop.py tests/test_react_policy.py && conda run -n autoGLM python -m compileall app tests`
 

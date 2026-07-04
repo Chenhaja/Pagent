@@ -8,3 +8,4 @@ pagent_memory.db
 *.sqlite3
 *.jsonl
 *.json
+.pagent_attachments

@@ -4,9 +4,12 @@ from typing import Any
 from app.core.config import Settings, get_settings
 from app.orchestrator.react_loop import ReActTool, ToolObservation
 from app.orchestrator.react_policy import ToolCard
+from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.legal_status import LegalStatusTool
 from app.tools.official_fee import OfficialFeeTool
+from app.tools.patent_search import PatentSearchTool
 from app.tools.retrieval import Retriever, RetrievalResult, build_retriever
+from app.tools.skill_loader import SkillLoaderTool
 from app.tools.websearch import WebSearchTool
 
 
@@ -218,6 +221,46 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
             description="检索本地专利知识库、法规和既有材料,用于获取可引用 evidence。",
             input_schema=QUERY_INPUT_SCHEMA,
             external=False,
+            enabled=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="draft_workspace",
+            runner=DraftWorkspaceTool(current_settings),
+            description="读写专利文书生成过程中的 Markdown artifact,参数只传 artifact_key 和必要正文。",
+            input_schema={
+                "type": "object",
+                "properties": {"action": {"type": "string"}, "artifact_key": {"type": "string"}, "content": {"type": "string"}},
+                "required": ["action", "artifact_key"],
+                "additionalProperties": False,
+            },
+            external=False,
+            enabled=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="skill_loader",
+            runner=SkillLoaderTool(),
+            description="按白名单读取本地专利 skill/template 内容,不允许任意路径。",
+            input_schema={
+                "type": "object",
+                "properties": {"skill_name": {"type": "string"}},
+                "required": ["skill_name"],
+                "additionalProperties": False,
+            },
+            external=False,
+            enabled=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="patent_search",
+            runner=PatentSearchTool(current_settings),
+            description="受联网配置门控的专利检索工具,默认离线安全降级。",
+            input_schema=QUERY_INPUT_SCHEMA,
+            external=True,
             enabled=True,
         )
     )

@@ -44,22 +44,22 @@
 
 ## Phase 2 — native tools
 
-- [ ] 新增 `app/tools/draft_workspace.py`。
+- [x] 新增 `app/tools/draft_workspace.py`。
   - 验收：支持 artifact 读写，key/path 安全，不允许目录穿越。
   - 验证：`conda run -n autoGLM pytest tests/test_new_native_tools.py`
-- [ ] 新增 `app/tools/skill_loader.py`。
+- [x] 新增 `app/tools/skill_loader.py`。
   - 验收：按白名单加载 drafting 所需 skill/template，不读取任意路径。
   - 验证：native tool 测试。
-- [ ] 新增 `app/tools/patent_search.py`。
+- [x] 新增 `app/tools/patent_search.py`。
   - 验收：默认 skipped/fake；联网受配置门控；异常安全降级。
   - 验证：native tool 测试；联网测试单独标记 `network`。
-- [ ] 注册 `ToolRegistry`。
+- [x] 注册 `ToolRegistry`。
   - 验收：三个 native tools 可通过稳定工具名调用。
   - 验证：`conda run -n autoGLM pytest tests/test_agentic_tools.py tests/test_new_native_tools.py`
-- [ ] 新增 `tests/test_new_native_tools.py`。
+- [x] 新增 `tests/test_new_native_tools.py`。
   - 验收：覆盖离线可测、路径安全、联网门控、异常降级。
   - 验证：`conda run -n autoGLM pytest tests/test_new_native_tools.py`
-- [ ] 运行 P2 验证命令。
+- [x] 运行 P2 验证命令。
   - 验收：P2 目标测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_new_native_tools.py tests/test_agentic_tools.py && conda run -n autoGLM python -m compileall app tests`
 

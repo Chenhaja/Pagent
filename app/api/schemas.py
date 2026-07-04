@@ -1,6 +1,6 @@
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ClaimGenerationRequest(BaseModel):
@@ -113,6 +113,48 @@ class ClaimRevisionResponse(BaseModel):
     version: str
     validation_report: dict[str, Any]
     disclaimer: str
+
+
+class AttachmentUploadResponse(BaseModel):
+    """附件上传响应。
+
+    Args:
+        attachment_id: 附件 ID。
+        filename: 原始文件名。
+        content_type: 上传内容类型。
+        bytes: 附件字节数。
+        chars: 抽取后正文字符数。
+        truncated: 是否发生截断。
+        doc_type: 文档类型。
+        format: 抽取正文格式。
+        media: 媒体元数据列表。
+
+    Returns:
+        单个附件上传结果。
+    """
+
+    attachment_id: str
+    filename: str
+    content_type: str | None
+    bytes: int
+    chars: int
+    truncated: bool
+    doc_type: str
+    format: Literal["markdown", "text"]
+    media: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AttachmentUploadBatchResponse(BaseModel):
+    """批量附件上传响应。
+
+    Args:
+        attachments: 附件上传结果列表。
+
+    Returns:
+        批量附件上传结果。
+    """
+
+    attachments: list[AttachmentUploadResponse]
 
 
 class AgentRequest(BaseModel):

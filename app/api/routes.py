@@ -2,12 +2,13 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.log_context import bind_context, new_request_id, reset_context
 from app.core.logging import log_event
 from app.api.schemas import (
     AgentRequest,
+    AttachmentUploadBatchResponse,
     ClaimGenerationRequest,
     ClaimGenerationResponse,
     ClaimRevisionRequest,
@@ -16,6 +17,7 @@ from app.api.schemas import (
     TranslateResponse,
 )
 from app.services.agent_dispatch_service import AgentDispatchService
+from app.services.attachment_service import AttachmentService, AttachmentServiceError
 from app.services.revision_service import RevisionService
 from app.services.translate_service import TranslateService
 from app.services.workflow_service import WorkflowService
@@ -50,6 +52,44 @@ def health_check() -> dict[str, str]:
         固定健康状态,用于确认 API 服务已启动。
     """
     return {"status": "ok"}
+
+
+@router.post("/agent/attachments", response_model=AttachmentUploadBatchResponse)
+async def upload_agent_attachments(files: list[UploadFile] = File(...), doc_type: str = Form("other")) -> dict[str, Any]:
+    """上传并解析 Agent 附件。
+
+    Args:
+        files: multipart 上传文件列表。
+        doc_type: 文档类型,默认 other。
+
+    Returns:
+        批量附件上传结果。
+
+    Raises:
+        HTTPException: 当附件校验或解析失败时抛出。
+    """
+    service = AttachmentService()
+    try:
+        service.validate_count(len(files))
+        attachments = []
+        for file in files:
+            content = await file.read()
+            attachments.append(service.save_upload(file.filename or "attachment", file.content_type, content, doc_type))
+        log_event(
+            logger,
+            logging.INFO,
+            "attachment_received",
+            "附件上传完成",
+            count=len(attachments),
+            bytes=sum(item["bytes"] for item in attachments),
+        )
+        return {"attachments": attachments}
+    except AttachmentServiceError as exc:
+        log_event(logger, logging.WARNING, "attachment_rejected", "附件上传被拒绝", reason=exc.code, count=len(files))
+        raise HTTPException(
+            status_code=400,
+            detail={"status": "failed", "errors": [exc.code], "message": exc.message, "disclaimer": DISCLAIMER},
+        ) from exc
 
 
 @router.post("/agent")

@@ -1,225 +1,201 @@
-# R9 CoT 推理链采集与分析 Todo
+# R10 Agent 端口文件处理 Todo
 
-## Phase 0 — 口径确认与基线锁定
+## Phase 0 — 开放决策确认
 
-- [ ] 确认允许扩展 `LLMResponse.trace`。
-  - 验收：仅新增可选无正文字段 `reasoning_chars`、`has_reasoning`。
-  - 验证：人工 review `tasks/plan.md` 的 Checkpoint 0。
-- [ ] 确认本轮只做观测/评估用途。
-  - 验收：不改变 ReAct 决策、反思、检索、收敛业务行为。
-  - 验证：review 计划和后续 diff。
-- [ ] 确认默认不采集推理正文。
-  - 验收：`cot_capture_enabled=False` 为默认值。
+- [ ] 确认 `.pdf` 是否纳入 R10 必做范围。
+  - 验收：计划中明确 `.pdf` 是本轮实现还是后续增量。
+  - 验证：人工 review `tasks/plan.md` 的 Phase 0。
+- [ ] 确认新增上传与 Office 解析依赖。
+  - 验收：允许新增 `python-multipart`、`mammoth`、`python-pptx`；如启用 `.pdf`，同步确认 PDF 纯文本抽取依赖。
+  - 验证：review 后续 `requirements.txt` diff。
+- [ ] 确认默认限制值。
+  - 验收：采用 `input_max_chars=2000`、`attachment_max_bytes=10485760`、`attachment_max_count=5`、`attachment_max_chars=50000`、`attachment_storage_dir=.pagent_attachments`，或记录替代值。
   - 验证：配置测试。
-- [ ] 确认生产环境强制不采集正文。
-  - 验收：`cot_require_local_env=True` 且 `environment=prod` 时 sink 不写正文。
-  - 验证：CoT 采集测试。
-- [ ] 确认不新增第三方依赖。
-  - 验收：`requirements.txt` 不变。
-  - 验证：review diff。
-- [ ] 确认默认测试不触网、不调用真实 LLM。
-  - 验收：新增测试使用 fake/stub/caplog/tmp_path。
-  - 验证：review 测试实现。
+- [ ] 确认上传响应使用批量包装。
+  - 验收：`POST /agent/attachments` 返回 `{"attachments": [...]}`。
+  - 验证：上传 API 测试。
+- [ ] 确认 `input_max_chars >= llm_max_tokens` 只 warning。
+  - 验收：配置异常只记录告警，不阻止服务启动。
+  - 验证：配置测试或 caplog 测试。
 
-## Phase 1 — Reasoning sink 安全写入闭环
+## Phase 1 — 配置与 raw_input 上限闭环
 
-- [ ] 新增 `app/core/reasoning_sink.py`。
-  - 验收：模块可 import。
-  - 验证：`conda run -n autoGLM pytest tests/test_reasoning_sink.py`
-- [ ] 定义 `ReasoningRecord`。
-  - 验收：字段包含 `request_id`、`node_name`、`task_type`、`step_index`、`source`、`text`、`outcome`。
-  - 验证：reasoning sink 单测。
-- [ ] 定义 `ReasoningTraceSink` 协议。
-  - 验收：包含 `write(record: ReasoningRecord) -> None`。
-  - 验证：类型/单测 import。
-- [ ] 实现 `NoopReasoningSink`。
-  - 验收：`write()` 不产生文件、不抛异常。
-  - 验证：单测。
-- [ ] 实现 `JsonlReasoningSink`。
-  - 验收：写入合法 JSON Lines；不写 stdout。
-  - 验证：tmp_path 单测读取 JSONL。
-- [ ] 写入前脱敏正文。
-  - 验收：`sk-...`、`Bearer ...`、`password=...`、`token=...`、`api_key=...` 被替换。
-  - 验证：单测。
-- [ ] 写入前截断正文。
-  - 验收：超过 `cot_max_chars` 的正文带稳定截断标记。
-  - 验证：单测。
-- [ ] sink 异常吞掉。
-  - 验收：文件写入失败或序列化失败不影响调用方。
-  - 验证：注入异常 sink / monkeypatch 单测。
-
-## Phase 2 — CoT 配置控制闭环
-
-- [ ] `Settings` 新增 `cot_capture_enabled`。
-  - 验收：默认 `False`；`PAGENT_COT_CAPTURE_ENABLED=true/false` 可读取。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] `Settings` 新增 `cot_capture_sources`。
-  - 验收：默认包含 `native_cot`、`thought`、`reason`；env 逗号分隔可覆盖。
+- [ ] 新增 `input_max_chars` 配置。
+  - 验收：`Settings` 默认值为 `2000`，`PAGENT_INPUT_MAX_CHARS` 可覆盖。
+  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_input_limit.py`
+- [ ] 新增附件护栏配置。
+  - 验收：`Settings` 包含 `attachment_max_bytes`、`attachment_max_count`、`attachment_max_chars`、`attachment_allowed_types`、`attachment_storage_dir`。
   - 验证：配置测试。
-- [ ] `Settings` 新增 `cot_max_chars`。
-  - 验收：默认 `1200`；`PAGENT_COT_MAX_CHARS` 可读取为整数。
+- [ ] 新增 `allow_network` 配置。
+  - 验收：默认 `True`，`PAGENT_ALLOW_NETWORK` 可覆盖；默认测试不触网。
   - 验证：配置测试。
-- [ ] `Settings` 新增 `cot_sink_path`。
-  - 验收：默认 `logs/reasoning.jsonl`；`PAGENT_COT_SINK_PATH` 可覆盖。
-  - 验证：配置测试。
-- [ ] `Settings` 新增 `cot_require_local_env`。
-  - 验收：默认 `True`；`PAGENT_COT_REQUIRE_LOCAL_ENV=false` 可读取。
-  - 验证：配置测试。
-- [ ] 更新 `Settings` docstring。
-  - 验收：新增 `cot_*` 配置均有中文说明。
-  - 验证：review。
-- [ ] 更新 `get_settings()`。
-  - 验收：五个 `PAGENT_COT_*` 环境变量生效。
+- [ ] 更新 `get_settings()` 环境变量读取。
+  - 验收：新增 `PAGENT_*` 环境变量均生效。
   - 验证：配置测试。
 - [ ] 更新 `to_public_dict()`。
-  - 验收：包含新增 `cot_*` 非敏感配置；不包含 key/token/secret/password。
+  - 验收：新增非敏感配置进入公开配置；不包含 API Key、token、secret、password。
   - 验证：配置测试。
+- [ ] 实现 `raw_input.strip()` 超限前置拒绝。
+  - 验收：超限请求在 normalize / rewrite / router 前返回 `requires_user_input`。
+  - 验证：`conda run -n autoGLM pytest tests/test_input_limit.py tests/test_agent_dispatch_service.py`
+- [ ] 统一 API 超限错误包装。
+  - 验收：`/agent` 超限返回 400，错误码包含 `raw_input_too_long`，message 引导使用文件上传。
+  - 验证：`conda run -n autoGLM pytest tests/test_agent_api.py tests/test_input_limit.py`
+- [ ] 确保超限 trace / 日志不含正文。
+  - 验收：只记录 `input_len`、`limit`、错误原因等元数据。
+  - 验证：输入限制或安全测试。
 
-## Phase 3 — LLM reasoning 提取与 trace 元数据闭环
+## Phase 2 — 文件抽取闭环
 
-- [ ] `LLMResponse` 新增 `reasoning_text`。
-  - 验收：默认 `None`，已有调用方不传该字段仍兼容。
-  - 验证：`conda run -n autoGLM pytest tests/test_llm_tool.py tests/test_cot_capture.py`
-- [ ] `FakeLLMClient` 支持注入 `reasoning_text`。
-  - 验收：测试可构造带原生 reasoning 的 fake response。
-  - 验证：CoT 采集测试。
-- [ ] Fake trace 增加 reasoning 元数据。
-  - 验收：`has_reasoning`、`reasoning_chars` 正确；不含正文。
-  - 验证：CoT 采集测试。
-- [ ] `OpenAICompatibleClient` 提取 `message.reasoning_content`。
-  - 验收：响应样本含该字段时进入 `LLMResponse.reasoning_text`。
-  - 验证：LLM tool / CoT 测试。
-- [ ] `OpenAICompatibleClient` 提取 `message.reasoning`。
-  - 验收：响应样本含该字段时进入 `LLMResponse.reasoning_text`。
-  - 验证：LLM tool / CoT 测试。
-- [ ] 无 reasoning 字段时安全退回。
-  - 验收：`reasoning_text is None` 且不报错。
-  - 验证：LLM tool / CoT 测试。
-- [ ] 成功响应 trace 增加 reasoning 元数据。
-  - 验收：`has_reasoning` / `reasoning_chars` 正确，不含正文。
-  - 验证：CoT 测试。
-- [ ] 错误响应 trace 增加 reasoning 元数据默认值。
-  - 验收：错误路径也包含 `has_reasoning=False`、`reasoning_chars=0`。
-  - 验证：LLM tool 测试。
-- [ ] `llm_call` 日志允许输出 reasoning 元数据。
-  - 验收：`LoggingLLMTraceSink` 不丢弃 `has_reasoning`、`reasoning_chars`，仍丢弃正文类字段。
-  - 验证：日志相关测试。
+- [ ] 新增 `app/tools/file_extract.py`。
+  - 验收：模块提供可导入抽取函数，按扩展名分派，返回结构化抽取结果。
+  - 验证：`conda run -n autoGLM pytest tests/test_attachment_extract.py`
+- [ ] 实现 `.txt` / `.md` 抽取。
+  - 验收：UTF-8 优先直读，必要时容错解码；返回 `format="text"` 或 `format="markdown"`。
+  - 验证：附件抽取测试。
+- [ ] 实现文本归一化。
+  - 验收：去控制字符、统一换行、折叠过多空白。
+  - 验证：附件抽取测试。
+- [ ] 实现抽取文本截断。
+  - 验收：超过 `attachment_max_chars` 时截断，返回 `truncated=true`，`chars` 与截断后文本一致。
+  - 验证：附件抽取测试。
+- [ ] 新增 `app/tools/office_to_md.py`。
+  - 验收：提供可导入函数，不依赖 argparse、Bash 或 `CLAUDE_SKILL_DIR`。
+  - 验证：附件抽取测试和 compileall。
+- [ ] 实现 `.docx` 转 Markdown。
+  - 验收：使用 `mammoth`，标题、列表、表格等结构尽量可辨。
+  - 验证：附件抽取测试。
+- [ ] 实现 `.pptx` 转 Markdown。
+  - 验收：使用 `python-pptx`，每页输出 `## 第 N 页`，表格转 Markdown，备注输出为“备注”块。
+  - 验证：附件抽取测试。
+- [ ] 明确拒绝 `.doc` / `.ppt`。
+  - 验收：返回可读不支持错误，不尝试 shell 转换。
+  - 验证：附件抽取测试。
+- [ ] 处理 media 元数据。
+  - 验收：图片等 media 写入 `media/`，进入元数据清单；R10 阶段不注入 `<data>`。
+  - 验证：附件抽取测试。
+- [ ] 同步新增依赖到 `requirements.txt`。
+  - 验收：包含 `mammoth`、`python-pptx`；上传端点阶段包含 `python-multipart`。
+  - 验证：review diff。
 
-## Phase 4 — ReAct 旁路采集闭环
+## Phase 3 — 附件服务与上传端点闭环
 
-- [ ] 在 `LLMReActPolicy.decide()` 保存最近 decision reasoning。
-  - 验收：loop 可只读获取 native CoT；不改变 `ReActDecision` 字段。
-  - 验证：CoT 采集测试。
-- [ ] 在 `LLMReActPolicy.reflect()` 保存最近 reflect reasoning。
-  - 验收：loop 可只读获取 native CoT；不改变 `ReflectResult` 字段。
-  - 验证：CoT 采集测试。
-- [ ] `BoundedReActLoop` 支持注入 settings / reasoning sink。
-  - 验收：默认继承全局配置；测试可注入 Noop/InMemory/Jsonl sink。
-  - 验证：agentic loop / CoT 测试。
-- [ ] 实现正文采集允许判断 helper。
-  - 验收：同时满足 enabled、source 命中、local gate 才写正文。
-  - 验证：CoT 采集测试。
-- [ ] 实现 `_capture_reasoning_signal(...)`。
-  - 验收：始终输出 `cot_captured` 元数据；允许时写 sink；异常吞掉。
-  - 验证：CoT 采集测试。
-- [ ] Act 后采集 `native_cot`。
-  - 验收：LLM decision reasoning 存在时记录 source=`native_cot`。
-  - 验证：CoT 采集测试。
-- [ ] Act 后采集 `thought`。
-  - 验收：`ReActDecision.thought` 记录元数据；允许时写 sink。
-  - 验证：CoT 采集测试。
-- [ ] Reflect 后采集 `native_cot`。
-  - 验收：LLM reflect reasoning 存在时记录 source=`native_cot`。
-  - 验证：CoT 采集测试。
-- [ ] Reflect 后采集 `reason`。
-  - 验收：`ReflectResult.reason` 记录元数据；允许时写 sink。
-  - 验证：CoT 采集测试。
-- [ ] `react_step` 增补 reasoning 元数据。
-  - 验收：包含 `has_reasoning`、`reasoning_chars`，不含正文。
-  - 验证：agentic loop 测试。
-- [ ] 默认配置不写正文。
-  - 验收：`cot_capture_enabled=False` 时无 reasoning JSONL。
-  - 验证：CoT 采集测试。
-- [ ] local 开关开启写正文。
-  - 验收：`environment=local` 且 enabled 时写入脱敏截断正文。
-  - 验证：CoT 采集测试。
-- [ ] prod 强制不写正文。
-  - 验收：`environment=prod` 且 `cot_require_local_env=True` 时 captured=false。
-  - 验证：CoT 采集测试。
-- [ ] sink 异常不影响 ReAct 结果。
-  - 验收：异常 sink 下 outcome 与正常路径一致。
-  - 验证：agentic loop 测试。
+- [ ] 新增附件上传响应 schema。
+  - 验收：`AttachmentUploadResponse` 包含 `attachment_id`、filename、content_type、bytes、chars、truncated、doc_type、format、media。
+  - 验证：`conda run -n autoGLM pytest tests/test_attachment_upload.py`
+- [ ] 新增批量上传响应 schema。
+  - 验收：`AttachmentUploadBatchResponse` 返回 `attachments: list[AttachmentUploadResponse]`。
+  - 验证：上传 API 测试。
+- [ ] 新增 `app/services/attachment_service.py`。
+  - 验收：模块负责生成 ID、校验、保存、解析、读取 metadata。
+  - 验证：附件上传测试。
+- [ ] 实现不可预测 `attachment_id`。
+  - 验收：ID 不使用用户原始文件名直接构造。
+  - 验证：附件服务测试。
+- [ ] 实现附件数量校验。
+  - 验收：单次上传超过 `attachment_max_count` 被拒绝。
+  - 验证：附件上传测试。
+- [ ] 实现单文件大小校验。
+  - 验收：超过 `attachment_max_bytes` 被拒绝。
+  - 验证：附件上传测试。
+- [ ] 实现扩展名白名单校验。
+  - 验收：不在 `attachment_allowed_types` 的文件被拒绝。
+  - 验证：附件上传测试。
+- [ ] 实现 `doc_type` 校验。
+  - 验收：仅允许 `invention_disclosure`、`specification`、`claims`、`office_action`、`prior_art`、`other`。
+  - 验证：附件上传测试。
+- [ ] 实现附件文件保存结构。
+  - 验收：保存 original、extracted、metadata、media；读取时路径位于 `attachment_storage_dir` 内。
+  - 验证：附件服务测试。
+- [ ] 新增 `POST /agent/attachments`。
+  - 验收：接收 multipart `files` 和可选 `doc_type`，返回 `{"attachments": [...]}`。
+  - 验证：附件上传 API 测试。
+- [ ] 上传端点错误复用现有包装风格。
+  - 验收：类型、大小、数量、解析失败错误可读且 HTTP 状态合理。
+  - 验证：附件上传测试。
+- [ ] 附件上传日志只记录元数据。
+  - 验收：`attachment_received`、`attachment_rejected`、`attachment_parsed` 不含正文。
+  - 验证：日志或安全测试。
 
-## Phase 5 — 安全合规与不回灌证明闭环
+## Phase 4 — `/agent` attachment_ids 注入闭环
 
-- [ ] 主日志不含推理正文。
-  - 验收：caplog/stdout 中不出现注入的 CoT / thought / reason 正文。
-  - 验证：`conda run -n autoGLM pytest tests/test_security_compliance.py`
-- [ ] 用户返回不含推理正文。
-  - 验收：`ReActOutcome` / API 可见返回不出现 CoT / reason 正文。
-  - 验证：安全或 agentic 测试。
-- [ ] `LLMResponse.trace` 不含推理正文。
-  - 验收：trace 只有 `has_reasoning`、`reasoning_chars`。
-  - 验证：CoT 采集测试。
-- [ ] scratchpad 不含推理正文。
-  - 验收：scratchpad 仍只保存 thought_len / observation 摘要等字段。
-  - 验证：agentic loop 测试。
-- [ ] 后续 prompt 不含上一步推理正文。
-  - 验收：记录后续 `decide` / `reflect` 输入，grep 不到 reasoning 正文。
-  - 验证：agentic loop 测试。
-- [ ] reasoning sink 正文已脱敏。
-  - 验收：敏感样本写入后只出现 `[REDACTED]` 或等价占位。
+- [ ] `AgentRequest` 新增 `attachment_ids`。
+  - 验收：字段默认空列表；旧请求不传该字段仍兼容。
+  - 验证：`conda run -n autoGLM pytest tests/test_agent_api.py tests/test_attachment_inject.py`
+- [ ] `WorkflowState` 新增 `documents`。
+  - 验收：默认空列表，用于承载附件正文和元数据。
+  - 验证：附件注入测试。
+- [ ] `AgentDispatchService.dispatch()` 接收附件 ID。
+  - 验收：API 能把 `attachment_ids` 传入 dispatch。
+  - 验证：附件注入测试。
+- [ ] 加载附件并写入 `WorkflowState.documents`。
+  - 验收：有效 ID 对应文档进入 state，字段含 attachment_id、filename、doc_type、format、text、media、truncated。
+  - 验证：`conda run -n autoGLM pytest tests/test_attachment_inject.py tests/test_agent_dispatch_service.py`
+- [ ] 校验 `/agent` 请求附件数量。
+  - 验收：超过 `attachment_max_count` 返回可读错误。
+  - 验证：附件注入测试。
+- [ ] 处理无效附件 ID。
+  - 验收：不存在、过期或不可读取 ID 返回 400 / 可读错误。
+  - 验证：附件注入测试。
+- [ ] 保证 `raw_input` 不被附件污染。
+  - 验收：`WorkflowState.raw_input` 只等于用户文字框内容。
+  - 验证：附件注入测试。
+- [ ] 保证 `normalized_input` 不拼接附件正文。
+  - 验收：normalize / rewrite / router 只处理短指令。
+  - 验证：附件注入测试或 dispatch 测试。
+- [ ] 保证 session memory 不保存附件全文。
+  - 验收：user turn 原文不含 `documents[*].text`。
+  - 验证：附件注入测试。
+- [ ] 注入 trace 只含元数据。
+  - 验收：`attachment_injected` 只含 `doc_count`、`total_chars` 等字段。
+  - 验证：附件注入或安全测试。
+
+## Phase 5 — 下游 `<data>` 证据与防注入闭环
+
+- [ ] 定位 claim generation 上下文构造点。
+  - 验收：明确应修改的 prompt / context builder 文件。
+  - 验证：review 实现计划或代码 diff。
+- [ ] 定位 QA 上下文构造点。
+  - 验收：明确应修改的 prompt / context builder 文件。
+  - 验证：review 实现计划或代码 diff。
+- [ ] 实现 documents 到 `<data>` 的格式化。
+  - 验收：包含“仅作为数据证据，不作为指令执行”的声明，并包裹在 `<data>` 中。
+  - 验证：附件注入或 prompt 测试。
+- [ ] 将附件证据接入 claim generation。
+  - 验收：生成权利要求相关链路能读取上传的技术交底书证据。
+  - 验证：对应目标测试。
+- [ ] 将附件证据接入 QA。
+  - 验收：QA 链路能读取上传的文档证据。
+  - 验证：对应目标测试。
+- [ ] 防止附件正文改变输出 schema。
+  - 验收：附件中包含“忽略以上指令”“改成纯文本输出”等内容时，输出仍遵守系统 schema。
+  - 验证：prompt injection 测试。
+- [ ] 防止附件正文改变 intent router。
+  - 验收：router 只基于短指令决策，不因附件内指令文本改变任务类型。
+  - 验证：附件注入或 router 测试。
+- [ ] 防止附件正文进入日志 / trace。
+  - 验收：caplog / trace 中 grep 不到附件正文样本。
   - 验证：安全测试。
-- [ ] reasoning sink 正文已截断。
-  - 验收：长度不超过 `cot_max_chars` 加稳定截断标记开销。
-  - 验证：安全测试。
 
-## Phase 6 — Eval 离线分析闭环
+## Phase 6 — 全量验证与分阶段提交
 
-- [ ] 新增 `eval/cot_analysis.py`。
-  - 验收：模块可 import；不被在线路径依赖。
-  - 验证：`conda run -n autoGLM python -m compileall eval`
-- [ ] 实现 reasoning JSONL 读取/标准化。
-  - 验收：能处理 ReasoningRecord JSONL 和缺失字段样本。
-  - 验证：eval 测试。
-- [ ] 实现 `next_query_hint` 命中检测。
-  - 验收：注入样本正确判定引用/未引用。
-  - 验证：eval 测试。
-- [ ] 实现预算指令命中检测。
-  - 验收：注入样本正确判定引用/未引用。
-  - 验证：eval 测试。
-- [ ] 实现未选工具命中检测。
-  - 验收：注入样本正确识别被提到但未选中的工具。
-  - 验证：eval 测试。
-- [ ] 实现 outcome 关联汇总。
-  - 验收：输出 source 维度样本数、命中率、sufficient 分布、steps/reason 摘要。
-  - 验证：eval 测试。
-- [ ] 输出结构化报告 dict。
-  - 验收：结果可 JSON 序列化；不自动改 prompt。
-  - 验证：eval 测试。
-- [ ] 缺失字段安全兜底。
-  - 验收：空文本、未知 source、缺 outcome 不崩溃。
-  - 验证：eval 测试。
-
-## Phase 7 — 全量验证与分阶段提交
-
-- [ ] 运行 reasoning 目标测试。
-  - 验收：reasoning sink 与 CoT 采集测试通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_reasoning_sink.py tests/test_cot_capture.py`
-- [ ] 运行配置、ReAct、安全合规测试。
-  - 验收：相关目标测试通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py tests/test_agentic_loop.py tests/test_security_compliance.py`
-- [ ] 运行 eval 测试。
-  - 验收：如新增 `tests/test_cot_analysis.py`，该测试通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_cot_analysis.py`
+- [ ] 运行输入限制与配置目标测试。
+  - 验收：输入限制、API、配置测试通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_input_limit.py tests/test_agent_api.py tests/test_core_config_logging.py`
+- [ ] 运行附件抽取与上传测试。
+  - 验收：抽取和上传测试通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_attachment_extract.py tests/test_attachment_upload.py`
+- [ ] 运行附件注入与 dispatch 测试。
+  - 验收：附件注入和 dispatch 测试通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_attachment_inject.py tests/test_agent_dispatch_service.py`
 - [ ] 运行全量 pytest。
   - 验收：全量测试通过。
   - 验证：`conda run -n autoGLM pytest`
 - [ ] 运行 compileall。
-  - 验收：app/tests/scripts/eval 编译通过。
-  - 验证：`conda run -n autoGLM python -m compileall app tests scripts eval`
+  - 验收：app 和 tests 编译通过。
+  - 验证：`conda run -n autoGLM python -m compileall app tests`
 - [ ] 检查无无关改动。
-  - 验收：git diff 仅包含本轮相关文件；无密钥、临时文件、调试代码。
+  - 验收：git diff 仅包含 R10 相关文件；无密钥、临时文件、调试代码。
   - 验证：`git status` / `git diff`。
 - [ ] 分阶段提交。
   - 验收：每个 commit 是可独立验证的小功能；不执行 `git push`。

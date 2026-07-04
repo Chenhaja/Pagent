@@ -62,7 +62,7 @@ def test_agent_api_routes_qa(monkeypatch) -> None:
     class StubAgentDispatchService:
         """测试用 QA 失败 dispatch 服务。"""
 
-        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+        def dispatch(self, raw_input, claims_draft=None, session_id=None, attachment_ids=None):
             """返回 QA 失败响应。"""
             return {"status": "failed", "errors": ["qa_failed"], "intent": "qa", "workflow": "qa"}
 
@@ -99,7 +99,7 @@ def test_agent_api_logs_request_lifecycle_with_session_context(monkeypatch, capl
     class StubAgentDispatchService:
         """测试用 dispatch 服务。"""
 
-        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+        def dispatch(self, raw_input, claims_draft=None, session_id=None, attachment_ids=None):
             """返回成功响应。"""
             return {"status": "success", "intent": "claim_generation", "workflow": "claim_generation", "trace": []}
 
@@ -124,7 +124,7 @@ def test_agent_api_logs_failure_reason(monkeypatch, caplog) -> None:
     class StubAgentDispatchService:
         """测试用失败 dispatch 服务。"""
 
-        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+        def dispatch(self, raw_input, claims_draft=None, session_id=None, attachment_ids=None):
             """返回失败响应。"""
             return {"status": "failed", "errors": ["qa_failed:ValidationError"], "message": "QA 失败"}
 
@@ -149,7 +149,7 @@ def test_agent_api_accepts_and_forwards_session_id(monkeypatch) -> None:
     class StubAgentDispatchService:
         """测试用 dispatch 服务。"""
 
-        def dispatch(self, raw_input, claims_draft=None, session_id=None):
+        def dispatch(self, raw_input, claims_draft=None, session_id=None, attachment_ids=None):
             """记录请求参数并返回成功响应。"""
             captured["raw_input"] = raw_input
             captured["claims_draft"] = claims_draft

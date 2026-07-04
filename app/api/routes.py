@@ -110,7 +110,12 @@ def dispatch_agent(request: AgentRequest) -> dict[str, Any]:
     started_at = time.perf_counter()
     log_event(logger, logging.INFO, "request_start", "请求开始", method="POST", path="/agent", session_id=request.session_id)
     try:
-        result = AgentDispatchService().dispatch(request.raw_input, claims_draft=request.claims_draft, session_id=request.session_id)
+        result = AgentDispatchService().dispatch(
+            request.raw_input,
+            claims_draft=request.claims_draft,
+            session_id=request.session_id,
+            attachment_ids=request.attachment_ids,
+        )
         if result["status"] != "success":
             log_event(
                 logger,

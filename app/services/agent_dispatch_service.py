@@ -7,6 +7,7 @@ from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.qa import QANode
 from app.nodes.query_rewrite import QueryRewriteNode
+from app.services.attachment_service import AttachmentService, AttachmentServiceError
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 from app.services.revision_service import RevisionService
@@ -33,6 +34,7 @@ class AgentDispatchService:
         raw_input: str,
         claims_draft: list[dict[str, Any]] | None = None,
         session_id: str | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """根据用户输入识别意图并分派到预定义 workflow。
 
@@ -40,6 +42,7 @@ class AgentDispatchService:
             raw_input: 用户原始输入。
             claims_draft: 修改权利要求时传入的当前权利要求草稿。
             session_id: 可选会话标识,用于读取和写入会话记忆。
+            attachment_ids: 可选已上传附件 ID 列表。
 
         Returns:
             具体 workflow 的结构化结果,或需要用户补充输入的错误结果。
@@ -56,6 +59,9 @@ class AgentDispatchService:
                 "trace": state.trace,
             }
         state = WorkflowState(raw_input=raw_input, claims_draft=claims_draft or [])
+        attachment_error = self._inject_attachments(state, attachment_ids or [], settings)
+        if attachment_error is not None:
+            return attachment_error
         self._inject_session_context(state, session_id)
         normalize_result = self.normalize_node.run(state)
         if normalize_result.status != "success":
@@ -122,6 +128,30 @@ class AgentDispatchService:
             session_id,
             {"status": "requires_user_input", "errors": ["unknown_intent"], "message": "请补充要办理的专利任务类型。"},
         )
+
+    def _inject_attachments(self, state: WorkflowState, attachment_ids: list[str], settings: Any) -> dict[str, Any] | None:
+        """加载附件并写入 workflow documents。
+
+        Args:
+            state: 当前 workflow 状态。
+            attachment_ids: 用户请求中引用的附件 ID 列表。
+            settings: 当前运行配置。
+
+        Returns:
+            成功时返回 None;失败时返回可直接响应的错误结果。
+        """
+        if not attachment_ids:
+            return None
+        service = AttachmentService(settings=settings)
+        try:
+            service.validate_count(len(attachment_ids))
+            state.documents = [service.load_document(attachment_id) for attachment_id in attachment_ids]
+        except AttachmentServiceError as exc:
+            state.add_trace_event(event="attachment_rejected", data={"reason": exc.code, "count": len(attachment_ids)})
+            return {"status": "requires_user_input", "errors": [exc.code], "message": exc.message, "trace": state.trace}
+        total_chars = sum(len(str(document.get("text", ""))) for document in state.documents)
+        state.add_trace_event(event="attachment_injected", data={"doc_count": len(state.documents), "total_chars": total_chars})
+        return None
 
     def _inject_session_context(self, state: WorkflowState, session_id: str | None) -> None:
         """在 query_rewrite 前注入会话上下文。

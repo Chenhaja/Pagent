@@ -273,6 +273,7 @@ class WorkflowState(BaseModel):
         intent: 意图识别结果。
         dialog_context: 会话上下文快照。
         invention_disclosure: 结构化技术交底。
+        documents: 用户上传附件抽取后的文档列表。
         technical_features: 技术特征列表。
         claim_plan: 权利要求布局规划。
         claims_draft: 当前权利要求草稿。
@@ -291,6 +292,7 @@ class WorkflowState(BaseModel):
     intent: str | None = None
     dialog_context: dict[str, Any] = Field(default_factory=dict)
     invention_disclosure: dict[str, Any] = Field(default_factory=dict)
+    documents: list[dict[str, Any]] = Field(default_factory=list)
     technical_features: list[dict[str, Any]] = Field(default_factory=list)
     claim_plan: dict[str, Any] = Field(default_factory=dict)
     claims_draft: list[dict[str, Any]] = Field(default_factory=list)

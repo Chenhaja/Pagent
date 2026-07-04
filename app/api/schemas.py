@@ -164,11 +164,13 @@ class AgentRequest(BaseModel):
         raw_input: 用户原始输入。
         claims_draft: 可选的当前权利要求草稿,用于修改路径。
         session_id: 可选会话标识,用于跨请求会话记忆。
+        attachment_ids: 可选附件 ID 列表。
 
     Returns:
         统一 Agent API 请求体。
     """
 
     raw_input: str
-    claims_draft: list[dict[str, Any]] = []
+    claims_draft: list[dict[str, Any]] = Field(default_factory=list)
     session_id: str | None = None
+    attachment_ids: list[str] = Field(default_factory=list)

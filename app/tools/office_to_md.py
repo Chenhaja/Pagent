@@ -6,6 +6,11 @@ class OfficeConversionError(Exception):
     """Office 文档转换失败。"""
 
 
+def _drop_image(image: Any) -> list[Any]:
+    """丢弃 docx 图片,避免 Markdown 中出现图片引用。"""
+    return []
+
+
 def convert_docx_to_markdown(file_path: Path, media_dir: Path | None = None) -> tuple[str, list[dict[str, Any]]]:
     """将 docx 文档转换为 Markdown。
 
@@ -25,7 +30,7 @@ def convert_docx_to_markdown(file_path: Path, media_dir: Path | None = None) -> 
         raise OfficeConversionError("缺少 mammoth 依赖,无法解析 docx 附件。") from exc
     try:
         with file_path.open("rb") as file_obj:
-            result = mammoth.convert_to_markdown(file_obj)
+            result = mammoth.convert_to_markdown(file_obj, convert_image=mammoth.images.img_element(_drop_image))
     except Exception as exc:
         raise OfficeConversionError("docx 附件解析失败。") from exc
     return str(result.value or ""), []

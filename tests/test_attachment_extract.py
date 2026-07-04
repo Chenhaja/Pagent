@@ -1,9 +1,11 @@
+import sys
 from pathlib import Path
 
 import pytest
 
 from app.core.config import Settings
 from app.tools import file_extract
+from app.tools import office_to_md
 from app.tools.file_extract import AttachmentExtractionError, extract_document
 
 
@@ -69,6 +71,40 @@ def test_extract_docx_delegates_to_office_converter(monkeypatch, tmp_path) -> No
     assert result.format == "markdown"
     assert result.text == "# 技术交底书"
     assert result.media == [{"path": "media/image1.png", "content_type": "image/png"}]
+
+
+def test_docx_converter_drops_images_with_mammoth(monkeypatch, tmp_path) -> None:
+    """docx 转 Markdown 时应显式配置 mammoth 丢弃图片。"""
+    captured = {}
+
+    class FakeImages:
+        """测试用 mammoth images API。"""
+
+        def img_element(self, callback):
+            """记录图片处理回调并返回 converter。"""
+            captured["callback"] = callback
+            return "image-converter"
+
+    class FakeMammoth:
+        """测试用 mammoth 模块。"""
+
+        images = FakeImages()
+
+        def convert_to_markdown(self, file_obj, **kwargs):
+            """记录转换参数并返回 Markdown。"""
+            captured["kwargs"] = kwargs
+            return type("Result", (), {"value": "正文"})()
+
+    path = tmp_path / "交底书.docx"
+    path.write_bytes(b"docx")
+    monkeypatch.setitem(sys.modules, "mammoth", FakeMammoth())
+
+    text, media = office_to_md.convert_docx_to_markdown(path)
+
+    assert text == "正文"
+    assert media == []
+    assert captured["kwargs"]["convert_image"] == "image-converter"
+    assert captured["callback"](object()) == []
 
 
 def test_extract_pptx_delegates_to_office_converter(monkeypatch, tmp_path) -> None:

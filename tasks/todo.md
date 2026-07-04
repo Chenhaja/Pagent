@@ -2,16 +2,16 @@
 
 ## Phase 0 — 需求命名与基础配置对齐
 
-- [ ] 确认并固定命名：`todo_prompt` / `todo`。
+- [x] 确认并固定命名：`todo_prompt` / `todo`。
   - 验收：计划、任务、后续测试和实现均不新增 `todo_middleware` / `write_todos` 命名。
   - 验证：代码 review 或内容搜索。
-- [ ] 更新 `app/core/config.py` 中 workspace、技能目录与 SerpAPI 配置。
+- [x] 更新 `app/core/config.py` 中 workspace、技能目录与 SerpAPI 配置。
   - 验收：`draft_workspace_dir` 默认空字符串；`skill_dir` 默认 `app/skills_docs`；`patent_search_top_k` 默认 10；SerpAPI Key 从 `SERPAPI_API_KEY` / `PAGENT_SERPAPI_API_KEY` 或配置读取且标记为敏感。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [ ] 更新 `to_public_dict()`。
+- [x] 更新 `to_public_dict()`。
   - 验收：非敏感 R12 配置进入公开配置；敏感项不暴露。
   - 验证：配置测试。
-- [ ] 运行 P0 验证命令。
+- [x] 运行 P0 验证命令。
   - 验收：配置测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py && conda run -n autoGLM python -m compileall app tests`
 

@@ -31,9 +31,12 @@ class Settings(BaseModel):
         attachment_allowed_types: 附件扩展名白名单。
         attachment_storage_dir: 本地附件存储目录。
         allow_network: 运行时是否允许联网能力。
-        draft_workspace_dir: 专利文书生成 artifact 工作目录。
+        draft_workspace_dir: 专利文书生成 artifact 工作目录,空字符串表示内存工作区。
         draft_artifact_max_chars: 单个专利文书 artifact 最大字符数。
         subagent_timeout_seconds: 子代理工具默认超时时间。
+        skill_dir: Markdown 技能文档目录。
+        patent_search_top_k: 专利检索默认返回条数。
+        serpapi_api_key: SerpAPI Key,用于真实专利检索。
         llm_base_url: OpenAI 兼容 LLM 端点地址,默认不配置。
         llm_model: 默认 LLM 模型名称。
         llm_api_key: 可选 LLM API Key,默认不配置。
@@ -126,9 +129,12 @@ class Settings(BaseModel):
     attachment_allowed_types: list[str] = Field(default_factory=lambda: [".txt", ".md", ".docx", ".pptx"])
     attachment_storage_dir: str = ".pagent_attachments"
     allow_network: bool = True
-    draft_workspace_dir: str = ".pagent_drafts"
+    draft_workspace_dir: str = ""
     draft_artifact_max_chars: int = 80000
     subagent_timeout_seconds: int = 30
+    skill_dir: str = "app/skills_docs"
+    patent_search_top_k: int = 10
+    serpapi_api_key: str | None = Field(default=None, exclude=True)
     llm_base_url: str | None = None
     llm_model: str = ""
     llm_api_key: str | None = Field(default=None, exclude=True)
@@ -227,6 +233,8 @@ class Settings(BaseModel):
             "draft_workspace_dir": self.draft_workspace_dir,
             "draft_artifact_max_chars": str(self.draft_artifact_max_chars),
             "subagent_timeout_seconds": str(self.subagent_timeout_seconds),
+            "skill_dir": self.skill_dir,
+            "patent_search_top_k": str(self.patent_search_top_k),
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
             "llm_temperature": str(self.llm_temperature),
@@ -377,9 +385,12 @@ def get_settings() -> Settings:
         attachment_allowed_types=_get_list_env("PAGENT_ATTACHMENT_ALLOWED_TYPES", [".txt", ".md", ".docx", ".pptx"]),
         attachment_storage_dir=os.getenv("PAGENT_ATTACHMENT_STORAGE_DIR", ".pagent_attachments"),
         allow_network=_get_bool_env("PAGENT_ALLOW_NETWORK", True),
-        draft_workspace_dir=os.getenv("PAGENT_DRAFT_WORKSPACE_DIR", ".pagent_drafts"),
+        draft_workspace_dir=os.getenv("PAGENT_DRAFT_WORKSPACE_DIR", ""),
         draft_artifact_max_chars=int(os.getenv("PAGENT_DRAFT_ARTIFACT_MAX_CHARS", "80000")),
         subagent_timeout_seconds=int(os.getenv("PAGENT_SUBAGENT_TIMEOUT_SECONDS", "30")),
+        skill_dir=os.getenv("PAGENT_SKILL_DIR", "app/skills_docs"),
+        patent_search_top_k=int(os.getenv("PAGENT_PATENT_SEARCH_TOP_K", "10")),
+        serpapi_api_key=os.getenv("PAGENT_SERPAPI_API_KEY") or os.getenv("SERPAPI_API_KEY"),
         llm_base_url=os.getenv("PAGENT_LLM_BASE_URL"),
         llm_model=os.getenv("PAGENT_LLM_MODEL", ""),
         llm_api_key=os.getenv("PAGENT_LLM_API_KEY"),

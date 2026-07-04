@@ -29,9 +29,12 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.attachment_allowed_types == [".txt", ".md", ".docx", ".pptx"]
     assert settings.attachment_storage_dir == ".pagent_attachments"
     assert settings.allow_network is True
-    assert settings.draft_workspace_dir == ".pagent_drafts"
+    assert settings.draft_workspace_dir == ""
     assert settings.draft_artifact_max_chars == 80000
     assert settings.subagent_timeout_seconds == 30
+    assert settings.skill_dir == "app/skills_docs"
+    assert settings.patent_search_top_k == 10
+    assert settings.serpapi_api_key is None
     assert settings.llm_api_key is None
     assert settings.llm_base_url is None
     assert settings.llm_model == ""
@@ -148,6 +151,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_DRAFT_WORKSPACE_DIR", "custom_drafts")
     monkeypatch.setenv("PAGENT_DRAFT_ARTIFACT_MAX_CHARS", "12345")
     monkeypatch.setenv("PAGENT_SUBAGENT_TIMEOUT_SECONDS", "17")
+    monkeypatch.setenv("PAGENT_SKILL_DIR", "custom_skills")
+    monkeypatch.setenv("PAGENT_PATENT_SEARCH_TOP_K", "7")
+    monkeypatch.setenv("PAGENT_SERPAPI_API_KEY", "serpapi-secret")
     monkeypatch.setenv("PAGENT_LLM_TEMPERATURE", "0.3")
     monkeypatch.setenv("PAGENT_LLM_MAX_TOKENS", "1024")
     monkeypatch.setenv("PAGENT_LLM_TIMEOUT", "12.5")
@@ -237,6 +243,9 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.draft_workspace_dir == "custom_drafts"
     assert settings.draft_artifact_max_chars == 12345
     assert settings.subagent_timeout_seconds == 17
+    assert settings.skill_dir == "custom_skills"
+    assert settings.patent_search_top_k == 7
+    assert settings.serpapi_api_key == "serpapi-secret"
     assert settings.llm_temperature == 0.3
     assert settings.llm_max_tokens == 1024
     assert settings.llm_timeout == 12.5
@@ -308,6 +317,7 @@ def test_settings_do_not_expose_secret_values() -> None:
         qdrant_api_key="qdrant-secret",
         embedding_api_key="embedding-secret",
         rerank_api_key="rerank-secret",
+        serpapi_api_key="serpapi-secret",
     )
 
     public_values = settings.to_public_dict()
@@ -316,10 +326,12 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert "qdrant_api_key" not in public_values
     assert "embedding_api_key" not in public_values
     assert "rerank_api_key" not in public_values
+    assert "serpapi_api_key" not in public_values
     assert "secret-value" not in str(public_values)
     assert "qdrant-secret" not in str(public_values)
     assert "embedding-secret" not in str(public_values)
     assert "rerank-secret" not in str(public_values)
+    assert "serpapi-secret" not in str(public_values)
     assert public_values["log_format"] == "auto"
     assert public_values["log_include_context"] == "True"
     assert public_values["log_max_field_length"] == "205"
@@ -331,9 +343,11 @@ def test_settings_do_not_expose_secret_values() -> None:
     assert public_values["cot_require_local_env"] == "True"
     assert public_values["llm_reasoning_enabled"] == "False"
     assert public_values["llm_reasoning_effort"] is None
-    assert public_values["draft_workspace_dir"] == ".pagent_drafts"
+    assert public_values["draft_workspace_dir"] == ""
     assert public_values["draft_artifact_max_chars"] == "80000"
     assert public_values["subagent_timeout_seconds"] == "30"
+    assert public_values["skill_dir"] == "app/skills_docs"
+    assert public_values["patent_search_top_k"] == "10"
     assert public_values["memory_enabled"] == "True"
     assert public_values["memory_db_path"] == "./pagent_memory.db"
     assert public_values["memory_history_window"] == "6"

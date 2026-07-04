@@ -7,6 +7,7 @@ def test_workflow_registry_returns_known_intent_workflow_defs() -> None:
 
     assert registry.get_workflow("translation") == ["normalize_input", "translate"]
     assert registry.get_workflow("qa") == ["normalize_input", "qa"]
+    assert registry.get_workflow("patent_drafting") == ["normalize_input", "drafting_leader"]
 
 
 def test_workflow_registry_returns_empty_for_unknown_intent() -> None:
@@ -45,3 +46,15 @@ def test_workflow_registry_registers_qa_workflow() -> None:
     workflow_def = registry.get_workflow_def("qa")
     assert workflow_def.start_node == "normalize_input"
     assert workflow_def.nodes[-1] == "qa"
+
+
+def test_workflow_registry_registers_patent_drafting_workflow() -> None:
+    """patent_drafting intent 应注册到 drafting leader。"""
+    registry = WorkflowRegistry()
+
+    workflow_def = registry.get_workflow_def("patent_drafting")
+
+    assert workflow_def.intent == "patent_drafting"
+    assert workflow_def.start_node == "normalize_input"
+    assert workflow_def.max_loop_count == 0
+    assert workflow_def.nodes == ["normalize_input", "drafting_leader"]

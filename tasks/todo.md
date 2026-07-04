@@ -113,25 +113,25 @@
 
 ## Phase 5 — workflow / intent / dispatch / API
 
-- [ ] 更新 intent schema/router/prompt。
+- [x] 更新 intent schema/router/prompt。
   - 验收：新增 `patent_drafting` intent；旧 claim intent 不再可路由。
   - 验证：`conda run -n autoGLM pytest tests/test_intent_router_node.py`
-- [ ] 更新 workflow registry。
+- [x] 更新 workflow registry。
   - 验收：新增 `patent_drafting` workflow；删除旧 claim workflow。
   - 验证：`conda run -n autoGLM pytest tests/test_workflow_registry.py`
-- [ ] 更新 `AgentDispatchService`。
+- [x] 更新 `AgentDispatchService`。
   - 验收：新增 `patent_drafting` dispatch；删除旧 claim 分支；未人审 `complete_patent_md` 不写长期记忆。
   - 验证：`conda run -n autoGLM pytest tests/test_agent_dispatch_service.py`
-- [ ] 更新 API 兼容字段。
+- [x] 更新 API 兼容字段。
   - 验收：API 可返回 drafting Markdown 产物；不恢复旧 claim workflow。
   - 验证：`conda run -n autoGLM pytest tests/test_agent_api.py`
-- [ ] 新增 E2E 测试。
+- [x] 新增 E2E 测试。
   - 验收：`patent_drafting` 从请求到 workflow 输出完整 Markdown 产物。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [ ] 验证附件接入仍复用 R10 链路。
+- [x] 验证附件接入仍复用 R10 链路。
   - 验收：`WorkflowState.documents` 被 drafting 消费；上传/解析链路无重复实现。
   - 验证：`conda run -n autoGLM pytest tests/test_attachment_inject.py`
-- [ ] 运行 P5 验证命令。
+- [x] 运行 P5 验证命令。
   - 验收：P5 目标测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_workflow_registry.py tests/test_intent_router_node.py tests/test_agent_dispatch_service.py && conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py tests/test_agent_api.py tests/test_attachment_inject.py && conda run -n autoGLM python -m compileall app tests`
 

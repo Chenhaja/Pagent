@@ -9,3 +9,4 @@ pagent_memory.db
 *.jsonl
 *.json
 .pagent_attachments
+.pagent_drafts

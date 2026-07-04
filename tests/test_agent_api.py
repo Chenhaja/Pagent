@@ -22,6 +22,21 @@ def test_agent_api_routes_translation() -> None:
     assert payload["disclaimer"] == DISCLAIMER
 
 
+def test_agent_api_routes_patent_drafting() -> None:
+    """统一 Agent API 应返回 drafting Markdown 产物。"""
+    client = TestClient(app)
+
+    response = client.post("/agent", json={"raw_input": "请生成专利文书"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "patent_drafting"
+    assert payload["workflow"] == "patent_drafting"
+    assert payload["complete_patent_md"].startswith("# 完整专利文书")
+    assert payload["drafting_incomplete"] is False
+    assert payload["disclaimer"] == DISCLAIMER
+
+
 def test_agent_api_routes_qa(monkeypatch) -> None:
     """统一 Agent API 应支持 QA 失败响应。"""
 

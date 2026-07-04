@@ -3,6 +3,7 @@ from typing import Any
 from app.core.config import get_settings
 from app.memory.session_store import SessionMemoryStore, build_session_store
 from app.models.schemas import WorkflowState
+from app.nodes.drafting_leader import DraftingLeaderNode
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.qa import QANode
@@ -104,6 +105,9 @@ class AgentDispatchService:
         if state.intent == "qa":
             result = self._run_qa(state, remaining_nodes)
             return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "qa", **result})
+        if state.intent == "patent_drafting":
+            result = self._run_patent_drafting(state, remaining_nodes)
+            return self._finalize_result(state, session_id, {"intent": state.intent, "workflow": "patent_drafting", **result})
 
         return self._finalize_result(
             state,
@@ -212,6 +216,8 @@ class AgentDispatchService:
         """
         if result.get("message"):
             return str(result["message"])
+        if result.get("workflow") == "patent_drafting":
+            return ""
         if result.get("claims_draft"):
             return "\n".join(str(claim.get("text", "")) for claim in result["claims_draft"] if isinstance(claim, dict)).strip()
         if result.get("translated_text"):
@@ -225,6 +231,21 @@ class AgentDispatchService:
             if isinstance(qa_result, dict):
                 return str(qa_result.get("answer", ""))
         return ""
+
+    def _run_patent_drafting(self, state: WorkflowState, workflow_def: list[str]) -> dict[str, Any]:
+        """执行 patent_drafting workflow 并转换为服务响应。
+
+        Args:
+            state: 已完成 normalize 和 intent_router 的 workflow 状态。
+            workflow_def: 从 drafting_leader 节点开始的节点序列。
+
+        Returns:
+            drafting 成功输出或结构化失败结果。
+        """
+        result = Orchestrator(nodes={"drafting_leader": DraftingLeaderNode(settings=get_settings())}).run(state, workflow_def)
+        if result.status != "success":
+            return {"status": result.status, "errors": result.errors, "message": "专利文书生成暂时不可用,请稍后重试。"}
+        return {"status": "success", **result.output, "trace": state.trace}
 
     def _run_qa(self, state: WorkflowState, workflow_def: list[str]) -> dict[str, Any]:
         """执行 QA workflow 并转换为服务响应。

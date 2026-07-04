@@ -41,6 +41,12 @@ class WorkflowRegistry:
                 start_node="normalize_input",
                 max_loop_count=1,
             ),
+            "patent_drafting": WorkflowDef(
+                intent="patent_drafting",
+                nodes=["normalize_input", "drafting_leader"],
+                start_node="normalize_input",
+                max_loop_count=0,
+            ),
         }
 
     def get_workflow(self, intent: str) -> list[str]:

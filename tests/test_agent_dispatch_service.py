@@ -6,6 +6,20 @@ from app.services.agent_dispatch_service import AgentDispatchService
 from app.tools.llm import FakeLLMClient
 
 
+DRAFTING_RESULT = {
+    "status": "success",
+    "input_points_md": "# 输入要点",
+    "prior_art_md": "# 现有技术",
+    "outline_md": "# 文书提纲",
+    "abstract_md": "# 摘要",
+    "claims_md": "# 权利要求",
+    "description_md": "# 说明书",
+    "figures_md": "# 附图说明",
+    "complete_patent_md": "# 完整专利文书",
+    "drafting_incomplete": False,
+}
+
+
 class FixedRewriteNode:
     """测试用固定改写节点。"""
 
@@ -155,14 +169,29 @@ def test_agent_dispatch_continues_after_query_rewrite_fallback() -> None:
     ]
 
 
-def test_agent_dispatch_returns_user_input_request_for_old_claim_intent() -> None:
-    """旧 claim 意图在 P0 删除后不应进入旧 workflow。"""
+def test_agent_dispatch_routes_patent_drafting_workflow() -> None:
+    """统一 Agent 入口应路由到 patent_drafting workflow。"""
     service = AgentDispatchService()
+    service._run_patent_drafting = lambda state, workflow_def: DRAFTING_RESULT
 
     result = service.dispatch("请根据技术方案生成权利要求")
 
-    assert result["status"] == "requires_user_input"
-    assert result["errors"] == ["unknown_intent"]
+    assert result["status"] == "success"
+    assert result["intent"] == "patent_drafting"
+    assert result["workflow"] == "patent_drafting"
+    assert result["complete_patent_md"] == "# 完整专利文书"
+
+
+def test_agent_dispatch_does_not_persist_unreviewed_complete_patent() -> None:
+    """未人审的完整专利文书不应写入长期会话记忆。"""
+    store = RecordingSessionStore()
+    service = AgentDispatchService(session_store=store)
+    service._run_patent_drafting = lambda state, workflow_def: DRAFTING_RESULT
+
+    result = service.dispatch("请生成专利文书", session_id="s1")
+
+    assert result["status"] == "success"
+    assert store.appended == [("s1", "user", "请生成专利文书")]
 
 
 def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:

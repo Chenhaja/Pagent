@@ -4,7 +4,7 @@ from app.core.config import Settings, get_settings
 from app.models.schemas import NodeResult, WorkflowState
 from app.orchestrator.node_base import Node
 from app.orchestrator.react_loop import BoundedReActLoop, ReActBudget, ReActOutcome
-from app.orchestrator.react_policy import HeuristicReActPolicy
+from app.orchestrator.react_policy import HeuristicReActPolicy, ReflectResult
 from app.orchestrator.tool_registry import build_default_tool_registry
 from app.prompts.patent_drafting_sop import PATENT_DRAFTING_SOP_PROMPT
 from app.tools.draft_workspace import DraftWorkspaceTool
@@ -43,6 +43,15 @@ class DraftingLeaderPolicy(HeuristicReActPolicy):
             decision.tool_input = {"source_artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY}
         return decision
 
+    def reflect(self, task_input: str, observation_digest: dict, scratchpad: list[dict], step_index: int) -> ReflectResult:
+        """仅在最后一个 SOP 工具完成后判定充分。"""
+        has_error = bool(observation_digest.get("error"))
+        return ReflectResult(
+            sufficient=not has_error and step_index >= len(DRAFTING_ALLOWED_TOOLS) - 1,
+            reason="SOP 已完成" if step_index >= len(DRAFTING_ALLOWED_TOOLS) - 1 else "继续执行 SOP",
+            next_query_hint=None,
+        )
+
 
 class DraftingLeaderNode(Node):
     """专利文书生成编排节点。
@@ -73,7 +82,7 @@ class DraftingLeaderNode(Node):
         """初始化 drafting leader 节点。"""
         super().__init__(name=self.name)
         self.settings = settings or get_settings()
-        self.max_steps = self.settings.react_max_steps if max_steps is None else max_steps
+        self.max_steps = len(DRAFTING_ALLOWED_TOOLS) if max_steps is None else max_steps
         self.token_budget = self.settings.react_token_budget if token_budget is None else token_budget
         self.timeout_seconds = self.settings.react_timeout_seconds if timeout_seconds is None else timeout_seconds
         self.workspace = workspace or DraftWorkspaceTool(self.settings)
@@ -126,7 +135,7 @@ class DraftingLeaderNode(Node):
             node_name=self.name,
             policy=DraftingLeaderPolicy(),
             tool_cards=registry.tool_cards(DRAFTING_ALLOWED_TOOLS),
-            use_llm_judge=False,
+            use_llm_judge=True,
             observation_digest_chars=0,
             settings=self.settings,
         )

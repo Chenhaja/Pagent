@@ -137,24 +137,24 @@
 
 ## Phase 6 — 回归与收尾
 
-- [ ] 验证完整 Markdown 输出。
+- [x] 验证完整 Markdown 输出。
   - 验收：摘要、权利要求、说明书、附图说明、完整文书字段齐全。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [ ] 运行安全合规与附件回归。
+- [x] 运行安全合规与附件回归。
   - 验收：防注入、附件抽取、附件注入测试通过。
   - 验证：`conda run -n autoGLM pytest tests/test_security_compliance.py tests/test_attachment_extract.py tests/test_attachment_inject.py`
-- [ ] 检查 trace/log 脱敏。
+- [x] 检查 trace/log 脱敏。
   - 验收：trace/log 不含附件正文、完整专利正文、API Key 或隐私内容。
   - 验证：安全测试或 caplog/trace 断言。
-- [ ] 检查网络测试标记。
+- [x] 检查网络测试标记。
   - 验收：`patent_search` 默认离线；联网测试单独标记 `network`。
   - 验证：native tool 测试与测试标记 review。
-- [ ] 运行全量 pytest。
+- [x] 运行全量 pytest。
   - 验收：全量测试通过。
   - 验证：`conda run -n autoGLM pytest`
-- [ ] 运行 compileall。
+- [x] 运行 compileall。
   - 验收：`app` 和 `tests` 编译通过。
   - 验证：`conda run -n autoGLM python -m compileall app tests`
-- [ ] 检查无无关改动。
+- [x] 检查无无关改动。
   - 验收：diff 仅包含 R11 相关改动，无密钥、临时文件、调试代码。
   - 验证：`git status` / `git diff`

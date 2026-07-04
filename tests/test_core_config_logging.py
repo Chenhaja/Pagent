@@ -22,6 +22,13 @@ def test_default_settings_use_safe_local_values() -> None:
     assert settings.cot_require_local_env is True
     assert settings.llm_reasoning_enabled is False
     assert settings.llm_reasoning_effort is None
+    assert settings.input_max_chars == 2000
+    assert settings.attachment_max_bytes == 10485760
+    assert settings.attachment_max_count == 5
+    assert settings.attachment_max_chars == 50000
+    assert settings.attachment_allowed_types == [".txt", ".md", ".docx", ".pptx"]
+    assert settings.attachment_storage_dir == ".pagent_attachments"
+    assert settings.allow_network is True
     assert settings.llm_api_key is None
     assert settings.llm_base_url is None
     assert settings.llm_model == ""
@@ -128,6 +135,13 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("PAGENT_COT_REQUIRE_LOCAL_ENV", "false")
     monkeypatch.setenv("PAGENT_LLM_REASONING_ENABLED", "true")
     monkeypatch.setenv("PAGENT_LLM_REASONING_EFFORT", "high")
+    monkeypatch.setenv("PAGENT_INPUT_MAX_CHARS", "321")
+    monkeypatch.setenv("PAGENT_ATTACHMENT_MAX_BYTES", "2048")
+    monkeypatch.setenv("PAGENT_ATTACHMENT_MAX_COUNT", "3")
+    monkeypatch.setenv("PAGENT_ATTACHMENT_MAX_CHARS", "4096")
+    monkeypatch.setenv("PAGENT_ATTACHMENT_ALLOWED_TYPES", ".txt,.md")
+    monkeypatch.setenv("PAGENT_ATTACHMENT_STORAGE_DIR", "custom_attachments")
+    monkeypatch.setenv("PAGENT_ALLOW_NETWORK", "false")
     monkeypatch.setenv("PAGENT_LLM_TEMPERATURE", "0.3")
     monkeypatch.setenv("PAGENT_LLM_MAX_TOKENS", "1024")
     monkeypatch.setenv("PAGENT_LLM_TIMEOUT", "12.5")
@@ -207,6 +221,13 @@ def test_settings_read_llm_values_from_environment(monkeypatch) -> None:
     assert settings.cot_require_local_env is False
     assert settings.llm_reasoning_enabled is True
     assert settings.llm_reasoning_effort == "high"
+    assert settings.input_max_chars == 321
+    assert settings.attachment_max_bytes == 2048
+    assert settings.attachment_max_count == 3
+    assert settings.attachment_max_chars == 4096
+    assert settings.attachment_allowed_types == [".txt", ".md"]
+    assert settings.attachment_storage_dir == "custom_attachments"
+    assert settings.allow_network is False
     assert settings.llm_temperature == 0.3
     assert settings.llm_max_tokens == 1024
     assert settings.llm_timeout == 12.5

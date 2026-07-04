@@ -1,3 +1,4 @@
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -23,6 +24,13 @@ class Settings(BaseModel):
         cot_require_local_env: 是否仅允许 local 环境采集推理正文。
         llm_reasoning_enabled: 是否在 LLM 请求中启用 provider 原生思考参数。
         llm_reasoning_effort: 可选原生思考强度,如 low、medium、high。
+        input_max_chars: Agent 短指令最大字符数。
+        attachment_max_bytes: 单个附件最大字节数。
+        attachment_max_count: 单次请求最大附件数量。
+        attachment_max_chars: 单个附件抽取文本最大字符数。
+        attachment_allowed_types: 附件扩展名白名单。
+        attachment_storage_dir: 本地附件存储目录。
+        allow_network: 运行时是否允许联网能力。
         llm_base_url: OpenAI 兼容 LLM 端点地址,默认不配置。
         llm_model: 默认 LLM 模型名称。
         llm_api_key: 可选 LLM API Key,默认不配置。
@@ -108,6 +116,13 @@ class Settings(BaseModel):
     cot_require_local_env: bool = True
     llm_reasoning_enabled: bool = False
     llm_reasoning_effort: str | None = None
+    input_max_chars: int = 2000
+    attachment_max_bytes: int = 10485760
+    attachment_max_count: int = 5
+    attachment_max_chars: int = 50000
+    attachment_allowed_types: list[str] = Field(default_factory=lambda: [".txt", ".md", ".docx", ".pptx"])
+    attachment_storage_dir: str = ".pagent_attachments"
+    allow_network: bool = True
     llm_base_url: str | None = None
     llm_model: str = ""
     llm_api_key: str | None = Field(default=None, exclude=True)
@@ -196,6 +211,13 @@ class Settings(BaseModel):
             "cot_require_local_env": str(self.cot_require_local_env),
             "llm_reasoning_enabled": str(self.llm_reasoning_enabled),
             "llm_reasoning_effort": self.llm_reasoning_effort,
+            "input_max_chars": str(self.input_max_chars),
+            "attachment_max_bytes": str(self.attachment_max_bytes),
+            "attachment_max_count": str(self.attachment_max_count),
+            "attachment_max_chars": str(self.attachment_max_chars),
+            "attachment_allowed_types": ",".join(self.attachment_allowed_types),
+            "attachment_storage_dir": self.attachment_storage_dir,
+            "allow_network": str(self.allow_network),
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
             "llm_temperature": str(self.llm_temperature),
@@ -324,7 +346,7 @@ def get_settings() -> Settings:
         从环境变量读取后的应用配置对象。
     """
     _load_local_dotenv()
-    return Settings(
+    settings = Settings(
         service_name=os.getenv("PAGENT_SERVICE_NAME", "patent-agent"),
         environment=os.getenv("PAGENT_ENVIRONMENT", "local"),
         log_level=os.getenv("PAGENT_LOG_LEVEL", "INFO"),
@@ -339,6 +361,13 @@ def get_settings() -> Settings:
         cot_require_local_env=_get_bool_env("PAGENT_COT_REQUIRE_LOCAL_ENV", True),
         llm_reasoning_enabled=_get_bool_env("PAGENT_LLM_REASONING_ENABLED", False),
         llm_reasoning_effort=os.getenv("PAGENT_LLM_REASONING_EFFORT"),
+        input_max_chars=int(os.getenv("PAGENT_INPUT_MAX_CHARS", "2000")),
+        attachment_max_bytes=int(os.getenv("PAGENT_ATTACHMENT_MAX_BYTES", "10485760")),
+        attachment_max_count=int(os.getenv("PAGENT_ATTACHMENT_MAX_COUNT", "5")),
+        attachment_max_chars=int(os.getenv("PAGENT_ATTACHMENT_MAX_CHARS", "50000")),
+        attachment_allowed_types=_get_list_env("PAGENT_ATTACHMENT_ALLOWED_TYPES", [".txt", ".md", ".docx", ".pptx"]),
+        attachment_storage_dir=os.getenv("PAGENT_ATTACHMENT_STORAGE_DIR", ".pagent_attachments"),
+        allow_network=_get_bool_env("PAGENT_ALLOW_NETWORK", True),
         llm_base_url=os.getenv("PAGENT_LLM_BASE_URL"),
         llm_model=os.getenv("PAGENT_LLM_MODEL", ""),
         llm_api_key=os.getenv("PAGENT_LLM_API_KEY"),
@@ -406,3 +435,12 @@ def get_settings() -> Settings:
         embedding_model=os.getenv("PAGENT_EMBEDDING_MODEL", ""),
         embedding_api_key=os.getenv("PAGENT_EMBEDDING_API_KEY"),
     )
+    if settings.input_max_chars >= settings.llm_max_tokens:
+        logging.getLogger(__name__).warning(
+            "Agent 输入上限不应大于或等于 LLM 输出 token 上限",
+            extra={
+                "event": "config_warning",
+                "fields": {"input_max_chars": settings.input_max_chars, "llm_max_tokens": settings.llm_max_tokens},
+            },
+        )
+    return settings

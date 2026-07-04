@@ -44,6 +44,17 @@ class AgentDispatchService:
         Returns:
             具体 workflow 的结构化结果,或需要用户补充输入的错误结果。
         """
+        settings = get_settings()
+        input_len = len(raw_input.strip())
+        if input_len > settings.input_max_chars:
+            state = WorkflowState(raw_input=raw_input, claims_draft=claims_draft or [])
+            state.add_trace_event(event="input_length_rejected", data={"input_len": input_len, "limit": settings.input_max_chars})
+            return {
+                "status": "requires_user_input",
+                "errors": ["raw_input_too_long"],
+                "message": "输入内容过长,请将技术交底书等长文以文件上传,文字框仅填写简短指令。",
+                "trace": state.trace,
+            }
         state = WorkflowState(raw_input=raw_input, claims_draft=claims_draft or [])
         self._inject_session_context(state, session_id)
         normalize_result = self.normalize_node.run(state)

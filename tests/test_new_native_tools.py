@@ -57,16 +57,15 @@ def test_patent_search_is_skipped_without_network() -> None:
     assert observation.evidence == []
 
 
-def test_patent_search_returns_fake_evidence_when_network_allowed() -> None:
-    """联网打开时 patent_search 返回可核对的占位 evidence。"""
-    tool = PatentSearchTool(Settings(allow_network=True))
+def test_patent_search_degrades_without_serpapi_key() -> None:
+    """联网打开但缺少 SerpAPI Key 时 patent_search 安全降级。"""
+    tool = PatentSearchTool(Settings(allow_network=True, serpapi_api_key=None))
 
     observation = tool.run({"query": "夹爪"})
 
-    assert observation.error is None
+    assert observation.error == "serpapi_key_missing"
     assert observation.external is True
-    assert observation.evidence[0]["content"] == "patent_search skipped: 夹爪"
-    assert observation.evidence[0]["provenance"]["source"] == "patent_search://fake"
+    assert observation.evidence == []
 
 
 def test_default_tool_registry_registers_drafting_native_tools(tmp_path) -> None:

@@ -26,6 +26,19 @@ QUERY_INPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": True,
 }
 
+PATENT_SEARCH_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+        "top_k": {"type": "integer"},
+        "country": {"type": "string"},
+        "status": {"type": "string"},
+        "step_index": {"type": "integer"},
+    },
+    "required": ["query"],
+    "additionalProperties": True,
+}
+
 
 @dataclass
 class ToolSpec:
@@ -265,8 +278,8 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="patent_search",
             runner=PatentSearchTool(current_settings),
-            description="受联网配置门控的专利检索工具,默认离线安全降级。",
-            input_schema=QUERY_INPUT_SCHEMA,
+            description="受联网配置和 SerpAPI Key 门控的专利检索工具,支持 query/top_k/country/status 并默认安全降级。",
+            input_schema=PATENT_SEARCH_INPUT_SCHEMA,
             external=True,
             enabled=True,
         )

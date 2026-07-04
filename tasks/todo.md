@@ -71,25 +71,25 @@
 
 ## Phase 3 — `patent_search` SerpAPI 检索接口与降级
 
-- [ ] 新增或改写 `tests/test_patent_search.py`。
+- [x] 新增或改写 `tests/test_patent_search.py`。
   - 验收：覆盖空 query、联网门控、SerpAPI Key 缺失、fake SerpAPI provider、Top-K、provider 异常、安全降级。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_search.py`
-- [ ] 为 `PatentSearchTool` 增加 SerpAPI provider 注入点。
+- [x] 为 `PatentSearchTool` 增加 SerpAPI provider 注入点。
   - 验收：测试可注入 fake SerpAPI provider，不访问真实网络。
   - 验证：patent_search 测试。
-- [ ] 支持 R12 输入参数。
+- [x] 支持 R12 输入参数。
   - 验收：支持 `query`、`top_k`、`country`、`status`；默认 CN / GRANT / Top-K。
   - 验证：patent_search 参数测试。
-- [ ] 实现联网门控与 SerpAPI Key 缺失降级。
+- [x] 实现联网门控与 SerpAPI Key 缺失降级。
   - 验收：`allow_network=False`、外部工具未授权或未配置 SerpAPI Key 时返回 skipped/degraded，不触网。
   - 验证：patent_search 门控测试。
-- [ ] 删除 fake evidence 行为并接入 SerpAPI 结果规范化。
+- [x] 删除 fake evidence 行为并接入 SerpAPI 结果规范化。
   - 验收：不再返回 `patent_search skipped: {query}` 伪 evidence；联网授权时从 SerpAPI 响应规范化出 title、publication_number、abstract、url、country、status、provenance。
   - 验证：patent_search 测试。
-- [ ] 更新 `ToolRegistry` 中 `patent_search` schema 与 SerpAPI 描述。
+- [x] 更新 `ToolRegistry` 中 `patent_search` schema 与 SerpAPI 描述。
   - 验收：schema 支持 `top_k`、`country`、`status`；描述明确后端为 SerpAPI。
   - 验证：registry 测试或 review。
-- [ ] 运行 P3 验证命令。
+- [x] 运行 P3 验证命令。
   - 验收：patent_search 测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_search.py && conda run -n autoGLM python -m compileall app tests`
 

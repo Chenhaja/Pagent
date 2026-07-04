@@ -9,7 +9,7 @@ from app.tools.legal_status import LegalStatusTool
 from app.tools.official_fee import OfficialFeeTool
 from app.tools.patent_search import PatentSearchTool
 from app.tools.retrieval import Retriever, RetrievalResult, build_retriever
-from app.tools.skill_loader import SkillLoaderTool
+from app.tools.skill_loader import ALLOWED_SKILL_DOCS, SkillLoaderTool
 from app.tools.websearch import WebSearchTool
 
 
@@ -249,11 +249,11 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
     registry.register(
         ToolSpec(
             name="skill_loader",
-            runner=SkillLoaderTool(),
-            description="按白名单读取本地专利 skill/template 内容,不允许任意路径。",
+            runner=SkillLoaderTool(current_settings),
+            description="按白名单读取本地 Markdown 专利技能文档,不允许任意路径或 Python 源码。",
             input_schema={
                 "type": "object",
-                "properties": {"skill_name": {"type": "string"}},
+                "properties": {"skill_name": {"type": "string", "enum": list(ALLOWED_SKILL_DOCS)}},
                 "required": ["skill_name"],
                 "additionalProperties": False,
             },

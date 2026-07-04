@@ -47,25 +47,25 @@
 
 ## Phase 2 — `skill_loader` Markdown 技能文档
 
-- [ ] 新增或改写 `tests/test_skill_loader.py`。
+- [x] 新增或改写 `tests/test_skill_loader.py`。
   - 验收：覆盖 Markdown 读取、白名单、缺失、路径穿越、拒绝 Python 源码。
   - 验证：`conda run -n autoGLM pytest tests/test_skill_loader.py`
-- [ ] 将 `SkillLoaderTool` 默认目录改为 `settings.skill_dir`。
+- [x] 将 `SkillLoaderTool` 默认目录改为 `settings.skill_dir`。
   - 验收：默认指向 `app/skills_docs`，不再指向 `app/skills`。
   - 验证：skill_loader 测试。
-- [ ] 将白名单文件改为 Markdown 技能文档。
+- [x] 将白名单文件改为 Markdown 技能文档。
   - 验收：至少支持 `patent_drafting.md` 与 `mermaid.md`。
   - 验证：skill_loader 测试。
-- [ ] 增加 `app/skills_docs/` 必要技能文档。
+- [x] 增加 `app/skills_docs/` 必要技能文档。
   - 验收：文档为领域知识 / SOP，不包含可执行 Python 源码。
   - 验证：skill_loader 测试。
-- [ ] 保留路径安全校验。
+- [x] 保留路径安全校验。
   - 验收：未知技能、路径穿越、`.py` 请求均被拒绝。
   - 验证：skill_loader 安全测试。
-- [ ] 更新 `ToolRegistry` 中 `skill_loader` 描述。
+- [x] 更新 `ToolRegistry` 中 `skill_loader` 描述。
   - 验收：描述明确为 Markdown 技能文档加载。
   - 验证：registry 测试或 review。
-- [ ] 运行 P2 验证命令。
+- [x] 运行 P2 验证命令。
   - 验收：skill_loader 测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_skill_loader.py && conda run -n autoGLM python -m compileall app tests`
 

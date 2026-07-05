@@ -191,21 +191,21 @@
 
 ## Phase 6 — 端到端回归与收尾
 
-- [ ] 运行 R12 相关专项测试。
+- [x] 运行 R12 相关专项测试。
   - 验收：workspace、skill_loader、patent_search、todo、subagent、leader、workflow 测试通过。
   - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_skill_loader.py tests/test_patent_search.py tests/test_todo_tool.py tests/test_subagent_tools.py tests/test_drafting_leader.py tests/test_patent_drafting_workflow.py`
-- [ ] 运行安全与附件回归。
+- [x] 运行安全与附件回归。
   - 验收：附件 / 检索数据中的 prompt injection 不改变行为；正文不进日志或 trace。
   - 验证：相关 security / attachment 测试。
-- [ ] 检查默认测试不触网、不调用真实外部 LLM。
+- [x] 检查默认测试不触网、不调用真实外部 LLM。
   - 验收：默认测试使用 fake LLM / fake provider。
   - 验证：测试 review 或 monkeypatch 断言。
-- [ ] 运行全量 pytest。
+- [x] 运行全量 pytest。
   - 验收：全量测试通过。
   - 验证：`conda run -n autoGLM pytest`
-- [ ] 运行 compileall。
+- [x] 运行 compileall。
   - 验收：`app` 和 `tests` 编译通过。
   - 验证：`conda run -n autoGLM python -m compileall app tests`
-- [ ] 检查 diff 无无关改动。
+- [x] 检查 diff 无无关改动。
   - 验收：无密钥、无临时文件、无调试代码、无未要求重构。
   - 验证：`git status` / `git diff`

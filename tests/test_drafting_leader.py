@@ -1,32 +1,9 @@
 from app.models.schemas import WorkflowState
-from app.nodes.drafting_leader import DRAFTING_ALLOWED_TOOLS, DRAFTING_ARTIFACT_FIELDS, DraftingLeaderNode
-from app.orchestrator.react_loop import ReActOutcome
-from app.tools.draft_workspace import DraftWorkspaceTool
-
-
-class FakeReactLoop:
-    """测试用 drafting ReAct loop,记录调用并返回固定 outcome。"""
-
-    def __init__(self, outcome: ReActOutcome) -> None:
-        """初始化测试 loop。
-
-        Args:
-            outcome: 每次 run 返回的固定结果。
-
-        Returns:
-            无返回值。
-        """
-        self.outcome = outcome
-        self.calls = []
-
-    def run(self, task_input: str, allowed_tools: list[str]) -> ReActOutcome:
-        """记录任务输入和工具白名单。"""
-        self.calls.append({"task_input": task_input, "allowed_tools": allowed_tools})
-        return self.outcome
+from app.nodes.drafting_leader import DRAFTING_ALLOWED_TOOLS, DRAFTING_ARTIFACT_FIELDS, DRAFTING_SOURCE_ARTIFACT_KEY, DraftingLeaderNode
 
 
 class RecordingWorkspace:
-    """测试用 workspace,记录写入并提供 artifact 内容。"""
+    """测试用 workspace,记录读写和 list 操作。"""
 
     def __init__(self, contents: dict[str, str] | None = None) -> None:
         """初始化内存 workspace。"""
@@ -34,107 +11,129 @@ class RecordingWorkspace:
         self.calls = []
 
     def run(self, tool_input: dict):
-        """按 DraftWorkspaceTool 协议读写内存 artifact。"""
-        self.calls.append(tool_input)
+        """按 DraftWorkspaceTool 协议处理内存 artifact。"""
+        self.calls.append(dict(tool_input))
         action = tool_input["action"]
-        key = tool_input["artifact_key"]
         if action == "write":
+            key = tool_input["artifact_key"]
             self.contents[key] = tool_input.get("content", "")
             return type("Observation", (), {"error": None, "evidence": [{"artifact_key": key, "chars": len(self.contents[key])}]})()
-        if key not in self.contents:
-            return type("Observation", (), {"error": "artifact_not_found", "evidence": []})()
-        return type("Observation", (), {"error": None, "evidence": [{"artifact_key": key, "content": self.contents[key], "chars": len(self.contents[key])}]})()
+        if action == "read":
+            key = tool_input["artifact_key"]
+            if key not in self.contents:
+                return type("Observation", (), {"error": "artifact_not_found", "evidence": []})()
+            return type("Observation", (), {"error": None, "evidence": [{"artifact_key": key, "content": self.contents[key], "chars": len(self.contents[key])}]})()
+        if action == "list":
+            prefix = tool_input.get("prefix", "")
+            artifacts = sorted(key for key in self.contents if key.startswith(prefix))
+            return type("Observation", (), {"error": None, "evidence": [{"prefix": prefix, "artifacts": artifacts, "count": len(artifacts)}]})()
+        return type("Observation", (), {"error": "invalid_action", "evidence": []})()
 
 
-def make_outcome(reason: str = "sufficient", evidence: list[dict] | None = None) -> ReActOutcome:
-    """构造测试用 ReAct outcome。"""
-    return ReActOutcome(
-        evidence=evidence or [],
-        reason=reason,
-        steps_used=8,
-        tool_calls=8,
-        trace_events=[
-            {"event": "react_main_step", "data": {"tool_name": "subagent_input_points", "input_len": 20}},
-            {"event": "react_main_converged", "data": {"reason": reason, "steps_used": 8, "tool_calls": 8}},
-        ],
-    )
+class RecordingRegistry:
+    """测试用工具注册表,记录子代理和 todo 调用。"""
+
+    def __init__(self, workspace: RecordingWorkspace, missing_once: str | None = None) -> None:
+        """初始化记录型 registry。"""
+        self.workspace = workspace
+        self.missing_once = missing_once
+        self.calls = []
+        self.output_by_tool = {
+            "input_parser": "01_input/parsed_info.json",
+            "patent_searcher": "02_research/prior_art_analysis.md",
+            "outline_generator": "03_outline/patent_outline.md",
+            "abstract_writer": "04_content/abstract.md",
+            "claims_writer": "04_content/claims.md",
+            "description_writer_part1": "04_content/description.md",
+            "description_writer_part2": "04_content/description.md",
+            "diagram_generator": "04_content/figures.md",
+            "markdown_merger": "05_final/complete_patent.md",
+        }
+
+    def run(self, name: str, tool_input: dict):
+        """模拟 todo 与子代理工具调用。"""
+        self.calls.append({"name": name, "input": dict(tool_input)})
+        if name == "todo":
+            return type("Observation", (), {"error": None, "evidence": [{"owner": tool_input.get("owner"), "todos": tool_input.get("todos", [])}]})()
+        output_key = self.output_by_tool[name]
+        if self.missing_once == name:
+            self.missing_once = None
+            return type("Observation", (), {"error": None, "evidence": [{"artifact_key": output_key, "done": True}]})()
+        self.workspace.contents[output_key] = f"# {output_key}"
+        return type("Observation", (), {"error": None, "evidence": [{"artifact_key": output_key, "done": True}]})()
+
+    def get(self, name: str):
+        """返回工具存在性。"""
+        return object() if name in ["todo", *DRAFTING_ALLOWED_TOOLS] else None
 
 
-def test_drafting_leader_uses_drafting_tool_whitelist() -> None:
-    """drafting leader 只能向 ReAct loop 暴露 drafting 白名单工具。"""
-    loop = FakeReactLoop(make_outcome())
-    workspace = RecordingWorkspace({key: f"# {key}" for key in DRAFTING_ARTIFACT_FIELDS})
-    node = DraftingLeaderNode(react_loop=loop, workspace=workspace)
+def test_drafting_leader_runs_r12_subagents_in_order() -> None:
+    """drafting leader 应按 R12 9 环节顺序调用子代理。"""
+    workspace = RecordingWorkspace()
+    registry = RecordingRegistry(workspace)
+    node = DraftingLeaderNode(workspace=workspace, tool_registry=registry)
 
     result = node.run(WorkflowState(raw_input="请撰写专利文书", normalized_input="请撰写专利文书"))
 
     assert result.status == "success"
-    assert loop.calls[0]["allowed_tools"] == DRAFTING_ALLOWED_TOOLS
-    assert "请撰写专利文书" not in loop.calls[0]["task_input"]
-    assert "source_artifact_key=drafting_source" in loop.calls[0]["task_input"]
+    assert [call["name"] for call in registry.calls if call["name"] in DRAFTING_ALLOWED_TOOLS] == DRAFTING_ALLOWED_TOOLS
+    assert workspace.calls[0] == {"action": "write", "artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY, "content": "请撰写专利文书"}
 
 
-def test_drafting_leader_writes_source_and_state_fields() -> None:
-    """drafting leader 应写入 source artifact 并回填 Markdown 产物字段。"""
-    contents = {key: f"# {key}" for key in DRAFTING_ARTIFACT_FIELDS}
-    workspace = RecordingWorkspace(contents)
-    node = DraftingLeaderNode(react_loop=FakeReactLoop(make_outcome()), workspace=workspace)
-    state = WorkflowState(
-        raw_input="交底书正文",
-        normalized_input="交底书正文",
-        documents=[{"filename": "交底书.txt", "text": "附件正文", "truncated": False}],
-    )
+def test_drafting_leader_writes_r12_source_and_state_fields() -> None:
+    """drafting leader 应初始化 01_input 并回填 R12 产物字段。"""
+    workspace = RecordingWorkspace()
+    registry = RecordingRegistry(workspace)
+    node = DraftingLeaderNode(workspace=workspace, tool_registry=registry)
+    state = WorkflowState(raw_input="交底书正文", documents=[{"text": "附件正文"}])
 
     result = node.run(state)
 
-    assert workspace.calls[0] == {"action": "write", "artifact_key": "drafting_source", "content": "交底书正文\n\n附件正文"}
-    assert result.output["complete_patent_md"] == "# complete_patent"
-    assert state.input_points_md == "# input_points"
-    assert state.complete_patent_md == "# complete_patent"
+    assert workspace.contents[DRAFTING_SOURCE_ARTIFACT_KEY] == "交底书正文\n\n附件正文"
+    assert result.output["complete_patent_md"] == "# 05_final/complete_patent.md"
+    assert state.input_points_md == "# 01_input/parsed_info.json"
+    assert state.complete_patent_md == "# 05_final/complete_patent.md"
     assert state.drafting_incomplete is False
 
 
-def test_drafting_leader_marks_incomplete_when_budget_exhausted() -> None:
-    """预算耗尽时 drafting leader 应标记 incomplete。"""
-    workspace = RecordingWorkspace({key: f"# {key}" for key in DRAFTING_ARTIFACT_FIELDS})
-    node = DraftingLeaderNode(react_loop=FakeReactLoop(make_outcome(reason="max_steps")), workspace=workspace)
-    state = WorkflowState(raw_input="交底书正文")
+def test_drafting_leader_reviews_with_list_and_retries_missing_file() -> None:
+    """drafting leader 应用 list 审查产物,缺失时最多重委托。"""
+    workspace = RecordingWorkspace()
+    registry = RecordingRegistry(workspace, missing_once="abstract_writer")
+    node = DraftingLeaderNode(workspace=workspace, tool_registry=registry)
 
-    result = node.run(state)
+    result = node.run(WorkflowState(raw_input="交底书正文"))
 
     assert result.status == "success"
-    assert result.output["drafting_incomplete"] is True
-    assert state.drafting_incomplete is True
+    assert [call["name"] for call in registry.calls].count("abstract_writer") == 2
+    list_calls = [call for call in workspace.calls if call["action"] == "list"]
+    assert any(call["prefix"] == "04_content" for call in list_calls)
+
+
+def test_drafting_leader_uses_todo_tool_not_write_todos() -> None:
+    """drafting leader 应接入 todo 工具且不调用 write_todos。"""
+    workspace = RecordingWorkspace()
+    registry = RecordingRegistry(workspace)
+    node = DraftingLeaderNode(workspace=workspace, tool_registry=registry)
+
+    node.run(WorkflowState(raw_input="交底书正文"))
+
+    called_names = [call["name"] for call in registry.calls]
+    assert "todo" in called_names
+    assert "write_todos" not in called_names
 
 
 def test_drafting_leader_trace_is_sanitized() -> None:
-    """drafting leader trace 不应包含附件正文或完整文书正文。"""
-    sensitive = "敏感完整专利正文"
-    workspace = RecordingWorkspace({key: f"# {key} {sensitive}" for key in DRAFTING_ARTIFACT_FIELDS})
-    outcome = make_outcome(evidence=[{"artifact_key": "complete_patent", "markdown": sensitive, "done": True}])
-    node = DraftingLeaderNode(react_loop=FakeReactLoop(outcome), workspace=workspace)
+    """drafting leader trace 仅包含工具名、artifact key、长度、状态和错误摘要。"""
+    workspace = RecordingWorkspace()
+    registry = RecordingRegistry(workspace)
+    node = DraftingLeaderNode(workspace=workspace, tool_registry=registry)
 
     result = node.run(WorkflowState(raw_input="用户原文", documents=[{"text": "附件敏感正文"}]))
 
     trace_text = str(result.trace_events)
     assert "附件敏感正文" not in trace_text
-    assert sensitive not in trace_text
+    assert "用户原文" not in trace_text
     completed = next(event for event in result.trace_events if event["event"] == "drafting_leader_completed")
     assert completed["data"]["artifact_keys"] == list(DRAFTING_ARTIFACT_FIELDS)
-    assert completed["data"]["complete_patent_chars"] == len(f"# complete_patent {sensitive}")
-
-
-def test_drafting_leader_default_loop_runs_subagents_in_sop_order(tmp_path) -> None:
-    """默认 bounded ReAct loop 应按 SOP 顺序调用 8 个子代理。"""
-    from app.core.config import Settings
-
-    settings = Settings(draft_workspace_dir=str(tmp_path), react_max_steps=8, react_token_budget=2000, react_timeout_seconds=5)
-    workspace = DraftWorkspaceTool(settings)
-    node = DraftingLeaderNode(settings=settings, workspace=workspace)
-    state = WorkflowState(raw_input="技术交底内容")
-
-    result = node.run(state)
-
-    assert result.status == "success"
-    assert [event["data"]["tool_name"] for event in result.trace_events if event["event"] == "react_main_step"] == DRAFTING_ALLOWED_TOOLS
-    assert state.complete_patent_md.startswith("# 完整专利文书")
+    assert completed["data"]["complete_patent_chars"] == len("# 05_final/complete_patent.md")

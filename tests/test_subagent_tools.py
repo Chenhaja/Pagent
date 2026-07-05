@@ -123,7 +123,7 @@ def test_markdown_merger_merges_final_patent_and_report(tmp_path) -> None:
     report = workspace.run({"action": "read", "artifact_key": "05_final/summary_report.md"})
 
     assert observation.evidence == [{"artifact_key": "05_final/complete_patent.md", "done": True}]
-    assert final_doc.evidence[0]["content"] == "摘要\n\n权利要求\n\n说明书\n\n附图"
+    assert final_doc.evidence[0]["content"] == "# 完整专利文书\n\n摘要\n\n权利要求\n\n说明书\n\n附图"
     assert report.evidence[0]["content"] == "评审报告"
 
 

@@ -161,31 +161,31 @@
 
 ## Phase 5 — `drafting_leader` R12 编排审查
 
-- [ ] 改写 `tests/test_drafting_leader.py` 为 R12 顺序。
+- [x] 改写 `tests/test_drafting_leader.py` 为 R12 顺序。
   - 验收：断言 9 环节顺序、workspace list 审查、缺文件重试、最终输出 key。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py`
-- [ ] 将 Leader 工具顺序改为 R12 9 环节。
+- [x] 将 Leader 工具顺序改为 R12 9 环节。
   - 验收：顺序为 input_parser → patent_searcher → outline_generator → abstract_writer → claims_writer → description_writer_part1 → description_writer_part2 → diagram_generator → markdown_merger。
   - 验证：leader 顺序测试。
-- [ ] Leader 创建或初始化项目工作区。
+- [x] Leader 创建或初始化项目工作区。
   - 验收：输入写入 `01_input/`，后续路径符合 R12 目录结构。
   - 验证：leader workspace 测试。
-- [ ] Leader 通过 `list` 审查每阶段输出。
+- [x] Leader 通过 `list` 审查每阶段输出。
   - 验收：每个子代理后检查目标 artifact 是否存在。
   - 验证：leader list 审查测试。
-- [ ] Leader 实现缺文件重委托。
+- [x] Leader 实现缺文件重委托。
   - 验收：缺失文件最多重试 5 次，超过后失败或标记 incomplete。
   - 验证：leader retry 测试。
-- [ ] Leader 接入 `todo`。
+- [x] Leader 接入 `todo`。
   - 验收：Leader 可维护并注入自己的 todo 状态；不调用 `write_todos`。
   - 验证：leader todo 测试。
-- [ ] 更新 trace / 日志脱敏。
+- [x] 更新 trace / 日志脱敏。
   - 验收：trace 仅含工具名、artifact key、长度、状态、错误摘要。
   - 验证：leader trace 测试。
-- [ ] 更新 `tests/test_patent_drafting_workflow.py`。
+- [x] 更新 `tests/test_patent_drafting_workflow.py`。
   - 验收：端到端使用 R12 key 和 9 环节产物。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [ ] 运行 P5 验证命令。
+- [x] 运行 P5 验证命令。
   - 验收：leader、workflow 测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py tests/test_patent_drafting_workflow.py && conda run -n autoGLM python -m compileall app tests`
 

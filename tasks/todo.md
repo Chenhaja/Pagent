@@ -122,40 +122,40 @@
 
 ## Phase 4 — R12 Prompt 与 9 个真实子代理
 
-- [ ] 新增 `app/prompts/patent_drafting_leader.py`。
+- [x] 新增 `app/prompts/patent_drafting_leader.py`。
   - 验收：包含 R12 §4.1 Leader Prompt 原文，语义不改写。
   - 验证：prompt review。
-- [ ] 新增 `app/prompts/subagents/` 下 9 个 prompt 模块。
+- [x] 新增 `app/prompts/subagents/` 下 9 个 prompt 模块。
   - 验收：包含 R12 §4.3 - §4.11 原文；仅做工具名等价替换。
   - 验证：prompt review 或常量存在测试。
-- [ ] 改写 `tests/test_subagent_tools.py` 为 R12 契约。
+- [x] 改写 `tests/test_subagent_tools.py` 为 R12 契约。
   - 验收：断言 9 个子代理、fake LLM 调用、workspace key 读写、短结果返回。
   - 验证：`conda run -n autoGLM pytest tests/test_subagent_tools.py`
-- [ ] 将 `SUBAGENT_DEFINITIONS` 改为 R12 9 环节。
+- [x] 将 `SUBAGENT_DEFINITIONS` 改为 R12 9 环节。
   - 验收：包含 `description_writer_part1` 与 `description_writer_part2`。
   - 验证：subagent 测试。
-- [ ] 实现子代理 LLM 调用或可注入 fake LLM。
+- [x] 实现子代理 LLM 调用或可注入 fake LLM。
   - 验收：子代理不再通过拼标题生成内容；测试可证明 fake LLM 被调用。
   - 验证：subagent fake LLM 测试。
-- [ ] 为子代理配置受限工具集。
+- [x] 为子代理配置受限工具集。
   - 验收：不同角色只能访问规定工具，如 `patent_searcher` 可用 `patent_search`，写作类可用 `skill_loader`。
   - 验证：subagent 工具权限测试。
-- [ ] 子代理输出改为 R12 workspace key。
+- [x] 子代理输出改为 R12 workspace key。
   - 验收：输出写入 `01_input/parsed_info.json`、`02_research/*.md`、`03_outline/patent_outline.md`、`04_content/*.md`、`05_final/*.md`。
   - 验证：subagent artifact 测试。
-- [ ] 子代理返回短结果。
+- [x] 子代理返回短结果。
   - 验收：返回 `{artifact_key, done, note?}`，不回传长 Markdown 正文。
   - 验证：subagent 返回结构测试。
-- [ ] 实现 `description_writer_part2` merge 行为。
+- [x] 实现 `description_writer_part2` merge 行为。
   - 验收：使用 workspace `merge` 合并说明书第一部分与具体实施方式临时文件。
   - 验证：subagent part2 测试。
-- [ ] 实现 `markdown_merger` merge 行为。
+- [x] 实现 `markdown_merger` merge 行为。
   - 验收：按摘要、权利要求书、说明书、说明书附图顺序合并终稿。
   - 验证：subagent merger 测试。
-- [ ] 更新 `ToolRegistry` 注册 9 个子代理。
+- [x] 更新 `ToolRegistry` 注册 9 个子代理。
   - 验收：默认 registry 可获取全部 9 个子代理工具。
   - 验证：subagent registry 测试。
-- [ ] 运行 P4 验证命令。
+- [x] 运行 P4 验证命令。
   - 验收：subagent 测试和编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_subagent_tools.py && conda run -n autoGLM python -m compileall app tests`
 

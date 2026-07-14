@@ -62,19 +62,19 @@
 
 ## Phase 3 — Leader prior art gate
 
-- [ ] 新增 `drafting_leader_gate_prior_art` 测试。
+- [x] 新增 `drafting_leader_gate_prior_art` 测试。
   - 验收：覆盖 continue、retry、revise、escalate、非法 decision、非法 target_node。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py`
-- [ ] 实现 Leader gate 基类或共享解析逻辑。
+- [x] 实现 Leader gate 基类或共享解析逻辑。
   - 验收：能校验结构化 decision，能把 decision 转换为合法 `NodeResult.next_node`。
   - 验证：gate 测试。
-- [ ] 实现 `drafting_leader_gate_prior_art` Node。
+- [x] 实现 `drafting_leader_gate_prior_art` Node。
   - 验收：只读取 artifact key / 结构化摘要，不生成正文。
   - 验证：gate 测试。
-- [ ] 验证 prior art gate 回跳路由。
+- [x] 验证 prior art gate 回跳路由。
   - 验收：`retry` 回到 `drafting_patent_search`；`revise` 回到 `drafting_prior_art_analysis`；超过 loop limit 安全失败。
   - 验证：workflow defs / orchestrator 测试。
-- [ ] 运行 Phase 3 验证命令。
+- [x] 运行 Phase 3 验证命令。
   - 验收：gate、workflow defs 测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py && conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py && conda run -n autoGLM python -m compileall app tests`
 

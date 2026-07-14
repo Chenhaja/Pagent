@@ -80,22 +80,22 @@
 
 ## Phase 4 — 附图分析与写作风格指南
 
-- [ ] 新增 `drafting_drawing_analysis` Node 测试。
+- [x] 新增 `drafting_drawing_analysis` Node 测试。
   - 验收：覆盖有附图文本、无附图、不得臆造图号、输出 uncertain points。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_guidance_nodes.py`
-- [ ] 实现 `drafting_drawing_analysis` Node。
+- [x] 实现 `drafting_drawing_analysis` Node。
   - 验收：读取 parsed info / 附件解析信息，写入 `02_research/drawing_analysis.json`。
   - 验证：guidance nodes 测试。
-- [ ] 新增 `drafting_writing_style_guide` Node 测试。
+- [x] 新增 `drafting_writing_style_guide` Node 测试。
   - 验收：覆盖整合 parsed info、prior art、drawing analysis、用户注意事项、指令注入隔离。
   - 验证：guidance nodes 测试。
-- [ ] 实现 `drafting_writing_style_guide` Node。
+- [x] 实现 `drafting_writing_style_guide` Node。
   - 验收：写入 `02_research/writing_style_guide.json`，包含 global rules、terminology rules、claim style、description style、uncertain points、confidence。
   - 验证：guidance nodes 测试。
-- [ ] 确保用户注意事项作为数据处理。
+- [x] 确保用户注意事项作为数据处理。
   - 验收：注意事项中的“忽略以上指令”等文本不会改变输出格式或系统行为。
   - 验证：注入隔离测试。
-- [ ] 运行 Phase 4 验证命令。
+- [x] 运行 Phase 4 验证命令。
   - 验收：guidance nodes 测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_guidance_nodes.py && conda run -n autoGLM python -m compileall app tests`
 

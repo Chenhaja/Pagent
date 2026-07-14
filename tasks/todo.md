@@ -20,24 +20,24 @@
 
 ## Phase 1 — 输入解析与 workspace 初始化
 
-- [ ] 新增 `drafting_parse_input` Node 测试。
+- [x] 新增 `drafting_parse_input` Node 测试。
   - 验收：覆盖无附件、有附件、workspace 写入、trace 脱敏。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py`
-- [ ] 实现 `drafting_parse_input` Node。
+- [x] 实现 `drafting_parse_input` Node。
   - 验收：从 `state.normalized_input` / `state.raw_input` / `state.documents` 构造输入 artifact。
   - 验证：输入节点测试。
-- [ ] 写入 `01_input/raw_document.md`。
+- [x] 写入 `01_input/raw_document.md`。
   - 验收：workspace 中存在 source artifact；trace 只记录 key 和 chars。
   - 验证：输入节点测试。
-- [ ] 生成或委托生成 `01_input/parsed_info.json`。
+- [x] 生成或委托生成 `01_input/parsed_info.json`。
   - 验收：后续节点可读取 parsed info artifact；失败时返回可解释错误。
   - 验证：输入节点测试。
-- [ ] 将 source / parsed info artifact key 写入 state 短字段或 `drafting_context`。
+- [x] 将 source / parsed info artifact key 写入 state 短字段或 `drafting_context`。
   - 验收：不把原始长正文写入新增 state 字段。
   - 验证：state 断言。
-- [ ] 运行 Phase 1 验证命令。
-  - 验收：输入节点测试与编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py && conda run -n autoGLM python -m compileall app tests`
+- [x] 运行 Phase 1 验证命令。
+  - 验收：输入节点测试与编译通过；全量回归通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py && conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests`
 
 ## Phase 2 — 前置研究：检索与现有技术分析
 

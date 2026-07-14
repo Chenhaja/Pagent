@@ -184,3 +184,65 @@ class DraftingLeaderGateGuidanceNode(DraftingLeaderGateBase):
         """检查 guidance gate 依赖 artifact 是否存在。"""
         observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
         return not observation.error and bool(getattr(observation, "evidence", None))
+
+
+class DraftingLeaderGateReviewNode(DraftingLeaderGateBase):
+    """终稿评审阶段 Leader gate 节点。
+
+    Args:
+        settings: 应用配置,未传入时读取全局配置。
+        workspace: 可注入的草稿 artifact 工作区工具。
+        tool_registry: 可注入工具注册表,用于调用 review gate 子代理。
+
+    Returns:
+        根据 review report 决定终稿通过、返修、重评或人工介入的 gate 节点。
+    """
+
+    name = "drafting_leader_gate_review"
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        workspace: DraftWorkspaceTool | None = None,
+        tool_registry: ToolRegistry | Any | None = None,
+    ) -> None:
+        """初始化终稿评审 Leader gate 节点。"""
+        super().__init__(
+            name=self.name,
+            allowed_targets={
+                "drafting_generate_sections",
+                "drafting_merge_document",
+                "drafting_review_document",
+                "drafting_leader_gate_review",
+                "drafting_finalize",
+            },
+            settings=settings,
+            workspace=workspace,
+            tool_registry=tool_registry,
+        )
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """读取 review report key 并输出结构化 gate 决策。
+
+        Args:
+            state: 当前 workflow 状态,需包含 complete patent 与 review report artifact key。
+
+        Returns:
+            成功时返回合法 next_node;人工介入时返回 requires_user_input。
+        """
+        complete_key = str(state.drafting_context.get("complete_patent_key") or "")
+        review_key = str(state.drafting_context.get("review_report_key") or "")
+        if not complete_key or not self._artifact_exists(complete_key):
+            return NodeResult.failed(errors=["complete_patent_missing"])
+        if not review_key or not self._artifact_exists(review_key):
+            return NodeResult.failed(errors=["review_report_missing"])
+        observation = self.tool_registry.run(self.name, {"complete_patent_key": complete_key, "review_report_key": review_key})
+        decision = self._parse_decision(observation)
+        if isinstance(decision, NodeResult):
+            return decision
+        return self._result_from_decision(state, "leader_gate_review", decision)
+
+    def _artifact_exists(self, artifact_key: str) -> bool:
+        """检查 review gate 依赖 artifact 是否存在。"""
+        observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
+        return not observation.error and bool(getattr(observation, "evidence", None))

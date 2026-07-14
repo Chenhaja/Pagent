@@ -216,6 +216,18 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
         )
 
 
+DRAFTING_FINALIZE_FIELDS = {
+    "01_input/parsed_info.json": "input_points_md",
+    "02_research/prior_art_analysis.json": "prior_art_md",
+    DRAFTING_OUTLINE_ARTIFACT_KEY: "outline_md",
+    DRAFTING_ABSTRACT_ARTIFACT_KEY: "abstract_md",
+    DRAFTING_CLAIMS_ARTIFACT_KEY: "claims_md",
+    DRAFTING_DESCRIPTION_ARTIFACT_KEY: "description_md",
+    DRAFTING_FIGURES_ARTIFACT_KEY: "figures_md",
+    DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY: "complete_patent_md",
+}
+
+
 class DraftingReviewDocumentNode(DraftingContentNodeBase):
     """专利文书终稿评审节点。
 
@@ -267,3 +279,44 @@ class DraftingReviewDocumentNode(DraftingContentNodeBase):
             output={"review_report_key": DRAFTING_REVIEW_REPORT_ARTIFACT_KEY},
             trace_events=[{"event": "drafting_document_reviewed", "data": {"artifact_key": DRAFTING_REVIEW_REPORT_ARTIFACT_KEY, "passed": payload["passed"]}}],
         )
+
+
+class DraftingFinalizeNode(DraftingContentNodeBase):
+    """专利文书最终响应回填节点。
+
+    Args:
+        settings: 应用配置,未传入时读取全局配置。
+        workspace: 可注入的草稿 artifact 工作区工具。
+
+    Returns:
+        读取最终 artifact 并回填现有 API 兼容字段的节点。
+    """
+
+    name = "drafting_finalize"
+
+    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None) -> None:
+        """初始化最终响应回填节点。"""
+        super().__init__(name=self.name, settings=settings, workspace=workspace)
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """读取文书生成 artifact 并回填 WorkflowState 与输出字段。
+
+        Args:
+            state: 当前 workflow 状态。
+
+        Returns:
+            成功时返回兼容旧 patent_drafting API 的字段集合。
+        """
+        output: dict[str, Any] = {}
+        missing: list[str] = []
+        for artifact_key, field_name in DRAFTING_FINALIZE_FIELDS.items():
+            content = self._read_text(artifact_key)
+            if content is None:
+                missing.append(artifact_key)
+                content = ""
+            setattr(state, field_name, content)
+            output[field_name] = content
+        state.drafting_incomplete = bool(missing)
+        output["drafting_incomplete"] = state.drafting_incomplete
+        trace_data = {"missing_artifacts": missing, "drafting_incomplete": state.drafting_incomplete}
+        return NodeResult.success(output=output, trace_events=[{"event": "drafting_finalized", "data": trace_data}])

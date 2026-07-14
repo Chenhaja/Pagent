@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.models.schemas import WorkflowState
-from app.nodes.drafting_gates import DraftingLeaderGateGuidanceNode, DraftingLeaderGatePriorArtNode
+from app.nodes.drafting_gates import DraftingLeaderGateGuidanceNode, DraftingLeaderGatePriorArtNode, DraftingLeaderGateReviewNode
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.node_base import Node
 from app.models.schemas import NodeResult
@@ -73,6 +73,20 @@ def _workspace_with_guidance(tmp_path, include_drawing: bool = True, include_gui
                 "content": json.dumps({"confidence": "medium", "uncertain_points": []}, ensure_ascii=False),
             }
         )
+    return workspace
+
+
+def _workspace_with_review(tmp_path) -> DraftWorkspaceTool:
+    """构造包含 review gate 前置 artifact 的测试 workspace。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": "# 完整专利文书"})
+    workspace.run(
+        {
+            "action": "write",
+            "artifact_key": "05_final/review_report.json",
+            "content": json.dumps({"passed": True, "issues": [], "confidence": "medium"}, ensure_ascii=False),
+        }
+    )
     return workspace
 
 
@@ -334,6 +348,87 @@ def test_guidance_gate_rejects_illegal_target(tmp_path) -> None:
             },
         )
     )
+
+    assert result.status == "failed"
+    assert result.errors == ["illegal_gate_target:drafting_patent_search"]
+
+
+def test_review_gate_continue_goes_to_finalize(tmp_path) -> None:
+    """review gate continue 时应进入 finalize 节点。"""
+    registry = FakeDecisionRegistry(_decision("continue", "drafting_finalize"))
+    node = DraftingLeaderGateReviewNode(workspace=_workspace_with_review(tmp_path), tool_registry=registry)
+    state = WorkflowState(
+        raw_input="请生成专利文书",
+        drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"},
+    )
+
+    result = node.run(state)
+
+    assert result.status == "success"
+    assert result.next_node == "drafting_finalize"
+    assert state.drafting_context["leader_gate_review"]["decision"] == "continue"
+    assert registry.calls[0]["name"] == "drafting_leader_gate_review"
+
+
+def test_review_gate_revise_goes_to_generate_sections(tmp_path) -> None:
+    """review gate revise 时应回到正文生成节点。"""
+    node = DraftingLeaderGateReviewNode(
+        workspace=_workspace_with_review(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("revise", "drafting_generate_sections")),
+    )
+
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+
+    assert result.status == "success"
+    assert result.next_node == "drafting_generate_sections"
+
+
+def test_review_gate_retry_goes_to_review_document(tmp_path) -> None:
+    """review gate retry 时应回到评审节点。"""
+    node = DraftingLeaderGateReviewNode(
+        workspace=_workspace_with_review(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_review_document")),
+    )
+
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+
+    assert result.status == "success"
+    assert result.next_node == "drafting_review_document"
+
+
+def test_review_gate_escalate_requires_user_input(tmp_path) -> None:
+    """review gate escalate 时应要求人工介入。"""
+    node = DraftingLeaderGateReviewNode(
+        workspace=_workspace_with_review(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("escalate", "drafting_leader_gate_review")),
+    )
+
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+
+    assert result.status == "requires_user_input"
+    assert result.errors == ["drafting_gate_escalated"]
+
+
+def test_review_gate_fails_when_review_report_missing(tmp_path) -> None:
+    """review gate 应在评审报告缺失时安全失败。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": "# 完整专利文书"})
+    node = DraftingLeaderGateReviewNode(workspace=workspace, tool_registry=FakeDecisionRegistry(_decision("continue", "drafting_finalize")))
+
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+
+    assert result.status == "failed"
+    assert result.errors == ["review_report_missing"]
+
+
+def test_review_gate_rejects_illegal_target(tmp_path) -> None:
+    """review gate 应拒绝非法目标节点。"""
+    node = DraftingLeaderGateReviewNode(
+        workspace=_workspace_with_review(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_patent_search")),
+    )
+
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
 
     assert result.status == "failed"
     assert result.errors == ["illegal_gate_target:drafting_patent_search"]

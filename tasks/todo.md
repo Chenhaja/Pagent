@@ -140,19 +140,19 @@
 
 ## Phase 7 — Leader review gate 与 finalize
 
-- [ ] 新增 `drafting_leader_gate_review` 测试。
+- [x] 新增 `drafting_leader_gate_review` 测试。
   - 验收：覆盖 review 通过、返修正文、重评、人工介入 / 安全失败。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py`
-- [ ] 实现 `drafting_leader_gate_review` Node。
+- [x] 实现 `drafting_leader_gate_review` Node。
   - 验收：读取 review report 和相关 artifact key，输出结构化决策并返回合法 `next_node`。
   - 验证：gate 测试。
-- [ ] 实现 `drafting_finalize` Node。
+- [x] 实现 `drafting_finalize` Node。
   - 验收：读取最终 artifact 并回填现有 API 兼容字段。
   - 验证：端到端测试。
-- [ ] 兼容现有返回字段。
+- [x] 兼容现有返回字段。
   - 验收：包含 `input_points_md`、`prior_art_md`、`outline_md`、`abstract_md`、`claims_md`、`description_md`、`figures_md`、`complete_patent_md`、`drafting_incomplete`。
   - 验证：`tests/test_patent_drafting_workflow.py`。
-- [ ] 运行 Phase 7 验证命令。
+- [x] 运行 Phase 7 验证命令。
   - 验收：review gate、端到端测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py && conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py && conda run -n autoGLM python -m compileall app tests`
 

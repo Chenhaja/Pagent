@@ -3,6 +3,7 @@ import json
 from app.core.config import Settings
 from app.models.schemas import WorkflowState
 from app.nodes.drafting_content import (
+    DraftingFinalizeNode,
     DraftingGenerateOutlineNode,
     DraftingGenerateSectionsNode,
     DraftingMergeDocumentNode,
@@ -177,3 +178,52 @@ def test_drafting_review_document_writes_review_report(tmp_path) -> None:
     assert payload["checked_artifacts"] == ["05_final/complete_patent.md", "02_research/writing_style_guide.json"]
     assert result.output == {"review_report_key": "05_final/review_report.json"}
     assert state.drafting_context["review_report_key"] == "05_final/review_report.json"
+
+
+def test_drafting_finalize_backfills_compatible_fields(tmp_path) -> None:
+    """drafting_finalize 应读取 artifact 并回填现有 API 兼容字段。"""
+    workspace = _content_workspace(tmp_path)
+    artifacts = {
+        "01_input/parsed_info.json": "# 输入要点\n\n夹爪控制",
+        "02_research/prior_art_analysis.json": "# 现有技术\n\n检索分析",
+        "03_outline/patent_outline.md": "# 专利大纲\n\n大纲",
+        "04_content/abstract.md": "# 摘要\n\n摘要",
+        "04_content/claims.md": "# 权利要求书\n\n权利要求",
+        "04_content/description.md": "# 说明书\n\n说明书",
+        "04_content/figures.md": "# 附图说明\n\n附图",
+        "05_final/complete_patent.md": "# 完整专利文书\n\n终稿",
+        "05_final/review_report.json": json.dumps({"passed": True}, ensure_ascii=False),
+    }
+    for artifact_key, content in artifacts.items():
+        workspace.run({"action": "write", "artifact_key": artifact_key, "content": content})
+    node = DraftingFinalizeNode(workspace=workspace)
+    state = WorkflowState(raw_input="请生成专利文书")
+
+    result = node.run(state)
+
+    assert result.status == "success"
+    assert result.output["input_points_md"].startswith("# 输入要点")
+    assert result.output["prior_art_md"].startswith("# 现有技术")
+    assert result.output["outline_md"].startswith("# 专利大纲")
+    assert result.output["abstract_md"].startswith("# 摘要")
+    assert result.output["claims_md"].startswith("# 权利要求书")
+    assert result.output["description_md"].startswith("# 说明书")
+    assert result.output["figures_md"].startswith("# 附图说明")
+    assert result.output["complete_patent_md"].startswith("# 完整专利文书")
+    assert result.output["drafting_incomplete"] is False
+    assert state.complete_patent_md.startswith("# 完整专利文书")
+
+
+def test_drafting_finalize_marks_incomplete_when_artifact_missing(tmp_path) -> None:
+    """drafting_finalize 缺少兼容字段 artifact 时应标记 incomplete。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": "# 完整专利文书\n\n终稿"})
+    node = DraftingFinalizeNode(workspace=workspace)
+    state = WorkflowState(raw_input="请生成专利文书")
+
+    result = node.run(state)
+
+    assert result.status == "success"
+    assert result.output["complete_patent_md"].startswith("# 完整专利文书")
+    assert result.output["drafting_incomplete"] is True
+    assert state.drafting_incomplete is True

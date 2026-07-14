@@ -45,7 +45,7 @@ def test_intent_router_routes_patent_drafting_without_llm() -> None:
 
     assert result.status == "success"
     assert state.intent == "patent_drafting"
-    assert result.next_node == "drafting_leader"
+    assert result.next_node == "drafting_parse_input"
     assert state.dialog_context["intent_classification"]["source"] == "keyword"
     assert result.trace_events[0]["data"] == {"intent": "patent_drafting", "source": "keyword", "confidence": 0.95}
 
@@ -72,7 +72,7 @@ def test_intent_router_routes_claim_problem_to_patent_drafting() -> None:
 
     assert result.status == "success"
     assert state.intent == "patent_drafting"
-    assert result.next_node == "drafting_leader"
+    assert result.next_node == "drafting_parse_input"
 
 
 def test_intent_router_routes_question_answering_without_llm() -> None:

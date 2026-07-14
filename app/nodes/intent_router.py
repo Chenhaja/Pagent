@@ -80,7 +80,7 @@ class IntentRouterNode(Node):
     def _route_success(self, state: WorkflowState, classification: IntentClassification, source: str) -> NodeResult:
         """写入分类结果并返回固定路由。"""
         next_nodes = {
-            "patent_drafting": "drafting_leader",
+            "patent_drafting": "drafting_parse_input",
             "translation": "translate",
             "qa": "qa",
         }

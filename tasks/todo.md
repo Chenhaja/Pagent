@@ -176,18 +176,18 @@
 
 ## Phase 9 — 收敛旧 Leader 与测试迁移
 
-- [ ] 迁移 `tests/test_drafting_leader.py`。
+- [x] 迁移 `tests/test_drafting_leader.py`。
   - 验收：旧 Leader 顺序调用测试改为 gate 或 workflow 测试，不再断言 Leader 内部 for-loop。
   - 验证：相关测试通过。
-- [ ] 删除或降级 `DraftingLeaderNode.run()` 的固定流程职责。
+- [x] 删除或降级 `DraftingLeaderNode.run()` 的固定流程职责。
   - 验收：没有默认路径继续通过 `drafting_leader` 隐藏完整文书生成流程。
   - 验证：代码搜索与端到端测试。
-- [ ] 清理旧流程常量引用。
+- [x] 清理旧流程常量引用。
   - 验收：`DRAFTING_ALLOWED_TOOLS` 等不再作为 patent_drafting 顶层顺序来源；如保留，只能作为内容节点内部子代理清单。
   - 验证：代码 review / 搜索。
-- [ ] 确认 `workflow_defs.py` 是顺序权威来源。
+- [x] 确认 `workflow_defs.py` 是顺序权威来源。
   - 验收：文书生成流程顺序只需查看 `WorkflowRegistry` 即可理解。
   - 验证：workflow defs 测试。
-- [ ] 运行 Phase 9 验证命令。
+- [x] 运行 Phase 9 验证命令。
   - 验收：全量测试与编译通过。
   - 验证：`conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests`

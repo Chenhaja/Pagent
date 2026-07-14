@@ -41,22 +41,22 @@
 
 ## Phase 2 — 前置研究：检索与现有技术分析
 
-- [ ] 新增 `drafting_patent_search` Node 测试。
+- [x] 新增 `drafting_patent_search` Node 测试。
   - 验收：覆盖离线降级、fake provider、有结果、无结果、trace 脱敏。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py`
-- [ ] 实现 `drafting_patent_search` Node。
+- [x] 实现 `drafting_patent_search` Node。
   - 验收：读取 `01_input/parsed_info.json`，调用 `patent_search` 工具，写入 `02_research/patent_search_results.json`。
   - 验证：research nodes 测试。
-- [ ] 新增 `drafting_prior_art_analysis` Node 测试。
+- [x] 新增 `drafting_prior_art_analysis` Node 测试。
   - 验收：覆盖有检索结果、检索不足、不编造来源、不确定点输出。
   - 验证：research nodes 测试。
-- [ ] 实现 `drafting_prior_art_analysis` Node。
+- [x] 实现 `drafting_prior_art_analysis` Node。
   - 验收：读取 parsed info 与 search results，写入 `02_research/prior_art_analysis.json`。
   - 验证：research nodes 测试。
-- [ ] 规范 prior art analysis 输出字段。
+- [x] 规范 prior art analysis 输出字段。
   - 验收：包含 closest prior art、distinguishing features、technical effects、novelty risks、inventiveness risks、recommended claim focus、uncertain points、confidence。
   - 验证：JSON 字段断言。
-- [ ] 运行 Phase 2 验证命令。
+- [x] 运行 Phase 2 验证命令。
   - 验收：research nodes、patent_search 测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py && conda run -n autoGLM pytest tests/test_patent_search.py && conda run -n autoGLM python -m compileall app tests`
 

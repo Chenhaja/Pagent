@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.models.schemas import WorkflowState
-from app.nodes.drafting_gates import DraftingLeaderGatePriorArtNode
+from app.nodes.drafting_gates import DraftingLeaderGateGuidanceNode, DraftingLeaderGatePriorArtNode
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.node_base import Node
 from app.models.schemas import NodeResult
@@ -51,6 +51,28 @@ def _workspace_with_prior_art(tmp_path) -> DraftWorkspaceTool:
             "content": json.dumps({"confidence": "medium", "uncertain_points": []}, ensure_ascii=False),
         }
     )
+    return workspace
+
+
+def _workspace_with_guidance(tmp_path, include_drawing: bool = True, include_guide: bool = True) -> DraftWorkspaceTool:
+    """构造包含 guidance gate 前置 artifact 的测试 workspace。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    if include_drawing:
+        workspace.run(
+            {
+                "action": "write",
+                "artifact_key": "02_research/drawing_analysis.json",
+                "content": json.dumps({"confidence": "medium", "uncertain_points": []}, ensure_ascii=False),
+            }
+        )
+    if include_guide:
+        workspace.run(
+            {
+                "action": "write",
+                "artifact_key": "02_research/writing_style_guide.json",
+                "content": json.dumps({"confidence": "medium", "uncertain_points": []}, ensure_ascii=False),
+            }
+        )
     return workspace
 
 
@@ -167,3 +189,151 @@ def test_prior_art_gate_retry_route_obeys_loop_limit() -> None:
     assert result.status == "failed"
     assert result.errors == ["loop_limit_exceeded:drafting_patent_search"]
     assert state.drafting_context["drafting_patent_search"] == 2
+
+
+def test_guidance_gate_continue_goes_to_outline(tmp_path) -> None:
+    """guidance gate continue 时应进入大纲生成节点。"""
+    registry = FakeDecisionRegistry(_decision("continue", "drafting_generate_outline"))
+    node = DraftingLeaderGateGuidanceNode(workspace=_workspace_with_guidance(tmp_path), tool_registry=registry)
+    state = WorkflowState(
+        raw_input="请生成专利文书",
+        drafting_context={
+            "drawing_analysis_key": "02_research/drawing_analysis.json",
+            "writing_style_guide_key": "02_research/writing_style_guide.json",
+        },
+    )
+
+    result = node.run(state)
+
+    assert result.status == "success"
+    assert result.next_node == "drafting_generate_outline"
+    assert state.drafting_context["leader_gate_guidance"]["decision"] == "continue"
+    assert registry.calls[0]["name"] == "drafting_leader_gate_guidance"
+    assert registry.calls[0]["input"] == {
+        "drawing_analysis_key": "02_research/drawing_analysis.json",
+        "writing_style_guide_key": "02_research/writing_style_guide.json",
+    }
+
+
+def test_guidance_gate_fails_when_drawing_missing(tmp_path) -> None:
+    """guidance gate 应在附图分析缺失时失败。"""
+    node = DraftingLeaderGateGuidanceNode(
+        workspace=_workspace_with_guidance(tmp_path, include_drawing=False),
+        tool_registry=FakeDecisionRegistry(_decision("continue", "drafting_generate_outline")),
+    )
+    state = WorkflowState(
+        raw_input="请生成专利文书",
+        drafting_context={
+            "drawing_analysis_key": "02_research/drawing_analysis.json",
+            "writing_style_guide_key": "02_research/writing_style_guide.json",
+        },
+    )
+
+    result = node.run(state)
+
+    assert result.status == "failed"
+    assert result.errors == ["drawing_analysis_missing"]
+
+
+def test_guidance_gate_fails_when_style_guide_missing(tmp_path) -> None:
+    """guidance gate 应在写作指南缺失时失败。"""
+    node = DraftingLeaderGateGuidanceNode(
+        workspace=_workspace_with_guidance(tmp_path, include_guide=False),
+        tool_registry=FakeDecisionRegistry(_decision("continue", "drafting_generate_outline")),
+    )
+    state = WorkflowState(
+        raw_input="请生成专利文书",
+        drafting_context={
+            "drawing_analysis_key": "02_research/drawing_analysis.json",
+            "writing_style_guide_key": "02_research/writing_style_guide.json",
+        },
+    )
+
+    result = node.run(state)
+
+    assert result.status == "failed"
+    assert result.errors == ["writing_style_guide_missing"]
+
+
+def test_guidance_gate_retry_goes_to_drawing_analysis(tmp_path) -> None:
+    """guidance gate retry 时可回到附图分析节点。"""
+    node = DraftingLeaderGateGuidanceNode(
+        workspace=_workspace_with_guidance(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_drawing_analysis")),
+    )
+
+    result = node.run(
+        WorkflowState(
+            raw_input="请生成专利文书",
+            drafting_context={
+                "drawing_analysis_key": "02_research/drawing_analysis.json",
+                "writing_style_guide_key": "02_research/writing_style_guide.json",
+            },
+        )
+    )
+
+    assert result.status == "success"
+    assert result.next_node == "drafting_drawing_analysis"
+
+
+def test_guidance_gate_revise_goes_to_style_guide(tmp_path) -> None:
+    """guidance gate revise 时可回到写作指南节点。"""
+    node = DraftingLeaderGateGuidanceNode(
+        workspace=_workspace_with_guidance(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("revise", "drafting_writing_style_guide")),
+    )
+
+    result = node.run(
+        WorkflowState(
+            raw_input="请生成专利文书",
+            drafting_context={
+                "drawing_analysis_key": "02_research/drawing_analysis.json",
+                "writing_style_guide_key": "02_research/writing_style_guide.json",
+            },
+        )
+    )
+
+    assert result.status == "success"
+    assert result.next_node == "drafting_writing_style_guide"
+
+
+def test_guidance_gate_escalate_requires_user_input(tmp_path) -> None:
+    """guidance gate escalate 时应要求人工介入。"""
+    node = DraftingLeaderGateGuidanceNode(
+        workspace=_workspace_with_guidance(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("escalate", "drafting_leader_gate_guidance")),
+    )
+
+    result = node.run(
+        WorkflowState(
+            raw_input="请生成专利文书",
+            drafting_context={
+                "drawing_analysis_key": "02_research/drawing_analysis.json",
+                "writing_style_guide_key": "02_research/writing_style_guide.json",
+            },
+        )
+    )
+
+    assert result.status == "requires_user_input"
+    assert result.errors == ["drafting_gate_escalated"]
+
+
+def test_guidance_gate_rejects_illegal_target(tmp_path) -> None:
+    """guidance gate 应拒绝非法目标节点。"""
+    node = DraftingLeaderGateGuidanceNode(
+        workspace=_workspace_with_guidance(tmp_path),
+        tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_patent_search")),
+    )
+
+    result = node.run(
+        WorkflowState(
+            raw_input="请生成专利文书",
+            drafting_context={
+                "drawing_analysis_key": "02_research/drawing_analysis.json",
+                "writing_style_guide_key": "02_research/writing_style_guide.json",
+            },
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.errors == ["illegal_gate_target:drafting_patent_search"]

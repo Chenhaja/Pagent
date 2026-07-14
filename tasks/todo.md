@@ -101,16 +101,16 @@
 
 ## Phase 5 — Leader guidance gate
 
-- [ ] 新增 `drafting_leader_gate_guidance` 测试。
+- [x] 新增 `drafting_leader_gate_guidance` 测试。
   - 验收：覆盖写作指南缺失、附图缺失、continue、retry、revise、escalate。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py`
-- [ ] 实现 `drafting_leader_gate_guidance` Node。
+- [x] 实现 `drafting_leader_gate_guidance` Node。
   - 验收：判断 drawing analysis 与 writing style guide 是否足够进入大纲生成。
   - 验证：gate 测试。
-- [ ] 验证 guidance gate 路由。
+- [x] 验证 guidance gate 路由。
   - 验收：`continue` 进入 `drafting_generate_outline`；`retry` / `revise` 回到合法前置节点。
   - 验证：gate / workflow 测试。
-- [ ] 运行 Phase 5 验证命令。
+- [x] 运行 Phase 5 验证命令。
   - 验收：gate 测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py && conda run -n autoGLM python -m compileall app tests`
 

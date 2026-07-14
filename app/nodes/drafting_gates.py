@@ -123,3 +123,64 @@ class DraftingLeaderGatePriorArtNode(DraftingLeaderGateBase):
         """检查 prior art analysis artifact 是否存在。"""
         observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
         return not observation.error and bool(getattr(observation, "evidence", None))
+
+
+class DraftingLeaderGateGuidanceNode(DraftingLeaderGateBase):
+    """写作指南阶段 Leader gate 节点。
+
+    Args:
+        settings: 应用配置,未传入时读取全局配置。
+        workspace: 可注入的草稿 artifact 工作区工具。
+        tool_registry: 可注入工具注册表,用于调用 guidance gate 子代理。
+
+    Returns:
+        根据附图分析和写作指南质量决定继续、重试、返修或人工介入的 gate 节点。
+    """
+
+    name = "drafting_leader_gate_guidance"
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        workspace: DraftWorkspaceTool | None = None,
+        tool_registry: ToolRegistry | Any | None = None,
+    ) -> None:
+        """初始化写作指南 Leader gate 节点。"""
+        super().__init__(
+            name=self.name,
+            allowed_targets={
+                "drafting_drawing_analysis",
+                "drafting_writing_style_guide",
+                "drafting_leader_gate_guidance",
+                "drafting_generate_outline",
+            },
+            settings=settings,
+            workspace=workspace,
+            tool_registry=tool_registry,
+        )
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """读取 guidance 前置 artifact key 并输出结构化 gate 决策。
+
+        Args:
+            state: 当前 workflow 状态,需包含 drawing analysis 与 writing style guide artifact key。
+
+        Returns:
+            成功时返回合法 next_node;人工介入时返回 requires_user_input。
+        """
+        drawing_key = str(state.drafting_context.get("drawing_analysis_key") or "")
+        guide_key = str(state.drafting_context.get("writing_style_guide_key") or "")
+        if not drawing_key or not self._artifact_exists(drawing_key):
+            return NodeResult.failed(errors=["drawing_analysis_missing"])
+        if not guide_key or not self._artifact_exists(guide_key):
+            return NodeResult.failed(errors=["writing_style_guide_missing"])
+        observation = self.tool_registry.run(self.name, {"drawing_analysis_key": drawing_key, "writing_style_guide_key": guide_key})
+        decision = self._parse_decision(observation)
+        if isinstance(decision, NodeResult):
+            return decision
+        return self._result_from_decision(state, "leader_gate_guidance", decision)
+
+    def _artifact_exists(self, artifact_key: str) -> bool:
+        """检查 guidance gate 依赖 artifact 是否存在。"""
+        observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
+        return not observation.error and bool(getattr(observation, "evidence", None))

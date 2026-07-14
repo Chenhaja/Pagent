@@ -158,19 +158,19 @@
 
 ## Phase 8 — 服务入口与端到端回归
 
-- [ ] 更新 `AgentDispatchService._run_patent_drafting()` 测试。
+- [x] 更新 `AgentDispatchService._run_patent_drafting()` 测试。
   - 验收：服务入口注册完整 drafting node 集合，而不是只注册 `drafting_leader`。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [ ] 更新 `_run_patent_drafting()` 节点注册。
+- [x] 更新 `_run_patent_drafting()` 节点注册。
   - 验收：`Orchestrator` 可调度全部 drafting 顶层节点。
   - 验证：端到端测试。
-- [ ] 确认 `remaining_nodes` 裁剪逻辑适配新节点列表。
+- [x] 确认 `remaining_nodes` 裁剪逻辑适配新节点列表。
   - 验收：intent router 返回业务起始节点时能命中完整 workflow。
   - 验证：dispatch 测试。
-- [ ] 确认端到端 trace 可观测性。
+- [x] 确认端到端 trace 可观测性。
   - 验收：trace 包含多个 drafting 顶层 node 和 gate decision，而不是单个 `drafting_leader` 黑盒。
   - 验证：trace 断言。
-- [ ] 运行 Phase 8 验证命令。
+- [x] 运行 Phase 8 验证命令。
   - 验收：端到端、全量测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py && conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests`
 

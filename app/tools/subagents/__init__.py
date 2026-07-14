@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -112,7 +113,7 @@ class PatentDraftingSubagentTool:
     def _fallback_content(self, source_content: str) -> str:
         """LLM 未配置时生成本地占位内容,确保默认测试不调用外部模型。"""
         samples = {
-            "input_parser": f'{{"source":"{source_content[:80]}","uncertain":true}}',
+            "input_parser": json.dumps({"source": source_content[:80], "technical_topic": source_content[:30] or "技术方案", "uncertain": True}, ensure_ascii=False),
             "patent_searcher": "# 现有技术分析\n\n未配置外部 LLM,需后续补充检索分析。",
             "outline_generator": "# 专利大纲\n\n## 摘要\n## 权利要求书\n## 说明书",
             "abstract_writer": "# 摘要\n\n本申请公开了一种技术方案。",

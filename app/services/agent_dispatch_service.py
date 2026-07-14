@@ -3,7 +3,16 @@ from typing import Any
 from app.core.config import get_settings
 from app.memory.session_store import SessionMemoryStore, build_session_store
 from app.models.schemas import WorkflowState
-from app.nodes.drafting_leader import DraftingLeaderNode
+from app.nodes.drafting_content import (
+    DraftingFinalizeNode,
+    DraftingGenerateOutlineNode,
+    DraftingGenerateSectionsNode,
+    DraftingMergeDocumentNode,
+    DraftingReviewDocumentNode,
+)
+from app.nodes.drafting_gates import DraftingLeaderGateGuidanceNode, DraftingLeaderGatePriorArtNode, DraftingLeaderGateReviewNode
+from app.nodes.drafting_guidance import DraftingDrawingAnalysisNode, DraftingWritingStyleGuideNode
+from app.nodes.drafting_research import DraftingParseInputNode, DraftingPatentSearchNode, DraftingPriorArtAnalysisNode
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.qa import QANode
@@ -12,6 +21,39 @@ from app.services.attachment_service import AttachmentService, AttachmentService
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 from app.services.translate_service import TranslateService
+
+
+class DraftingDefaultGateRegistry:
+    """服务入口默认 Leader gate 决策 registry。
+
+    Returns:
+        在未接入外部 Leader 决策器时按阶段产出安全的 continue 决策。
+    """
+
+    def run(self, name: str, tool_input: dict):
+        """根据 gate 名称返回结构化默认决策。
+
+        Args:
+            name: gate 节点名称。
+            tool_input: gate 输入 artifact key。
+
+        Returns:
+            带 decision evidence 的轻量 observation。
+        """
+        targets = {
+            "drafting_leader_gate_prior_art": "drafting_drawing_analysis",
+            "drafting_leader_gate_guidance": "drafting_generate_outline",
+            "drafting_leader_gate_review": "drafting_finalize",
+        }
+        target_node = targets.get(name, "drafting_finalize")
+        payload = {
+            "decision": "continue",
+            "target_node": target_node,
+            "reason": "默认服务入口按显式 workflow 继续执行",
+            "required_changes": [],
+            "confidence": "medium",
+        }
+        return type("Observation", (), {"error": None, "evidence": [{"decision": payload}]})()
 
 
 class AgentDispatchService:
@@ -237,15 +279,32 @@ class AgentDispatchService:
 
         Args:
             state: 已完成 normalize 和 intent_router 的 workflow 状态。
-            workflow_def: 从 drafting_leader 节点开始的节点序列。
+            workflow_def: 从 drafting_parse_input 节点开始的节点序列。
 
         Returns:
             drafting 成功输出或结构化失败结果。
         """
-        # 顶层 drafting 节点会分阶段接入；迁移完成前服务入口继续使用旧 Leader 保持兼容。
-        result = Orchestrator(nodes={"drafting_leader": DraftingLeaderNode(settings=get_settings())}).run(state, ["drafting_leader"])
+        settings = get_settings()
+        gate_registry = DraftingDefaultGateRegistry()
+        nodes = {
+            "drafting_parse_input": DraftingParseInputNode(settings=settings),
+            "drafting_patent_search": DraftingPatentSearchNode(settings=settings),
+            "drafting_prior_art_analysis": DraftingPriorArtAnalysisNode(settings=settings),
+            "drafting_leader_gate_prior_art": DraftingLeaderGatePriorArtNode(settings=settings, tool_registry=gate_registry),
+            "drafting_drawing_analysis": DraftingDrawingAnalysisNode(settings=settings),
+            "drafting_writing_style_guide": DraftingWritingStyleGuideNode(settings=settings),
+            "drafting_leader_gate_guidance": DraftingLeaderGateGuidanceNode(settings=settings, tool_registry=gate_registry),
+            "drafting_generate_outline": DraftingGenerateOutlineNode(settings=settings),
+            "drafting_generate_sections": DraftingGenerateSectionsNode(settings=settings),
+            "drafting_merge_document": DraftingMergeDocumentNode(settings=settings),
+            "drafting_review_document": DraftingReviewDocumentNode(settings=settings),
+            "drafting_leader_gate_review": DraftingLeaderGateReviewNode(settings=settings, tool_registry=gate_registry),
+            "drafting_finalize": DraftingFinalizeNode(settings=settings),
+        }
+        runnable_workflow = [node_name for node_name in workflow_def if node_name != "normalize_input"]
+        result = Orchestrator(nodes=nodes).run(state, runnable_workflow, max_loop_count=3)
         if result.status != "success":
-            return {"status": result.status, "errors": result.errors, "message": "专利文书生成暂时不可用,请稍后重试。"}
+            return {"status": result.status, "errors": result.errors, "message": "专利文书生成暂时不可用,请稍后重试。", "trace": state.trace}
         return {"status": "success", **result.output, "trace": state.trace}
 
     def _run_qa(self, state: WorkflowState, workflow_def: list[str]) -> dict[str, Any]:

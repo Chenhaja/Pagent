@@ -34,6 +34,9 @@ def test_patent_drafting_workflow_generates_markdown_artifacts(tmp_path, monkeyp
     assert result["figures_md"].startswith("# 附图说明")
     assert result["complete_patent_md"].startswith("# 完整专利文书")
     assert result["drafting_incomplete"] is False
+    events = [event["event"] for event in result["trace"]]
+    assert "drafting_outline_generated" in events
+    assert "drafting_finalized" in events
 
 
 def test_patent_drafting_workflow_consumes_uploaded_documents(tmp_path, monkeypatch) -> None:

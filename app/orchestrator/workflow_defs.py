@@ -43,9 +43,24 @@ class WorkflowRegistry:
             ),
             "patent_drafting": WorkflowDef(
                 intent="patent_drafting",
-                nodes=["normalize_input", "drafting_leader"],
+                nodes=[
+                    "normalize_input",
+                    "drafting_parse_input",
+                    "drafting_patent_search",
+                    "drafting_prior_art_analysis",
+                    "drafting_leader_gate_prior_art",
+                    "drafting_drawing_analysis",
+                    "drafting_writing_style_guide",
+                    "drafting_leader_gate_guidance",
+                    "drafting_generate_outline",
+                    "drafting_generate_sections",
+                    "drafting_merge_document",
+                    "drafting_review_document",
+                    "drafting_leader_gate_review",
+                    "drafting_finalize",
+                ],
                 start_node="normalize_input",
-                max_loop_count=0,
+                max_loop_count=3,
             ),
         }
 

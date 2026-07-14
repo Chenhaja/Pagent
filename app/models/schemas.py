@@ -223,6 +223,27 @@ class NodeResult(BaseModel):
         )
 
 
+class DraftingGateDecision(BaseModel):
+    """文书生成 Leader gate 的结构化决策。
+
+    Args:
+        decision: gate 决策类型,用于决定继续、重试、返修或人工介入。
+        target_node: 决策指向的目标节点名称。
+        reason: 决策原因,用于 trace 和人工排查。
+        required_changes: 需要返修或重试时的具体要求。
+        confidence: 决策置信度。
+
+    Returns:
+        可由 gate Node 转换为 NodeResult.next_node 的结构化决策。
+    """
+
+    decision: Literal["continue", "retry", "revise", "escalate"]
+    target_node: str
+    reason: str
+    required_changes: list[str] = Field(default_factory=list)
+    confidence: Literal["low", "medium", "high"]
+
+
 class SkillContext(BaseModel):
     """Skill 调用上下文。
 
@@ -274,6 +295,7 @@ class WorkflowState(BaseModel):
         dialog_context: 会话上下文快照。
         invention_disclosure: 结构化技术交底。
         documents: 用户上传附件抽取后的文档列表。
+        drafting_context: 文书生成短上下文,仅保存 artifact key、gate 决策和重试计数。
         input_points_md: 输入要点 Markdown 产物。
         prior_art_md: 现有技术 Markdown 产物。
         outline_md: 专利文书提纲 Markdown 产物。
@@ -302,6 +324,7 @@ class WorkflowState(BaseModel):
     dialog_context: dict[str, Any] = Field(default_factory=dict)
     invention_disclosure: dict[str, Any] = Field(default_factory=dict)
     documents: list[dict[str, Any]] = Field(default_factory=list)
+    drafting_context: dict[str, Any] = Field(default_factory=dict)
     input_points_md: str = ""
     prior_art_md: str = ""
     outline_md: str = ""

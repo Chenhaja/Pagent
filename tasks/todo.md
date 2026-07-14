@@ -2,21 +2,21 @@
 
 ## Phase 0 — 顶层 workflow 契约与状态骨架
 
-- [ ] 新增或改写 `tests/test_drafting_workflow_defs.py`。
+- [x] 新增或改写 `tests/test_drafting_workflow_defs.py`。
   - 验收：覆盖 `patent_drafting` 完整节点列表、gate 节点存在、旧单点 `drafting_leader` 不再作为唯一业务节点、`max_loop_count=3`。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py`
-- [ ] 展开 `app/orchestrator/workflow_defs.py` 中的 `patent_drafting` 节点列表。
+- [x] 展开 `app/orchestrator/workflow_defs.py` 中的 `patent_drafting` 节点列表。
   - 验收：节点列表包含 parse、search、prior art、三个 leader gate、guidance、content、review、finalize。
   - 验证：workflow defs 测试。
-- [ ] 定义 gate decision 数据结构。
+- [x] 定义 gate decision 数据结构。
   - 验收：支持 `decision`、`target_node`、`reason`、`required_changes`、`confidence`；枚举包含 `continue` / `retry` / `revise` / `escalate`。
   - 验证：schema 或 gate 测试。
-- [ ] 定义 drafting artifact key 状态存储约定。
+- [x] 定义 drafting artifact key 状态存储约定。
   - 验收：长正文不进入 `WorkflowState` 的新增状态；只保存 artifact key、短摘要、gate decision、retry 信息。
   - 验证：workflow / state 测试。
-- [ ] 运行 Phase 0 验证命令。
-  - 验收：workflow defs 测试与编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py && conda run -n autoGLM python -m compileall app tests`
+- [x] 运行 Phase 0 验证命令。
+  - 验收：workflow defs 测试与编译通过；全量回归通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py tests/test_workflow_registry.py && conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests`
 
 ## Phase 1 — 输入解析与 workspace 初始化
 

@@ -242,7 +242,8 @@ class AgentDispatchService:
         Returns:
             drafting 成功输出或结构化失败结果。
         """
-        result = Orchestrator(nodes={"drafting_leader": DraftingLeaderNode(settings=get_settings())}).run(state, workflow_def)
+        # 顶层 drafting 节点会分阶段接入；迁移完成前服务入口继续使用旧 Leader 保持兼容。
+        result = Orchestrator(nodes={"drafting_leader": DraftingLeaderNode(settings=get_settings())}).run(state, ["drafting_leader"])
         if result.status != "success":
             return {"status": result.status, "errors": result.errors, "message": "专利文书生成暂时不可用,请稍后重试。"}
         return {"status": "success", **result.output, "trace": state.trace}

@@ -1,13 +1,31 @@
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 
 
+EXPECTED_PATENT_DRAFTING_NODES = [
+    "normalize_input",
+    "drafting_parse_input",
+    "drafting_patent_search",
+    "drafting_prior_art_analysis",
+    "drafting_leader_gate_prior_art",
+    "drafting_drawing_analysis",
+    "drafting_writing_style_guide",
+    "drafting_leader_gate_guidance",
+    "drafting_generate_outline",
+    "drafting_generate_sections",
+    "drafting_merge_document",
+    "drafting_review_document",
+    "drafting_leader_gate_review",
+    "drafting_finalize",
+]
+
+
 def test_workflow_registry_returns_known_intent_workflow_defs() -> None:
     """workflow registry 应按 known intent 返回预定义 workflow。"""
     registry = WorkflowRegistry()
 
     assert registry.get_workflow("translation") == ["normalize_input", "translate"]
     assert registry.get_workflow("qa") == ["normalize_input", "qa"]
-    assert registry.get_workflow("patent_drafting") == ["normalize_input", "drafting_leader"]
+    assert registry.get_workflow("patent_drafting") == EXPECTED_PATENT_DRAFTING_NODES
 
 
 def test_workflow_registry_returns_empty_for_unknown_intent() -> None:
@@ -49,12 +67,12 @@ def test_workflow_registry_registers_qa_workflow() -> None:
 
 
 def test_workflow_registry_registers_patent_drafting_workflow() -> None:
-    """patent_drafting intent 应注册到 drafting leader。"""
+    """patent_drafting intent 应注册为顶层文书生成流程。"""
     registry = WorkflowRegistry()
 
     workflow_def = registry.get_workflow_def("patent_drafting")
 
     assert workflow_def.intent == "patent_drafting"
     assert workflow_def.start_node == "normalize_input"
-    assert workflow_def.max_loop_count == 0
-    assert workflow_def.nodes == ["normalize_input", "drafting_leader"]
+    assert workflow_def.max_loop_count == 3
+    assert workflow_def.nodes == EXPECTED_PATENT_DRAFTING_NODES

@@ -116,25 +116,25 @@
 
 ## Phase 6 — 内容生成：大纲、正文、合并、评审
 
-- [ ] 新增或扩展内容生成节点测试。
+- [x] 新增或扩展内容生成节点测试。
   - 验收：覆盖大纲、正文、合并、评审四类节点的输入 artifact、输出 artifact 和失败语义。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [ ] 实现 `drafting_generate_outline` Node。
+- [x] 实现 `drafting_generate_outline` Node。
   - 验收：读取 parsed info、prior art、drawing analysis、writing style guide，写入 `03_outline/patent_outline.md`。
   - 验证：内容节点测试。
-- [ ] 实现 `drafting_generate_sections` Node。
+- [x] 实现 `drafting_generate_sections` Node。
   - 验收：读取大纲和写作指南，写入摘要、权利要求、说明书、附图说明等 `04_content/*.md`。
   - 验证：内容节点测试。
-- [ ] 实现 `drafting_merge_document` Node。
+- [x] 实现 `drafting_merge_document` Node。
   - 验收：按稳定顺序合并正文 artifact，写入 `05_final/complete_patent.md`。
   - 验证：内容节点测试。
-- [ ] 实现 `drafting_review_document` Node。
+- [x] 实现 `drafting_review_document` Node。
   - 验收：读取终稿、写作指南、关键中间产物，写入 `05_final/review_report.json`。
   - 验证：内容节点测试。
-- [ ] 确保内容节点不把长正文放入 `NodeResult.output`。
+- [x] 确保内容节点不把长正文放入 `NodeResult.output`。
   - 验收：output 只包含 artifact key、done、简短说明。
   - 验证：内容节点测试。
-- [ ] 运行 Phase 6 验证命令。
+- [x] 运行 Phase 6 验证命令。
   - 验收：内容相关测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py && conda run -n autoGLM python -m compileall app tests`
 

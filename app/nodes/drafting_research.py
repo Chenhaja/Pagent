@@ -6,6 +6,7 @@ from app.models.schemas import NodeResult, WorkflowState
 from app.orchestrator.node_base import Node
 from app.orchestrator.tool_registry import ToolRegistry, build_default_tool_registry
 from app.tools.draft_workspace import DraftWorkspaceTool
+from app.tools.subagents.input_parser_agent import LangChainInputParserAgent
 
 
 DRAFTING_SOURCE_ARTIFACT_KEY = "01_input/raw_document.md"
@@ -20,7 +21,8 @@ class DraftingParseInputNode(Node):
     Args:
         settings: 应用配置,未传入时读取全局配置。
         workspace: 可注入的草稿 artifact 工作区工具。
-        tool_registry: 可注入工具注册表,用于调用 input_parser 子代理。
+        tool_registry: 显式传入时沿用旧 input_parser 子代理调用路径。
+        input_parser_runner: 可注入输入解析 runner,默认使用 LangChain create_agent 试点 runner。
 
     Returns:
         写入 source 与 parsed_info artifact 的顶层 workflow 节点。
@@ -33,12 +35,14 @@ class DraftingParseInputNode(Node):
         settings: Settings | None = None,
         workspace: DraftWorkspaceTool | None = None,
         tool_registry: ToolRegistry | Any | None = None,
+        input_parser_runner: Any | None = None,
     ) -> None:
         """初始化输入解析节点。"""
         super().__init__(name=self.name)
         self.settings = settings or get_settings()
         self.workspace = workspace or DraftWorkspaceTool(self.settings)
-        self.tool_registry = tool_registry or build_default_tool_registry(self.settings)
+        self.tool_registry = tool_registry
+        self.input_parser_runner = input_parser_runner or (None if tool_registry is not None else LangChainInputParserAgent(settings=self.settings, workspace=self.workspace))
 
     def run(self, state: WorkflowState) -> NodeResult:
         """写入原始输入 artifact 并委托 input_parser 生成 parsed_info。
@@ -62,11 +66,11 @@ class DraftingParseInputNode(Node):
             self._trace_event("drafting_source_written", artifact_key=DRAFTING_SOURCE_ARTIFACT_KEY, chars=source_chars)
         )
 
-        parsed = self.tool_registry.run("input_parser", {"source_artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY})
+        parsed = self._run_input_parser({"source_artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY})
         if parsed.error:
             return NodeResult.failed(errors=[parsed.error])
         parsed_key = self._artifact_key_from_observation(parsed) or DRAFTING_PARSED_INFO_ARTIFACT_KEY
-        if not self._artifact_exists(parsed_key):
+        if not self._artifact_json_object_exists(parsed_key):
             return NodeResult.failed(errors=["parsed_info_missing"])
         state.drafting_context["parsed_info_key"] = parsed_key
         trace_events.append(self._trace_event("drafting_input_parsed", artifact_key=parsed_key))
@@ -84,10 +88,23 @@ class DraftingParseInputNode(Node):
                 parts.append(text)
         return "\n\n".join(part for part in parts if part.strip())
 
-    def _artifact_exists(self, artifact_key: str) -> bool:
-        """检查 artifact 是否已写入 workspace。"""
+    def _run_input_parser(self, tool_input: dict[str, Any]) -> Any:
+        """按注入优先级执行 input_parser runner 或旧 tool_registry。"""
+        if self.input_parser_runner is not None:
+            return self.input_parser_runner.run(tool_input)
+        registry = self.tool_registry or build_default_tool_registry(self.settings)
+        return registry.run("input_parser", tool_input)
+
+    def _artifact_json_object_exists(self, artifact_key: str) -> bool:
+        """检查 artifact 已写入且内容是 JSON object。"""
         observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
-        return not observation.error and bool(observation.evidence)
+        if observation.error or not getattr(observation, "evidence", None):
+            return False
+        try:
+            payload = json.loads(str(observation.evidence[0].get("content") or ""))
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, dict)
 
     def _artifact_key_from_observation(self, observation: Any) -> str | None:
         """从工具 observation 中提取 artifact key。"""

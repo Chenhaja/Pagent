@@ -3,6 +3,7 @@ import json
 from app.core.config import Settings
 from app.models.schemas import WorkflowState
 from app.nodes.drafting_research import DraftingParseInputNode, DraftingPatentSearchNode, DraftingPriorArtAnalysisNode
+from app.orchestrator.react_loop import ToolObservation
 from app.tools.draft_workspace import DraftWorkspaceTool
 
 
@@ -61,6 +62,71 @@ def test_drafting_parse_input_consumes_documents_and_sanitizes_trace(tmp_path) -
     assert "用户原文" not in trace_text
     assert "附件敏感正文" not in trace_text
     assert "01_input/raw_document.md" in trace_text
+
+
+def test_drafting_parse_input_uses_injected_runner(tmp_path) -> None:
+    """drafting_parse_input 应优先使用注入 runner。"""
+    class FakeRunner:
+        """测试用 runner,模拟 LangChain input_parser。"""
+
+        def __init__(self, workspace: DraftWorkspaceTool) -> None:
+            """初始化测试 runner。"""
+            self.workspace = workspace
+            self.calls = []
+
+        def run(self, tool_input: dict):
+            """写入测试 parsed_info 并返回短 observation。"""
+            self.calls.append(dict(tool_input))
+            key = "01_input/parsed_info.json"
+            self.workspace.run({"action": "write", "artifact_key": key, "content": '{"technical_topic":"runner"}'})
+            return ToolObservation(tool_name="input_parser", evidence=[{"artifact_key": key, "done": True}], sufficient=True)
+
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    runner = FakeRunner(workspace)
+    node = DraftingParseInputNode(workspace=workspace, input_parser_runner=runner)
+
+    result = node.run(WorkflowState(raw_input="交底书正文"))
+
+    assert result.status == "success"
+    assert runner.calls == [{"source_artifact_key": "01_input/raw_document.md"}]
+
+
+def test_drafting_parse_input_default_runner_falls_back_without_llm(tmp_path) -> None:
+    """默认 runner 在 LLM 配置不完整时应本地写入合法 parsed_info。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path), allow_network=False, llm_base_url=None, llm_model="", llm_api_key=None))
+    node = DraftingParseInputNode(settings=workspace.settings, workspace=workspace)
+
+    result = node.run(WorkflowState(raw_input="一种夹爪控制方法"))
+    parsed = workspace.run({"action": "read", "artifact_key": "01_input/parsed_info.json"})
+    payload = json.loads(parsed.evidence[0]["content"])
+
+    assert result.status == "success"
+    assert payload["uncertain"] is True
+    assert payload["technical_topic"] == "一种夹爪控制方法"
+
+
+def test_drafting_parse_input_fails_when_parser_writes_invalid_json(tmp_path) -> None:
+    """parser 写入非法 JSON 时节点应返回 parsed_info_missing。"""
+    class InvalidJsonRunner:
+        """测试用 runner,模拟写入非法 JSON。"""
+
+        def __init__(self, workspace: DraftWorkspaceTool) -> None:
+            """初始化测试 runner。"""
+            self.workspace = workspace
+
+        def run(self, tool_input: dict):
+            """写入非法 JSON 并声称成功。"""
+            key = "01_input/parsed_info.json"
+            self.workspace.run({"action": "write", "artifact_key": key, "content": "not-json"})
+            return ToolObservation(tool_name="input_parser", evidence=[{"artifact_key": key, "done": True}], sufficient=True)
+
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    node = DraftingParseInputNode(workspace=workspace, input_parser_runner=InvalidJsonRunner(workspace))
+
+    result = node.run(WorkflowState(raw_input="交底书正文"))
+
+    assert result.status == "failed"
+    assert result.errors == ["parsed_info_missing"]
 
 
 def test_drafting_parse_input_fails_when_parser_does_not_write_artifact(tmp_path) -> None:

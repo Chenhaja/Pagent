@@ -1,211 +1,193 @@
-# Pagent R12 专利文书生成缺口修复 Todo
+# Pagent 文书生成顶层流程化 Todo
 
-## Phase 0 — 需求命名与基础配置对齐
+## Phase 0 — 顶层 workflow 契约与状态骨架
 
-- [x] 确认并固定命名：`todo_prompt` / `todo`。
-  - 验收：计划、任务、后续测试和实现均不新增 `todo_middleware` / `write_todos` 命名。
-  - 验证：代码 review 或内容搜索。
-- [x] 更新 `app/core/config.py` 中 workspace、技能目录与 SerpAPI 配置。
-  - 验收：`draft_workspace_dir` 默认空字符串；`skill_dir` 默认 `app/skills_docs`；`patent_search_top_k` 默认 10；SerpAPI Key 从 `SERPAPI_API_KEY` / `PAGENT_SERPAPI_API_KEY` 或配置读取且标记为敏感。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py`
-- [x] 更新 `to_public_dict()`。
-  - 验收：非敏感 R12 配置进入公开配置；敏感项不暴露。
-  - 验证：配置测试。
-- [x] 运行 P0 验证命令。
-  - 验收：配置测试与编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_core_config_logging.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] 新增或改写 `tests/test_drafting_workflow_defs.py`。
+  - 验收：覆盖 `patent_drafting` 完整节点列表、gate 节点存在、旧单点 `drafting_leader` 不再作为唯一业务节点、`max_loop_count=3`。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py`
+- [ ] 展开 `app/orchestrator/workflow_defs.py` 中的 `patent_drafting` 节点列表。
+  - 验收：节点列表包含 parse、search、prior art、三个 leader gate、guidance、content、review、finalize。
+  - 验证：workflow defs 测试。
+- [ ] 定义 gate decision 数据结构。
+  - 验收：支持 `decision`、`target_node`、`reason`、`required_changes`、`confidence`；枚举包含 `continue` / `retry` / `revise` / `escalate`。
+  - 验证：schema 或 gate 测试。
+- [ ] 定义 drafting artifact key 状态存储约定。
+  - 验收：长正文不进入 `WorkflowState` 的新增状态；只保存 artifact key、短摘要、gate decision、retry 信息。
+  - 验证：workflow / state 测试。
+- [ ] 运行 Phase 0 验证命令。
+  - 验收：workflow defs 测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py && conda run -n autoGLM python -m compileall app tests`
 
-## Phase 1 — `draft_workspace` 项目工作区
+## Phase 1 — 输入解析与 workspace 初始化
 
-- [x] 新增或改写 `tests/test_draft_workspace.py`。
-  - 验收：覆盖内存模式、磁盘模式、目录结构、`write` / `read` / `list` / `merge`、路径安全。
-  - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py`
-- [x] 将 `DraftWorkspaceTool` 默认存储改为内存 key-store。
-  - 验收：`draft_workspace_dir=""` 时不创建磁盘目录或文件。
-  - 验证：workspace 测试。
-- [x] 支持磁盘落盘模式。
-  - 验收：`PAGENT_DRAFT_WORKSPACE_DIR` 非空时 artifact 落在 workspace 根目录内。
-  - 验证：workspace 测试。
-- [x] 支持项目工作区目录结构。
-  - 验收：逻辑目录包含 `01_input`、`02_research`、`03_outline`、`04_content`、`05_final`。
-  - 验证：workspace 测试。
-- [x] 支持相对路径 artifact key。
-  - 验收：允许 `04_content/abstract.md` 等 key；拒绝绝对路径、`..`、非法字符。
-  - 验证：workspace 路径安全测试。
-- [x] 实现 `list` 动作。
-  - 验收：可按 prefix 枚举目录下 artifact，供 Leader 审查缺文件。
-  - 验证：workspace list 测试。
-- [x] 实现 `merge` 动作。
-  - 验收：按输入顺序合并多个 artifact 并写入目标 key。
-  - 验证：workspace merge 测试。
-- [x] 更新 `ToolRegistry` 中 `draft_workspace` schema 与描述。
-  - 验收：schema 支持 `list` / `merge` 所需参数。
-  - 验证：tool registry 相关测试。
-- [x] 运行 P1 验证命令。
-  - 验收：workspace 测试和编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] 新增 `drafting_parse_input` Node 测试。
+  - 验收：覆盖无附件、有附件、workspace 写入、trace 脱敏。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py`
+- [ ] 实现 `drafting_parse_input` Node。
+  - 验收：从 `state.normalized_input` / `state.raw_input` / `state.documents` 构造输入 artifact。
+  - 验证：输入节点测试。
+- [ ] 写入 `01_input/raw_document.md`。
+  - 验收：workspace 中存在 source artifact；trace 只记录 key 和 chars。
+  - 验证：输入节点测试。
+- [ ] 生成或委托生成 `01_input/parsed_info.json`。
+  - 验收：后续节点可读取 parsed info artifact；失败时返回可解释错误。
+  - 验证：输入节点测试。
+- [ ] 将 source / parsed info artifact key 写入 state 短字段或 `drafting_context`。
+  - 验收：不把原始长正文写入新增 state 字段。
+  - 验证：state 断言。
+- [ ] 运行 Phase 1 验证命令。
+  - 验收：输入节点测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py && conda run -n autoGLM python -m compileall app tests`
 
-## Phase 2 — `skill_loader` Markdown 技能文档
+## Phase 2 — 前置研究：检索与现有技术分析
 
-- [x] 新增或改写 `tests/test_skill_loader.py`。
-  - 验收：覆盖 Markdown 读取、白名单、缺失、路径穿越、拒绝 Python 源码。
-  - 验证：`conda run -n autoGLM pytest tests/test_skill_loader.py`
-- [x] 将 `SkillLoaderTool` 默认目录改为 `settings.skill_dir`。
-  - 验收：默认指向 `app/skills_docs`，不再指向 `app/skills`。
-  - 验证：skill_loader 测试。
-- [x] 将白名单文件改为 Markdown 技能文档。
-  - 验收：至少支持 `patent_drafting.md` 与 `mermaid.md`。
-  - 验证：skill_loader 测试。
-- [x] 增加 `app/skills_docs/` 必要技能文档。
-  - 验收：文档为领域知识 / SOP，不包含可执行 Python 源码。
-  - 验证：skill_loader 测试。
-- [x] 保留路径安全校验。
-  - 验收：未知技能、路径穿越、`.py` 请求均被拒绝。
-  - 验证：skill_loader 安全测试。
-- [x] 更新 `ToolRegistry` 中 `skill_loader` 描述。
-  - 验收：描述明确为 Markdown 技能文档加载。
-  - 验证：registry 测试或 review。
-- [x] 运行 P2 验证命令。
-  - 验收：skill_loader 测试和编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_skill_loader.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] 新增 `drafting_patent_search` Node 测试。
+  - 验收：覆盖离线降级、fake provider、有结果、无结果、trace 脱敏。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py`
+- [ ] 实现 `drafting_patent_search` Node。
+  - 验收：读取 `01_input/parsed_info.json`，调用 `patent_search` 工具，写入 `02_research/patent_search_results.json`。
+  - 验证：research nodes 测试。
+- [ ] 新增 `drafting_prior_art_analysis` Node 测试。
+  - 验收：覆盖有检索结果、检索不足、不编造来源、不确定点输出。
+  - 验证：research nodes 测试。
+- [ ] 实现 `drafting_prior_art_analysis` Node。
+  - 验收：读取 parsed info 与 search results，写入 `02_research/prior_art_analysis.json`。
+  - 验证：research nodes 测试。
+- [ ] 规范 prior art analysis 输出字段。
+  - 验收：包含 closest prior art、distinguishing features、technical effects、novelty risks、inventiveness risks、recommended claim focus、uncertain points、confidence。
+  - 验证：JSON 字段断言。
+- [ ] 运行 Phase 2 验证命令。
+  - 验收：research nodes、patent_search 测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py && conda run -n autoGLM pytest tests/test_patent_search.py && conda run -n autoGLM python -m compileall app tests`
 
-## Phase 3 — `patent_search` SerpAPI 检索接口与降级
+## Phase 3 — Leader prior art gate
 
-- [x] 新增或改写 `tests/test_patent_search.py`。
-  - 验收：覆盖空 query、联网门控、SerpAPI Key 缺失、fake SerpAPI provider、Top-K、provider 异常、安全降级。
-  - 验证：`conda run -n autoGLM pytest tests/test_patent_search.py`
-- [x] 为 `PatentSearchTool` 增加 SerpAPI provider 注入点。
-  - 验收：测试可注入 fake SerpAPI provider，不访问真实网络。
-  - 验证：patent_search 测试。
-- [x] 支持 R12 输入参数。
-  - 验收：支持 `query`、`top_k`、`country`、`status`；默认 CN / GRANT / Top-K。
-  - 验证：patent_search 参数测试。
-- [x] 实现联网门控与 SerpAPI Key 缺失降级。
-  - 验收：`allow_network=False`、外部工具未授权或未配置 SerpAPI Key 时返回 skipped/degraded，不触网。
-  - 验证：patent_search 门控测试。
-- [x] 删除 fake evidence 行为并接入 SerpAPI 结果规范化。
-  - 验收：不再返回 `patent_search skipped: {query}` 伪 evidence；联网授权时从 SerpAPI 响应规范化出 title、publication_number、abstract、url、country、status、provenance。
-  - 验证：patent_search 测试。
-- [x] 更新 `ToolRegistry` 中 `patent_search` schema 与 SerpAPI 描述。
-  - 验收：schema 支持 `top_k`、`country`、`status`；描述明确后端为 SerpAPI。
-  - 验证：registry 测试或 review。
-- [x] 运行 P3 验证命令。
-  - 验收：patent_search 测试和编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_patent_search.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] 新增 `drafting_leader_gate_prior_art` 测试。
+  - 验收：覆盖 continue、retry、revise、escalate、非法 decision、非法 target_node。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py`
+- [ ] 实现 Leader gate 基类或共享解析逻辑。
+  - 验收：能校验结构化 decision，能把 decision 转换为合法 `NodeResult.next_node`。
+  - 验证：gate 测试。
+- [ ] 实现 `drafting_leader_gate_prior_art` Node。
+  - 验收：只读取 artifact key / 结构化摘要，不生成正文。
+  - 验证：gate 测试。
+- [ ] 验证 prior art gate 回跳路由。
+  - 验收：`retry` 回到 `drafting_patent_search`；`revise` 回到 `drafting_prior_art_analysis`；超过 loop limit 安全失败。
+  - 验证：workflow defs / orchestrator 测试。
+- [ ] 运行 Phase 3 验证命令。
+  - 验收：gate、workflow defs 测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py && conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py && conda run -n autoGLM python -m compileall app tests`
 
-## Phase 3.5 — `todo` 工具与 `todo_prompt`
+## Phase 4 — 附图分析与写作风格指南
 
-- [x] 新增 `app/prompts/todo_prompt.py`。
-  - 验收：包含 R12 §4.2 的规划 prompt，工具名按用户要求改为 `todo`。
-  - 验证：prompt review 或 prompt 常量测试。
-- [x] 新增 `app/tools/todo.py`。
-  - 验收：工具名为 `todo`，输入完整 todo 列表。
-  - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py`
-- [x] 新增 `tests/test_todo_tool.py`。
-  - 验收：覆盖状态枚举、owner 隔离、完整列表覆盖、上下文渲染、非法状态拒绝。
-  - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py`
-- [x] 实现状态枚举校验。
-  - 验收：只允许 `pending`、`in_progress`、`done`。
-  - 验证：todo 工具测试。
-- [x] 实现 owner 隔离。
-  - 验收：Leader 与每个子代理 todo 状态互不污染。
-  - 验证：todo owner 测试。
-- [x] 实现 todo 上下文渲染。
-  - 验收：可将当前 todo 列表注入 Leader / 子代理上下文。
-  - 验证：todo 渲染测试。
-- [x] 注册 `todo` 工具。
-  - 验收：`ToolRegistry` 可获取 `todo`；不注册 `write_todos`。
-  - 验证：registry 测试。
-- [x] 运行 P3.5 验证命令。
-  - 验收：todo 测试和编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] 新增 `drafting_drawing_analysis` Node 测试。
+  - 验收：覆盖有附图文本、无附图、不得臆造图号、输出 uncertain points。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_guidance_nodes.py`
+- [ ] 实现 `drafting_drawing_analysis` Node。
+  - 验收：读取 parsed info / 附件解析信息，写入 `02_research/drawing_analysis.json`。
+  - 验证：guidance nodes 测试。
+- [ ] 新增 `drafting_writing_style_guide` Node 测试。
+  - 验收：覆盖整合 parsed info、prior art、drawing analysis、用户注意事项、指令注入隔离。
+  - 验证：guidance nodes 测试。
+- [ ] 实现 `drafting_writing_style_guide` Node。
+  - 验收：写入 `02_research/writing_style_guide.json`，包含 global rules、terminology rules、claim style、description style、uncertain points、confidence。
+  - 验证：guidance nodes 测试。
+- [ ] 确保用户注意事项作为数据处理。
+  - 验收：注意事项中的“忽略以上指令”等文本不会改变输出格式或系统行为。
+  - 验证：注入隔离测试。
+- [ ] 运行 Phase 4 验证命令。
+  - 验收：guidance nodes 测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_guidance_nodes.py && conda run -n autoGLM python -m compileall app tests`
 
-## Phase 4 — R12 Prompt 与 9 个真实子代理
+## Phase 5 — Leader guidance gate
 
-- [x] 新增 `app/prompts/patent_drafting_leader.py`。
-  - 验收：包含 R12 §4.1 Leader Prompt 原文，语义不改写。
-  - 验证：prompt review。
-- [x] 新增 `app/prompts/subagents/` 下 9 个 prompt 模块。
-  - 验收：包含 R12 §4.3 - §4.11 原文；仅做工具名等价替换。
-  - 验证：prompt review 或常量存在测试。
-- [x] 改写 `tests/test_subagent_tools.py` 为 R12 契约。
-  - 验收：断言 9 个子代理、fake LLM 调用、workspace key 读写、短结果返回。
-  - 验证：`conda run -n autoGLM pytest tests/test_subagent_tools.py`
-- [x] 将 `SUBAGENT_DEFINITIONS` 改为 R12 9 环节。
-  - 验收：包含 `description_writer_part1` 与 `description_writer_part2`。
-  - 验证：subagent 测试。
-- [x] 实现子代理 LLM 调用或可注入 fake LLM。
-  - 验收：子代理不再通过拼标题生成内容；测试可证明 fake LLM 被调用。
-  - 验证：subagent fake LLM 测试。
-- [x] 为子代理配置受限工具集。
-  - 验收：不同角色只能访问规定工具，如 `patent_searcher` 可用 `patent_search`，写作类可用 `skill_loader`。
-  - 验证：subagent 工具权限测试。
-- [x] 子代理输出改为 R12 workspace key。
-  - 验收：输出写入 `01_input/parsed_info.json`、`02_research/*.md`、`03_outline/patent_outline.md`、`04_content/*.md`、`05_final/*.md`。
-  - 验证：subagent artifact 测试。
-- [x] 子代理返回短结果。
-  - 验收：返回 `{artifact_key, done, note?}`，不回传长 Markdown 正文。
-  - 验证：subagent 返回结构测试。
-- [x] 实现 `description_writer_part2` merge 行为。
-  - 验收：使用 workspace `merge` 合并说明书第一部分与具体实施方式临时文件。
-  - 验证：subagent part2 测试。
-- [x] 实现 `markdown_merger` merge 行为。
-  - 验收：按摘要、权利要求书、说明书、说明书附图顺序合并终稿。
-  - 验证：subagent merger 测试。
-- [x] 更新 `ToolRegistry` 注册 9 个子代理。
-  - 验收：默认 registry 可获取全部 9 个子代理工具。
-  - 验证：subagent registry 测试。
-- [x] 运行 P4 验证命令。
-  - 验收：subagent 测试和编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_subagent_tools.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] 新增 `drafting_leader_gate_guidance` 测试。
+  - 验收：覆盖写作指南缺失、附图缺失、continue、retry、revise、escalate。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py`
+- [ ] 实现 `drafting_leader_gate_guidance` Node。
+  - 验收：判断 drawing analysis 与 writing style guide 是否足够进入大纲生成。
+  - 验证：gate 测试。
+- [ ] 验证 guidance gate 路由。
+  - 验收：`continue` 进入 `drafting_generate_outline`；`retry` / `revise` 回到合法前置节点。
+  - 验证：gate / workflow 测试。
+- [ ] 运行 Phase 5 验证命令。
+  - 验收：gate 测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py && conda run -n autoGLM python -m compileall app tests`
 
-## Phase 5 — `drafting_leader` R12 编排审查
+## Phase 6 — 内容生成：大纲、正文、合并、评审
 
-- [x] 改写 `tests/test_drafting_leader.py` 为 R12 顺序。
-  - 验收：断言 9 环节顺序、workspace list 审查、缺文件重试、最终输出 key。
-  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py`
-- [x] 将 Leader 工具顺序改为 R12 9 环节。
-  - 验收：顺序为 input_parser → patent_searcher → outline_generator → abstract_writer → claims_writer → description_writer_part1 → description_writer_part2 → diagram_generator → markdown_merger。
-  - 验证：leader 顺序测试。
-- [x] Leader 创建或初始化项目工作区。
-  - 验收：输入写入 `01_input/`，后续路径符合 R12 目录结构。
-  - 验证：leader workspace 测试。
-- [x] Leader 通过 `list` 审查每阶段输出。
-  - 验收：每个子代理后检查目标 artifact 是否存在。
-  - 验证：leader list 审查测试。
-- [x] Leader 实现缺文件重委托。
-  - 验收：缺失文件最多重试 5 次，超过后失败或标记 incomplete。
-  - 验证：leader retry 测试。
-- [x] Leader 接入 `todo`。
-  - 验收：Leader 可维护并注入自己的 todo 状态；不调用 `write_todos`。
-  - 验证：leader todo 测试。
-- [x] 更新 trace / 日志脱敏。
-  - 验收：trace 仅含工具名、artifact key、长度、状态、错误摘要。
-  - 验证：leader trace 测试。
-- [x] 更新 `tests/test_patent_drafting_workflow.py`。
-  - 验收：端到端使用 R12 key 和 9 环节产物。
+- [ ] 新增或扩展内容生成节点测试。
+  - 验收：覆盖大纲、正文、合并、评审四类节点的输入 artifact、输出 artifact 和失败语义。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [x] 运行 P5 验证命令。
-  - 验收：leader、workflow 测试和编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader.py tests/test_patent_drafting_workflow.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] 实现 `drafting_generate_outline` Node。
+  - 验收：读取 parsed info、prior art、drawing analysis、writing style guide，写入 `03_outline/patent_outline.md`。
+  - 验证：内容节点测试。
+- [ ] 实现 `drafting_generate_sections` Node。
+  - 验收：读取大纲和写作指南，写入摘要、权利要求、说明书、附图说明等 `04_content/*.md`。
+  - 验证：内容节点测试。
+- [ ] 实现 `drafting_merge_document` Node。
+  - 验收：按稳定顺序合并正文 artifact，写入 `05_final/complete_patent.md`。
+  - 验证：内容节点测试。
+- [ ] 实现 `drafting_review_document` Node。
+  - 验收：读取终稿、写作指南、关键中间产物，写入 `05_final/review_report.json`。
+  - 验证：内容节点测试。
+- [ ] 确保内容节点不把长正文放入 `NodeResult.output`。
+  - 验收：output 只包含 artifact key、done、简短说明。
+  - 验证：内容节点测试。
+- [ ] 运行 Phase 6 验证命令。
+  - 验收：内容相关测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py && conda run -n autoGLM python -m compileall app tests`
 
-## Phase 6 — 端到端回归与收尾
+## Phase 7 — Leader review gate 与 finalize
 
-- [x] 运行 R12 相关专项测试。
-  - 验收：workspace、skill_loader、patent_search、todo、subagent、leader、workflow 测试通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_skill_loader.py tests/test_patent_search.py tests/test_todo_tool.py tests/test_subagent_tools.py tests/test_drafting_leader.py tests/test_patent_drafting_workflow.py`
-- [x] 运行安全与附件回归。
-  - 验收：附件 / 检索数据中的 prompt injection 不改变行为；正文不进日志或 trace。
-  - 验证：相关 security / attachment 测试。
-- [x] 检查默认测试不触网、不调用真实外部 LLM。
-  - 验收：默认测试使用 fake LLM / fake provider。
-  - 验证：测试 review 或 monkeypatch 断言。
-- [x] 运行全量 pytest。
-  - 验收：全量测试通过。
-  - 验证：`conda run -n autoGLM pytest`
-- [x] 运行 compileall。
-  - 验收：`app` 和 `tests` 编译通过。
-  - 验证：`conda run -n autoGLM python -m compileall app tests`
-- [x] 检查 diff 无无关改动。
-  - 验收：无密钥、无临时文件、无调试代码、无未要求重构。
-  - 验证：`git status` / `git diff`
+- [ ] 新增 `drafting_leader_gate_review` 测试。
+  - 验收：覆盖 review 通过、返修正文、重评、人工介入 / 安全失败。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py`
+- [ ] 实现 `drafting_leader_gate_review` Node。
+  - 验收：读取 review report 和相关 artifact key，输出结构化决策并返回合法 `next_node`。
+  - 验证：gate 测试。
+- [ ] 实现 `drafting_finalize` Node。
+  - 验收：读取最终 artifact 并回填现有 API 兼容字段。
+  - 验证：端到端测试。
+- [ ] 兼容现有返回字段。
+  - 验收：包含 `input_points_md`、`prior_art_md`、`outline_md`、`abstract_md`、`claims_md`、`description_md`、`figures_md`、`complete_patent_md`、`drafting_incomplete`。
+  - 验证：`tests/test_patent_drafting_workflow.py`。
+- [ ] 运行 Phase 7 验证命令。
+  - 验收：review gate、端到端测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_leader_gates.py && conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py && conda run -n autoGLM python -m compileall app tests`
+
+## Phase 8 — 服务入口与端到端回归
+
+- [ ] 更新 `AgentDispatchService._run_patent_drafting()` 测试。
+  - 验收：服务入口注册完整 drafting node 集合，而不是只注册 `drafting_leader`。
+  - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
+- [ ] 更新 `_run_patent_drafting()` 节点注册。
+  - 验收：`Orchestrator` 可调度全部 drafting 顶层节点。
+  - 验证：端到端测试。
+- [ ] 确认 `remaining_nodes` 裁剪逻辑适配新节点列表。
+  - 验收：intent router 返回业务起始节点时能命中完整 workflow。
+  - 验证：dispatch 测试。
+- [ ] 确认端到端 trace 可观测性。
+  - 验收：trace 包含多个 drafting 顶层 node 和 gate decision，而不是单个 `drafting_leader` 黑盒。
+  - 验证：trace 断言。
+- [ ] 运行 Phase 8 验证命令。
+  - 验收：端到端、全量测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py && conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests`
+
+## Phase 9 — 收敛旧 Leader 与测试迁移
+
+- [ ] 迁移 `tests/test_drafting_leader.py`。
+  - 验收：旧 Leader 顺序调用测试改为 gate 或 workflow 测试，不再断言 Leader 内部 for-loop。
+  - 验证：相关测试通过。
+- [ ] 删除或降级 `DraftingLeaderNode.run()` 的固定流程职责。
+  - 验收：没有默认路径继续通过 `drafting_leader` 隐藏完整文书生成流程。
+  - 验证：代码搜索与端到端测试。
+- [ ] 清理旧流程常量引用。
+  - 验收：`DRAFTING_ALLOWED_TOOLS` 等不再作为 patent_drafting 顶层顺序来源；如保留，只能作为内容节点内部子代理清单。
+  - 验证：代码 review / 搜索。
+- [ ] 确认 `workflow_defs.py` 是顺序权威来源。
+  - 验收：文书生成流程顺序只需查看 `WorkflowRegistry` 即可理解。
+  - 验证：workflow defs 测试。
+- [ ] 运行 Phase 9 验证命令。
+  - 验收：全量测试与编译通过。
+  - 验证：`conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests`

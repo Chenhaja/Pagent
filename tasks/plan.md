@@ -1,487 +1,536 @@
-# Pagent R12 专利文书生成缺口修复实施计划
+# Pagent 文书生成顶层流程化实施计划
 
 ## 目标与范围
 
-本计划基于根目录 `SPEC.md`，用于修复 R12 指出的专利文书生成工具实现缺口。本轮只生成 `tasks/plan.md` 与 `tasks/todo.md`，不修改实现代码、不运行测试、不提交 git。
+本计划基于根目录 `SPEC.md`，用于将专利文书生成从 `drafting_leader` 内部固定 for-loop 改为由现有顶层 `Orchestrator` 承载完整 `patent_drafting` 节点列表，Leader 只作为关键 gate Node 做结构化决策。
 
-用户补充命名约定：
+本轮只生成 `tasks/plan.md` 与 `tasks/todo.md`，不修改实现代码、不运行测试、不提交 git。
 
-- 原 SPEC 中 `todo_middleware` 统一按 `todo_prompt` 理解。
-- 原 SPEC 中 `write_todos` 工具统一按 `todo` 工具理解。
-- 后续实现文件、prompt 模块、工具名和测试命名均优先使用 `todo_prompt` / `todo`。
+核心范围：
 
-R12 范围：
-
-- 增强 `draft_workspace`：项目工作区、目录结构、相对路径 key、`list`、`merge`、默认内存 key-store、可选磁盘落盘。
-- 修复 `skill_loader`：读取 Markdown 技能文档，不读取 `app/skills/*.py` 源码。
-- 修复 `patent_search`：接入 SerpAPI 检索后端，受联网门控和 SerpAPI Key 配置控制，默认离线安全降级，不伪造 evidence。
-- 增加 `todo` 工具和 `todo_prompt`：Leader 与 9 个子代理各自维护独立 todo 状态并注入上下文。
-- 落地 R12 PRD §4 Prompt 原文：Leader + 9 个子代理 Prompt，只做工具名等价替换。
-- 子代理从 8 个占位工具升级为 9 个真实 LLM subagent，拆分 `description_writer_part1` / `description_writer_part2`。
-- 更新 `drafting_leader`：按 R12 顺序委托、审查、缺文件重试、最终交付。
+- 在 `WorkflowRegistry` 中展开 `patent_drafting` 顶层节点列表。
+- 复用 `app/orchestrator/engine.py` 的顺序执行、`NodeResult.next_node` 跳转和 `max_loop_count` 回环限制。
+- 将当前 `DraftingLeaderNode.run()` 中的 9 环节隐式编排拆为普通 Node。
+- 将 `patent_search`、`prior_art_analysis`、`drawing_analysis`、`writing_style_guide` 作为显式前置 Node。
+- 增加 Leader gate Node：prior art gate、guidance gate、review gate。
+- 长正文继续通过 `draft_workspace` artifact key 流转，`WorkflowState` 只保存短字段、artifact key 和结构化决策。
+- 默认测试不触网、不调用真实外部 LLM。
 
 当前只读探索结论：
 
-- `app/tools/draft_workspace.py` 当前只支持扁平安全 key 的 `write` / `read`，且默认 `draft_workspace_dir` 为 `.pagent_drafts`，与 R12 的“默认内存、磁盘可选”不一致。
-- `app/tools/skill_loader.py` 当前白名单指向 `.py` 文件，并默认读取 `app/skills`，与 R12 Markdown 技能文档要求不一致。
-- `app/tools/patent_search.py` 当前是 stub：联网关闭返回 `network_disabled`，联网开启返回 fake evidence。
-- `app/tools/subagents/__init__.py` 当前只有 8 个子代理，且只是读取 source artifact 后拼标题写回，没有 LLM、Prompt、工具访问和 9 环节拆分。
-- `app/prompts/patent_drafting_sop.py` 与 `app/prompts/patent_drafting_subagents.py` 当前是 R11 简化版，不是 R12 PRD §4 原文。
-- `app/nodes/drafting_leader.py` 当前按 8 个旧 subagent 顺序执行，不使用 workspace `list` 审查，也没有 R12 的重委托与 9 环节流程。
-- `tests/test_subagent_tools.py` 当前断言 8 个子代理和拼标题行为，需改为 R12 的 9 个 LLM subagent 契约。
+- `app/orchestrator/workflow_defs.py` 当前 `patent_drafting` 仍是 `['normalize_input', 'drafting_leader']`。
+- `app/orchestrator/engine.py` 已支持顺序执行、合法 `next_node` 跳转、向前回跳计数和 `loop_limit_exceeded`，可直接作为顶层流程承载层。
+- `app/services/agent_dispatch_service.py` 当前 `_run_patent_drafting()` 只注册 `drafting_leader` 一个节点，需要改为注册完整 drafting 节点集合。
+- `app/nodes/drafting_leader.py` 当前在 `run()` 内按 `DRAFTING_ALLOWED_TOOLS` for-loop 调用子代理，正是需要拆出的隐式编排。
+- `app/models/schemas.py` 当前 `WorkflowState` 主要保存 Markdown 结果字段，尚未显式保存 drafting artifact key、gate decision、retry 结构化状态。
+- 现有 `tests/test_drafting_leader.py` 和 `tests/test_patent_drafting_workflow.py` 仍以旧 Leader 编排为核心，需要逐步迁移到顶层 workflow 与 gate Node 测试。
 
 ---
 
 ## 依赖图
 
 ```text
-P0 需求命名与配置契约对齐
-  ├─> P1 draft_workspace 垂直切片
-  │     ├─> P4 子代理真实执行
-  │     │     └─> P5 Leader 编排审查
-  │     │           └─> P6 端到端回归
-  │     └─> P5 Leader 编排审查
-  ├─> P2 skill_loader 垂直切片
-  │     └─> P4 子代理真实执行
-  ├─> P3 patent_search 垂直切片
-  │     └─> P4 patent_searcher 子代理
-  ├─> P3.5 todo / todo_prompt 垂直切片
-  │     ├─> P4 子代理真实执行
-  │     └─> P5 Leader 编排审查
-  └─> P6 端到端回归
+P0 顶层 workflow 契约与状态骨架
+  ├─> P1 输入解析与 workspace 初始化切片
+  │     ├─> P2 前置研究切片
+  │     │     ├─> P3 prior art gate 切片
+  │     │     │     └─> P4 附图与写作指南切片
+  │     │     │           ├─> P5 guidance gate 切片
+  │     │     │           │     └─> P6 内容生成切片
+  │     │     │           │           ├─> P7 review gate 与 finalize 切片
+  │     │     │           │           │     └─> P8 服务入口与端到端回归
+  │     │     │           │           └─> P8 服务入口与端到端回归
+  │     │     └─> P8 服务入口与端到端回归
+  │     └─> P8 服务入口与端到端回归
+  └─> P9 收敛旧 Leader 与测试迁移
 ```
 
 说明：
 
-- `draft_workspace` 是所有子代理和 Leader 审查的基础，必须先落地。
-- `skill_loader` 与 `patent_search` 可并行实现，但它们分别阻塞专利写作类子代理和 `patent_searcher`。
-- `todo` 工具与 `todo_prompt` 需在子代理和 Leader 接入前完成，否则上下文注入契约无法测试。
-- Prompt 与子代理应作为一条完整垂直切片落地：Prompt 常量 → fake LLM 调用 → workspace 写入 → ToolRegistry 注册 → 测试。
+- P0 是所有后续任务的基础：节点名称、state 字段和 workflow 列表必须先稳定。
+- P1 负责把输入资料写入 workspace，后续所有 Node 只通过 artifact key 读取。
+- P2/P4 是前置产物生产链，阻塞内容生成。
+- P3/P5/P7 是 Leader 价值所在：只做 gate 判断，不直接生成正文。
+- P6/P7 完成从前置指南到终稿的完整可运行路径。
+- P8 把完整节点集合接回 `AgentDispatchService`，形成端到端可验收路径。
+- P9 在新路径稳定后再移除或降级旧 `DraftingLeaderNode`，避免中途大爆炸式替换。
 
 ---
 
-## 阶段计划
+## 垂直切片计划
 
-### P0 — 需求命名与基础配置对齐
+### P0 — 顶层 workflow 契约与状态骨架
 
 #### 目标
 
-将 R12 实施命名和配置口径固定下来，避免后续文件、工具名、测试名反复迁移。
+先把 `patent_drafting` 的顶层节点列表、gate decision schema、artifact key 状态约定固定下来，不实现复杂生成逻辑。
 
 #### 覆盖范围
 
-- `app/core/config.py`
-- `SPEC.md` 后续如需同步命名，另行确认后再改。
-- 测试中的工具名、prompt 模块名约定。
+- `app/orchestrator/workflow_defs.py`
+- `app/models/schemas.py` 或 `app/nodes/drafting_state.py`
+- `tests/test_drafting_workflow_defs.py`
 
 #### 实施要点
 
-- 新增或修正配置默认值：`draft_workspace_dir` 默认应为空字符串，表示内存 key-store。
-- 增加或确认 `skill_dir`，默认 `app/skills_docs`。
-- 增加或确认 `patent_search_top_k`，默认 10。
-- 增加 SerpAPI Key 敏感配置（`SERPAPI_API_KEY` / `PAGENT_SERPAPI_API_KEY`），不得进入 `to_public_dict()`、日志或 trace。
-- 如果需要独立 drafting 步数配置，沿用现有通用配置优先，不新增单 Node 临时配置。
-- 命名统一：`app/prompts/todo_prompt.py`、工具名 `todo`、测试文件建议 `tests/test_todo_tool.py`。
+- 将 `patent_drafting` 从 `normalize_input -> drafting_leader` 展开为 SPEC 中的完整节点列表。
+- 保持 `start_node='normalize_input'`。
+- 设置 `max_loop_count=3`，用于 gate 回跳的短期统一上限。
+- 增加 gate decision 数据结构：`decision`、`target_node`、`reason`、`required_changes`、`confidence`。
+- 增加 drafting artifact key 状态约定，优先使用 `WorkflowState` 的短字段或单独 `drafting_context` 字典，避免把长正文塞入 state。
+- 不新增 `drafting_dag.py` 或任何与 `engine.py` 平级的二级编排器。
 
 #### 验收标准
 
-- 配置默认值、环境变量读取、`to_public_dict()` 覆盖完整。
-- `draft_workspace_dir=""` 表示内存模式。
-- 公开配置不包含敏感字段。
-- 后续文档与测试不再出现 `todo_middleware` / `write_todos` 新命名。
+- `WorkflowRegistry.get_workflow_def('patent_drafting')` 返回完整节点列表。
+- 节点列表包含三个 Leader gate 节点。
+- 节点列表不再包含旧的单点 `drafting_leader` 作为唯一业务节点。
+- gate decision schema 能表达 `continue` / `retry` / `revise` / `escalate`。
 
 #### 验证命令
 
 ```bash
-conda run -n autoGLM pytest tests/test_core_config_logging.py
+conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
 #### 检查点
 
-- 确认 `todo` 工具命名已经被用户接受。
-- 确认 `PAGENT_SKILL_DIR` 默认值使用 `app/skills_docs`。
+- 确认是否采用 `WorkflowState.drafting_context` 字典，还是新增显式字段。
+- 确认短期使用统一 `max_loop_count=3`，per-gate retry 暂不做。
 
 ---
 
-### P1 — `draft_workspace` 项目工作区垂直切片
+### P1 — 输入解析与 workspace 初始化切片
 
 #### 目标
 
-让 Leader 和子代理可以通过项目工作区完成 artifact 写入、读取、枚举和合并。
+把当前 `DraftingLeaderNode._build_source_content()` 和 source artifact 写入能力拆成 `drafting_parse_input` Node，形成所有后续 Node 的入口 artifact。
 
 #### 覆盖范围
 
+- `app/nodes/drafting_research.py` 或独立 `app/nodes/drafting_input.py`
 - `app/tools/draft_workspace.py`
-- `app/orchestrator/tool_registry.py`
-- `tests/test_draft_workspace.py` 或现有 native tool 测试
+- `tests/test_drafting_research_nodes.py` 或 `tests/test_drafting_input_node.py`
 
 #### 实施要点
 
-- 支持动作：`write`、`read`、`list`、`merge`。
-- 支持项目根：`temp_[uuid]/`。
-- 内建逻辑目录：`01_input`、`02_research`、`03_outline`、`04_content`、`05_final`。
-- artifact key 改为相对路径，例如 `04_content/abstract.md`。
-- 默认内存 store；仅 `PAGENT_DRAFT_WORKSPACE_DIR` 非空时落盘。
-- 保留 key 白名单、防路径逃逸、内容截断。
-- `merge` 按顺序读取 source keys，合并后写入 output key。
+- `drafting_parse_input` 从 `state.normalized_input` / `state.raw_input` / `state.documents` 拼接输入数据。
+- 写入 `01_input/raw_document.md`。
+- 调用现有 `input_parser` 子代理或最小适配逻辑生成 `01_input/parsed_info.json`。
+- 将相关 artifact key 写入 state 短字段或 `drafting_context`。
+- trace 只记录 artifact key、字符数和状态，不记录原文。
 
 #### 验收标准
 
-- 内存模式下不创建磁盘文件。
-- 磁盘模式下所有路径均位于 workspace 根目录内。
-- `list` 可按 prefix 枚举 artifact。
-- `merge` 可生成 `04_content/description.md` 与 `05_final/complete_patent.md`。
-- 非法 key（绝对路径、`..`、非法字符）被拒绝。
+- 无附件时能写入用户输入。
+- 有附件时能合并附件文本。
+- `01_input/raw_document.md` 与 `01_input/parsed_info.json` 存在。
+- trace 不泄露用户原文和附件正文。
 
 #### 验证命令
 
 ```bash
-conda run -n autoGLM pytest tests/test_draft_workspace.py
+conda run -n autoGLM pytest tests/test_drafting_research_nodes.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-#### 建议提交
+#### 检查点
 
-```text
-feat(tool): 增强专利文书工作区能力
-```
+- 确认 `parsed_info.json` 短期是否继续沿用现有 `input_parser` 子代理输出，还是在本阶段引入强 schema。
 
 ---
 
-### P2 — `skill_loader` Markdown 技能文档垂直切片
+### P2 — 前置研究切片：检索与现有技术分析
 
 #### 目标
 
-将技能加载从读取 Python 源码修复为读取独立 Markdown 技能 / SOP 文档。
+完成从 parsed info 到检索结果、现有技术分析的完整垂直路径。
 
 #### 覆盖范围
 
-- `app/tools/skill_loader.py`
-- `app/skills_docs/`
-- `app/orchestrator/tool_registry.py`
-- `tests/test_skill_loader.py`
-
-#### 实施要点
-
-- 使用 `PAGENT_SKILL_DIR` / `settings.skill_dir`。
-- 白名单技能建议包括：`patent_drafting`、`mermaid`。
-- 文件扩展名限定 `.md`。
-- 防路径穿越。
-- 不读取、不返回 `app/skills/*.py` 内容。
-- 技能文档只作为数据上下文，不提升为系统指令。
-
-#### 验收标准
-
-- 能读取白名单 Markdown 技能文档。
-- 请求未知技能返回 `skill_unavailable` 或等价安全错误。
-- 请求 `.py` 或路径穿越被拒绝。
-- `ToolRegistry` 中 `skill_loader` 描述更新为 Markdown 技能文档加载。
-
-#### 验证命令
-
-```bash
-conda run -n autoGLM pytest tests/test_skill_loader.py
-conda run -n autoGLM python -m compileall app tests
-```
-
-#### 建议提交
-
-```text
-fix(tool): 改为加载专利 Markdown 技能文档
-```
-
----
-
-### P3 — `patent_search` SerpAPI 检索与离线降级垂直切片
-
-#### 目标
-
-将专利检索从 fake evidence stub 升级为基于 SerpAPI 的检索工具，并保持默认离线可测。
-
-#### 覆盖范围
-
+- `app/nodes/drafting_research.py`
 - `app/tools/patent_search.py`
-- `app/orchestrator/tool_registry.py`
-- `tests/test_patent_search.py`
+- `app/tools/subagents/` 中的 `patent_searcher` 适配能力
+- `tests/test_drafting_research_nodes.py`
 
 #### 实施要点
 
-- 定义 SerpAPI provider 抽象，测试中注入 fake provider。
-- 输入支持 `query`、`top_k`、`country`、`status`。
-- 默认 `country=CN`、`status=GRANT`、`top_k=settings.patent_search_top_k`。
-- `allow_network=False`、外部工具未授权或未配置 SerpAPI Key 时返回 skipped/degraded，不触网。
-- SerpAPI Key 从 `SERPAPI_API_KEY` / `PAGENT_SERPAPI_API_KEY` 或配置读取，作为敏感配置处理。
-- SerpAPI 调用异常、限流或返回异常时返回安全降级结果。
-- 真实联网 SerpAPI 测试必须标记 `network`，不在默认测试中触发。
+- `drafting_patent_search` 读取 `01_input/parsed_info.json`。
+- 调用 `patent_search` 工具，默认 fake provider / 离线降级。
+- 写入 `02_research/patent_search_results.json`。
+- `drafting_prior_art_analysis` 读取 parsed info 和 search results。
+- 调用现有子代理能力或 fake LLM 适配层生成结构化 `02_research/prior_art_analysis.json`。
+- 检索不足时不编造现有技术，在 `uncertain_points` 中显式标注。
 
 #### 验收标准
 
-- 空 query 返回明确错误。
-- 离线模式不触网且不伪造 evidence。
-- fake provider 能模拟 SerpAPI 返回 Top-K、CN、GRANT 结构化结果。
-- 结果字段包含来源 provenance。
-- 未配置 SerpAPI Key 时不触网并返回明确 reason。
-- SerpAPI Key 不进入公开配置、日志或 trace。
-- 默认测试不依赖真实网络。
+- 离线 / 未授权联网时 `patent_search_results.json` 标记 `skipped=true` 或 `sufficient=false`。
+- fake provider 有结果时保留来源、专利号、标题、摘要等字段。
+- `prior_art_analysis.json` 包含最接近现有技术、区别特征、技术效果、风险、不确定点和置信度。
+- 不在日志 / trace 中记录检索正文长内容或密钥。
 
 #### 验证命令
 
 ```bash
+conda run -n autoGLM pytest tests/test_drafting_research_nodes.py
 conda run -n autoGLM pytest tests/test_patent_search.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
 #### 检查点
 
-- 检索后端已明确使用 SerpAPI；仍需在实现前确认采用直接 HTTP 调用还是 SDK，以及具体查询参数映射。
-
-#### 建议提交
-
-```text
-feat(tool): 接入 SerpAPI 专利检索接口
-```
+- 确认 prior art analysis 是否由新的 Node prompt 生成，还是短期复用 `patent_searcher` 子代理并改输出 artifact。
 
 ---
 
-### P3.5 — `todo` 工具与 `todo_prompt` 垂直切片
+### P3 — Leader prior art gate 切片
 
 #### 目标
 
-实现 R12 规划能力：Leader 与每个子代理各自维护 todo 状态，并在后续上下文中注入当前 todo 列表。
+让 Leader 第一次作为顶层 gate Node 工作：只判断现有技术分析是否足够支撑继续。
 
 #### 覆盖范围
 
-- `app/tools/todo.py`
-- `app/prompts/todo_prompt.py`
-- `app/orchestrator/tool_registry.py`
-- `tests/test_todo_tool.py`
+- `app/nodes/drafting_leader_gate.py`
+- `app/prompts/drafting_gates.py`
+- `tests/test_drafting_leader_gates.py`
+- `tests/test_drafting_workflow_defs.py`
 
 #### 实施要点
 
-- 工具名为 `todo`。
-- Prompt 模块为 `app/prompts/todo_prompt.py`。
-- 输入为完整 todo 列表，每项包含 `text` 与 `status`。
-- 状态枚举：`pending`、`in_progress`、`done`。
-- 状态按 owner 隔离：Leader 与 9 个子代理各自一份。
-- 每步 agent 上下文注入当前 todo 列表。
-- todo 状态不影响最大步数、token 预算或超时硬门控。
+- 实现 `drafting_leader_gate_prior_art`。
+- 输入只包含 artifact key、结构化摘要、retry count 和验收规则。
+- 输出结构化 gate decision。
+- `continue` 不设置 `next_node` 或设置到 `drafting_drawing_analysis`。
+- `retry` 返回 `NodeResult.next_node='drafting_patent_search'`。
+- `revise` 返回 `NodeResult.next_node='drafting_prior_art_analysis'`。
+- `escalate` 短期返回 `requires_user_input` 或 failed；如新增 human review 需先确认。
 
 #### 验收标准
 
-- 非法 status 被拒绝。
-- 同一 owner 更新会覆盖完整列表。
-- 不同 owner 状态互不污染。
-- 可渲染当前 todo 列表供 Leader / 子代理 prompt 注入。
-- `ToolRegistry` 注册 `todo`，不注册 `write_todos`。
+- gate 输出非法枚举时安全失败。
+- `target_node` 不在当前 workflow 中时安全失败。
+- `retry` / `revise` 能被现有 `Orchestrator` 路由回前置节点。
+- 超过 `max_loop_count` 时由 `engine.py` 返回 `loop_limit_exceeded`。
+- Leader 不读写正文 artifact，不生成正文内容。
 
 #### 验证命令
 
 ```bash
-conda run -n autoGLM pytest tests/test_todo_tool.py
+conda run -n autoGLM pytest tests/test_drafting_leader_gates.py
+conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-#### 建议提交
+#### 检查点
 
-```text
-feat(drafting): 增加文书生成 todo 工具
-```
+- 确认 `escalate` 短期处理方式：`requires_user_input` 优先，暂不新增 human review Node。
 
 ---
 
-### P4 — R12 Prompt 与 9 个真实子代理垂直切片
+### P4 — 附图分析与写作风格指南切片
 
 #### 目标
 
-用 R12 PRD §4 原文替换 R11 简化 Prompt，并将 8 个占位子代理升级为 9 个真实 LLM subagent。
+把专利附图分析和写作风格指南从 prompt 上下文中拆为稳定前置 artifact。
 
 #### 覆盖范围
 
-- `app/prompts/patent_drafting_leader.py`
-- `app/prompts/subagents/*.py`
-- `app/tools/subagents/__init__.py`
-- 如需：`app/tools/subagents/base.py`
-- `tests/test_subagent_tools.py`
+- `app/nodes/drafting_guidance.py`
+- `app/prompts/subagents/drawing_analysis_prompt.py`
+- `app/prompts/subagents/writing_style_guide_prompt.py`
+- `tests/test_drafting_guidance_nodes.py`
 
 #### 实施要点
 
-- Leader Prompt 使用 R12 §4.1 原文。
-- 子代理 Prompt 使用 R12 §4.3 - §4.11 原文。
-- `todo_prompt` 使用 R12 §4.2 原文，但工具名按用户要求改为 `todo`。
-- 子代理清单改为 9 个：
-  1. `input_parser`
-  2. `patent_searcher`
-  3. `outline_generator`
-  4. `abstract_writer`
-  5. `claims_writer`
-  6. `description_writer_part1`
-  7. `description_writer_part2`
-  8. `diagram_generator`
-  9. `markdown_merger`
-- 每个子代理调用 LLM 或可注入 fake LLM，不再拼标题。
-- 子代理按角色限制工具：workspace / skill_loader / office_to_md / file_extract / patent_search / todo。
-- 子代理输出写入 R12 目录 key，只返回 `{artifact_key, done, note?}`。
+- `drafting_drawing_analysis` 读取 `parsed_info.json` 和可用附件解析信息。
+- 只基于输入已有附图说明或解析文本生成 `02_research/drawing_analysis.json`。
+- 无附图时输出 `missing_drawings` 与 `uncertain_points`，不得臆造图号。
+- `drafting_writing_style_guide` 读取 parsed info、prior art analysis、drawing analysis 和用户注意事项。
+- 写入 `02_research/writing_style_guide.json`。
+- 用户注意事项作为数据进入规则，不作为高优先级指令执行。
 
 #### 验收标准
 
-- `tests/test_subagent_tools.py` 断言 9 个子代理。
-- 每个子代理使用对应 Prompt 常量。
-- fake LLM 被调用，旧“拼标题”行为测试删除或改写。
-- 子代理不接受长正文 `content`。
-- 子代理产物写入 workspace 相对路径 key。
-- `description_writer_part2` 使用 `draft_workspace.merge` 合并说明书。
-- `markdown_merger` 使用 `draft_workspace.merge` 生成终稿。
+- 有附图信息时输出图号、标题、类型、部件编号。
+- 无附图信息时明确缺失，不臆造。
+- 写作指南包含 global rules、术语规则、claim style、description style、不确定点和置信度。
+- 后续内容节点可通过 artifact key 读取写作指南。
 
 #### 验证命令
 
 ```bash
-conda run -n autoGLM pytest tests/test_subagent_tools.py
+conda run -n autoGLM pytest tests/test_drafting_guidance_nodes.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-#### 建议提交
+#### 检查点
 
-```text
-feat(drafting): 接入 R12 子代理提示词
-```
+- 确认是否需要视觉理解；按 SPEC 默认不做视觉理解，只处理已有文本。
 
 ---
 
-### P5 — `drafting_leader` R12 编排审查垂直切片
+### P5 — Leader guidance gate 切片
 
 #### 目标
 
-让 Leader 严格按 R12 顺序创建项目工作区、委托 9 个子代理、审查输出文件、缺失重试并交付最终路径。
+让 Leader 判断附图分析和写作指南是否足够进入大纲 / 正文生成。
 
 #### 覆盖范围
 
-- `app/nodes/drafting_leader.py`
-- `app/prompts/patent_drafting_leader.py`
-- `tests/test_drafting_leader.py`
-- `tests/test_patent_drafting_workflow.py`
+- `app/nodes/drafting_leader_gate.py`
+- `app/prompts/drafting_gates.py`
+- `tests/test_drafting_leader_gates.py`
 
 #### 实施要点
 
-- 将旧 8 工具顺序替换为 R12 9 环节顺序。
-- 输入文档先写入 `01_input/raw_document.*` 或等价 source artifact。
-- 子代理参数只传 source / input / output artifact key。
-- 每个子代理完成后调用 workspace `list` 审查输出是否存在。
-- 缺文件时最多重委托 5 次。
-- 最终交付 `05_final/complete_patent.md` 与 `05_final/summary_report.md` key。
-- trace 只记录工具名、artifact key、长度、状态、错误摘要。
+- 实现 `drafting_leader_gate_guidance`。
+- 输入包括 `drawing_analysis_key`、`writing_style_guide_key`、摘要字段、uncertain points、retry 信息。
+- `continue` 进入 `drafting_generate_outline`。
+- `retry` 可回到 `drafting_drawing_analysis` 或 `drafting_writing_style_guide`。
+- `revise` 优先回到 `drafting_writing_style_guide`。
+- 低置信度时必须给出 required changes。
 
 #### 验收标准
 
-- 调用顺序严格匹配 R12。
-- `list` 审查缺失文件行为可测。
-- 超过重试上限返回失败原因或 `drafting_incomplete=True`。
-- 最终 state 包含完整文书和评审报告引用。
-- Leader 使用 `todo`，不使用 `write_todos`。
+- 写作指南缺失时不允许 continue。
+- 附图信息缺失但已显式标注时，可以根据规则 continue 或 requires_user_input。
+- 返回的 `target_node` 必须合法。
+- trace 只记录决策、目标节点、置信度和原因摘要。
 
 #### 验证命令
 
 ```bash
-conda run -n autoGLM pytest tests/test_drafting_leader.py
+conda run -n autoGLM pytest tests/test_drafting_leader_gates.py
+conda run -n autoGLM python -m compileall app tests
+```
+
+#### 检查点
+
+- 确认附图缺失是否阻塞继续，还是只作为 review 风险提示。
+
+---
+
+### P6 — 内容生成切片：大纲、正文、合并、评审
+
+#### 目标
+
+把现有子代理能力包装为顶层内容生成 Node，形成从写作指南到评审报告的完整路径。
+
+#### 覆盖范围
+
+- `app/nodes/drafting_content.py`
+- `app/tools/subagents/`
+- `app/tools/draft_workspace.py`
+- `tests/test_drafting_content_nodes.py` 或并入 `tests/test_patent_drafting_workflow.py`
+
+#### 实施要点
+
+- `drafting_generate_outline` 读取 parsed info、prior art analysis、drawing analysis、writing style guide，写入 `03_outline/patent_outline.md`。
+- `drafting_generate_sections` 读取大纲和前置指南，生成摘要、权利要求、说明书、附图说明等 `04_content/*.md`。
+- `drafting_merge_document` 使用 workspace merge 或 merger 子代理写入 `05_final/complete_patent.md`。
+- `drafting_review_document` 读取终稿和约束 artifact，写入 `05_final/review_report.json`。
+- 每个 Node 都返回短 output，不把长正文塞入 result output。
+
+#### 验收标准
+
+- 大纲生成缺少写作指南时返回可解释失败。
+- 正文生成必须读取 `writing_style_guide.json`。
+- 合并顺序稳定。
+- review 能发现终稿未遵守写作指南的情况。
+- 所有长正文只在 workspace 中流转。
+
+#### 验证命令
+
+```bash
 conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-#### 建议提交
+#### 检查点
 
-```text
-fix(drafting): 修复专利文书生成编排缺口
-```
+- 确认 `drafting_generate_sections` 是否继续作为一个 Node，还是拆为摘要 / 权利要求 / 说明书 / 附图多个 Node。按 SPEC 当前先保留一个 Node。
 
 ---
 
-### P6 — 端到端回归与收尾
+### P7 — Leader review gate 与 finalize 切片
 
 #### 目标
 
-验证 R12 缺口修复后的完整专利文书生成链路，确保默认离线、无真实 LLM、无真实网络也可测试。
+让 Leader 只在终稿评审后判断通过、返修、重评或人工介入，并由 finalize 汇总服务结果。
 
 #### 覆盖范围
 
-- 全部 R12 相关测试
-- 既有 agentic / attachment / security / config 回归
-- compileall
+- `app/nodes/drafting_leader_gate.py`
+- `app/nodes/drafting_content.py`
+- `tests/test_drafting_leader_gates.py`
+- `tests/test_patent_drafting_workflow.py`
 
 #### 实施要点
 
-- 使用 fake LLM / fake search provider / tmp workspace。
-- 覆盖附件或检索数据中的 prompt injection 不改变行为。
-- 覆盖 trace / log 脱敏。
-- 覆盖默认不触网。
-- 检查 diff 中无密钥、临时文件、无关改动。
+- 实现 `drafting_leader_gate_review`。
+- 输入包括 `complete_patent.md` key、`review_report.json` key、写作指南摘要和 retry 信息。
+- `continue` 进入 `drafting_finalize`。
+- `revise` 回到 `drafting_generate_sections`。
+- `retry` 回到 `drafting_review_document`。
+- `drafting_finalize` 读取最终 artifact，回填现有 API 兼容字段：`input_points_md`、`prior_art_md`、`outline_md`、`abstract_md`、`claims_md`、`description_md`、`figures_md`、`complete_patent_md`、`drafting_incomplete`。
 
 #### 验收标准
 
-- `patent_drafting` 端到端输出摘要、权利要求书、说明书、说明书附图、完整文书、评审报告。
-- 全量 pytest 通过。
-- compileall 通过。
-- 默认测试不访问真实网络和真实外部 LLM。
+- review gate 能对未满足写作指南的终稿返修。
+- finalize 保持现有 `AgentDispatchService` 返回结构兼容。
+- 旧端到端测试中的关键字段仍能返回。
+- trace 可看到 review gate 决策。
 
 #### 验证命令
 
 ```bash
-conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_skill_loader.py tests/test_patent_search.py tests/test_todo_tool.py tests/test_subagent_tools.py tests/test_drafting_leader.py tests/test_patent_drafting_workflow.py
+conda run -n autoGLM pytest tests/test_drafting_leader_gates.py
+conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py
+conda run -n autoGLM python -m compileall app tests
+```
+
+#### 检查点
+
+- 确认 `drafting_incomplete` 的判定口径：任一必需 artifact 缺失或 gate escalate 即 True。
+
+---
+
+### P8 — 服务入口与端到端回归切片
+
+#### 目标
+
+将完整顶层节点集合注册到 `AgentDispatchService._run_patent_drafting()`，完成真实入口回归。
+
+#### 覆盖范围
+
+- `app/services/agent_dispatch_service.py`
+- `app/orchestrator/workflow_defs.py`
+- `tests/test_patent_drafting_workflow.py`
+
+#### 实施要点
+
+- `_run_patent_drafting()` 不再只注册 `drafting_leader`。
+- 注册全部 drafting Node：parse、search、analysis、gates、guidance、content、finalize。
+- 保持 `remaining_nodes` 裁剪逻辑可用。
+- 确保 intent router 返回的起始节点能命中新 workflow。
+- 默认 fake LLM / fake provider 流程可跑通。
+
+#### 验收标准
+
+- `AgentDispatchService().dispatch('请生成专利文书')` 返回 success。
+- 返回结构兼容现有 API 字段。
+- trace 包含多个顶层 drafting node，而不是单个 `drafting_leader` 黑盒。
+- 默认不触网、不调用真实外部 LLM。
+
+#### 验证命令
+
+```bash
+conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py
 conda run -n autoGLM pytest
 conda run -n autoGLM python -m compileall app tests
 ```
 
-#### 建议提交
+#### 检查点
 
-```text
-test(drafting): 补充 R12 文书生成回归测试
+- 确认是否保留旧 `drafting_leader` 作为兼容 fallback。若保留，不能再作为默认 patent_drafting 路径。
+
+---
+
+### P9 — 收敛旧 Leader 与测试迁移
+
+#### 目标
+
+新顶层 workflow 稳定后，清理旧 Leader 的固定流程职责，避免两套流程并存。
+
+#### 覆盖范围
+
+- `app/nodes/drafting_leader.py`
+- `tests/test_drafting_leader.py`
+- 相关 prompt / constants / registry 引用
+
+#### 实施要点
+
+- 删除或降级旧 `DraftingLeaderNode.run()` 内部 9 环节 for-loop。
+- 将旧测试迁移为 gate Node 测试或 workflow 测试。
+- 删除不再使用的 `DRAFTING_ALLOWED_TOOLS` 流程顺序常量，或只保留为内容节点内部子代理清单。
+- 确认没有代码路径继续把 `drafting_leader` 当作完整文书生成黑盒。
+
+#### 验收标准
+
+- `workflow_defs.py` 是 patent_drafting 顺序权威来源。
+- Leader 相关代码只保留 gate 决策职责。
+- 全量测试通过。
+- compileall 通过。
+
+#### 验证命令
+
+```bash
+conda run -n autoGLM pytest
+conda run -n autoGLM python -m compileall app tests
 ```
 
----
+#### 检查点
 
-## 关键文件
-
-- `SPEC.md`
-- `app/core/config.py`
-- `app/tools/draft_workspace.py`
-- `app/tools/skill_loader.py`
-- `app/tools/patent_search.py`
-- `app/tools/todo.py`
-- `app/tools/subagents/__init__.py`
-- `app/tools/subagents/base.py`
-- `app/prompts/patent_drafting_leader.py`
-- `app/prompts/todo_prompt.py`
-- `app/prompts/subagents/*.py`
-- `app/nodes/drafting_leader.py`
-- `app/orchestrator/tool_registry.py`
-- `tests/test_draft_workspace.py`
-- `tests/test_skill_loader.py`
-- `tests/test_patent_search.py`
-- `tests/test_todo_tool.py`
-- `tests/test_subagent_tools.py`
-- `tests/test_drafting_leader.py`
-- `tests/test_patent_drafting_workflow.py`
+- 清理前确认没有外部 API 或测试依赖旧 `drafting_leader` 节点名。
 
 ---
 
-## 风险与防护
+## 阶段检查点
 
-| 风险 | 防护 |
-| --- | --- |
-| R12 Prompt 原文较长，手工迁移易误改语义 | 从 PRD §4 逐段搬运；测试只验证存在与绑定，不重写语义 |
-| workspace 从磁盘默认切到内存影响现有测试 | P1 先改测试，覆盖内存和磁盘双模式 |
-| 子代理接入 LLM 后默认测试不稳定 | 使用 fake LLM 注入；真实 LLM 不进入默认测试 |
-| `patent_search` 真实后端不确定 | 先实现 provider 抽象和 fake provider；真实联网后端作为需确认项 |
-| todo 命名与 SPEC 旧名称不一致 | 本计划统一使用 `todo_prompt` / `todo`，实现前如需同步 SPEC 再单独修改 |
-| Leader 重试导致测试复杂 | fake workspace / fake subagent 精确控制缺文件场景 |
-| 日志泄露正文 | trace/log 只断言 key、长度、状态，不记录正文 |
+### Checkpoint A — 顶层 workflow 可见
+
+完成 P0 后检查：
+
+- `patent_drafting` 完整节点列表已在 `workflow_defs.py` 可见。
+- 没有新增二级 DAG 编排器。
+- `engine.py` 的现有 `next_node` 路由足够支撑短期 gate 回跳。
+
+### Checkpoint B — 前置产物可复用
+
+完成 P1-P5 后检查：
+
+- `parsed_info`、检索结果、现有技术分析、附图分析、写作指南均有独立 artifact。
+- Leader prior art gate 和 guidance gate 只输出结构化决策。
+- 后续内容生成无需读取 Leader 内部状态。
+
+### Checkpoint C — 完整路径可跑通
+
+完成 P6-P8 后检查：
+
+- API 入口能返回完整文书字段。
+- trace 能看到多个顶层 drafting node。
+- 默认测试不触网、不调用真实外部 LLM。
+
+### Checkpoint D — 旧职责收敛
+
+完成 P9 后检查：
+
+- 旧 `drafting_leader` 不再隐藏固定全流程。
+- Leader 只保留关口决策职责。
+- 全量测试与编译检查通过。
 
 ---
 
-## 文档任务检查点
+## 风险与应对
 
-- [x] `tasks/plan.md` 已更新为 R12 计划。
-- [x] `tasks/todo.md` 应更新为 R12 todo。
-- [x] 已按用户补充统一使用 `todo_prompt` / `todo` 命名。
-- [x] 本轮不修改实现代码。
-- [x] 本轮不运行测试。
-- [x] 本轮不提交 git。
+### 风险 1：`engine.py` 只有统一 `max_loop_count`
+
+- 影响：无法为 prior art、guidance、review 设置不同 retry 上限。
+- 应对：短期按 SPEC 使用统一 `max_loop_count=3`；如后续确需差异化，再单独增强 per-node retry。
+
+### 风险 2：一次性拆旧 Leader 影响端到端稳定性
+
+- 影响：所有 patent_drafting 测试同时失败，定位困难。
+- 应对：按垂直切片逐步迁移，先让新节点路径跑通，再收敛旧 Leader。
+
+### 风险 3：中间产物 schema 过早强约束
+
+- 影响：fake LLM / 子代理输出适配成本过高。
+- 应对：先以最小字段 + 明确不确定性落地，强 JSON Schema 校验作为可选增强。
+
+### 风险 4：子代理工具与 Node 边界重复
+
+- 影响：Node 和 subagent 都像“执行单元”，职责混乱。
+- 应对：Node 是顶层 workflow 调度单元；subagent 是 Node 内部可替换执行机制。流程顺序只在 `workflow_defs.py` 中定义。

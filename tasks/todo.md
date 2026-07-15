@@ -62,28 +62,28 @@
 
 ## P3 — `LangChainInputParserAgent` 发送 agent / tool WorkflowTraceEvent
 
-- [ ] 为 `LangChainInputParserAgent.__init__()` 增加可选 `workflow_trace_emitter`。
+- [x] 为 `LangChainInputParserAgent.__init__()` 增加可选 `workflow_trace_emitter`。
   - 验收：默认不传时现有行为不变。
   - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py`
-- [ ] 在真实 agent 路径发送 agent 生命周期事件。
+- [x] 在真实 agent 路径发送 agent 生命周期事件。
   - 验收：成功路径发送 `agent_started`、`agent_completed`；异常路径发送 `agent_failed` 并保持 fallback 行为。
   - 验证：`tests/test_input_parser_agent.py` fake agent 成功 / 失败用例。
-- [ ] 包装 `read_source_artifact` 工具事件。
+- [x] 包装 `read_source_artifact` 工具事件。
   - 验收：发送 `tool_call_started` / `tool_call_completed` / `tool_call_failed`；不包含完整 content。
   - 验证：`tests/test_input_parser_agent.py`。
-- [ ] 包装 `write_parsed_info` 工具事件。
+- [x] 包装 `write_parsed_info` 工具事件。
   - 验收：发送 tool 事件；不记录完整 JSON content。
   - 验证：`tests/test_input_parser_agent.py`。
-- [ ] 包装 `file_extract` 工具事件。
+- [x] 包装 `file_extract` 工具事件。
   - 验收：只记录 attachment id、format、chars、truncated、error code；不记录附件正文或任意路径。
   - 验证：`tests/test_input_parser_agent.py`。
-- [ ] 包装 `office_to_md` 工具事件。
+- [x] 包装 `office_to_md` 工具事件。
   - 验收：只记录 attachment id、format、chars、media_count、error code；不记录 markdown 正文。
   - 验证：`tests/test_input_parser_agent.py`。
-- [ ] 保持 fallback 和安全约束不变。
+- [x] 保持 fallback 和安全约束不变。
   - 验收：LLM 配置不完整、非法 source key、非法 JSON、agent 写入非法 JSON 等现有测试继续通过。
   - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py`
-- [ ] 运行 P3 验证。
+- [x] 运行 P3 验证。
   - 验收：input parser agent 与 workflow trace event 测试通过。
   - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`
 

@@ -8,5 +8,6 @@ pagent_memory.db
 *.sqlite3
 *.jsonl
 *.json
-.pagent_attachments
-.pagent_drafts
+.pagent_attachments/
+.pagent_drafts/
+.draft_workspace/

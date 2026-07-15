@@ -96,35 +96,46 @@ def test_input_parser_agent_falls_back_after_agent_writes_invalid_json(monkeypat
     assert payload["uncertain_points"] == ["input_parser 使用安全降级结果: invalid_agent_json"]
 
 
-def test_input_parser_agent_emits_agent_lifecycle_events(monkeypatch, tmp_path) -> None:
-    """真实 agent 路径应发送 agent 生命周期事件。"""
+def test_input_parser_agent_passes_trace_middleware_to_create_agent(monkeypatch, tmp_path) -> None:
+    """真实 agent 路径应将 trace middleware 交给 create_agent。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
     emitter = MemoryWorkflowTraceEmitter()
     workspace.run({"action": "write", "artifact_key": "01_input/raw_document.md", "content": "交底书正文"})
     agent = LangChainInputParserAgent(settings=settings, workspace=workspace, workflow_trace_emitter=emitter)
 
+    captured = {}
+
     class FakeAgent:
         """测试用成功 LangChain agent。"""
 
         def invoke(self, payload: dict) -> dict:
-            """写入合法 JSON 后返回。"""
+            """模拟官方 middleware 发送事件后写入合法 JSON。"""
+            middleware = captured["middleware"][0]
+            middleware.before_agent(payload, object())
             workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": '{"technical_topic":"夹爪控制"}'})
+            middleware.after_agent({"messages": []}, object())
             return {}
 
-    monkeypatch.setattr(agent, "_import_langchain", lambda: ((lambda **kwargs: FakeAgent()), lambda **kwargs: object()))
+    def fake_create_agent(**kwargs):
+        """捕获 create_agent 参数。"""
+        captured.update(kwargs)
+        return FakeAgent()
+
+    monkeypatch.setattr(agent, "_import_langchain", lambda: (fake_create_agent, lambda **kwargs: object()))
 
     result = agent.run({"source_artifact_key": "01_input/raw_document.md"})
     events = [item.event for item in emitter.events]
 
     assert result.error is None
     assert events == ["agent_started", "agent_completed"]
-    assert emitter.events[0].node_name == "drafting_parse_input"
-    assert emitter.events[0].agent_name == "input_parser_agent"
+    assert captured["middleware"][0].emitter is emitter
+    assert captured["middleware"][0].node_name == "drafting_parse_input"
+    assert captured["middleware"][0].agent_name == "input_parser_agent"
 
 
-def test_input_parser_agent_emits_agent_failed_event(monkeypatch, tmp_path) -> None:
-    """agent 异常时应发送失败事件并保持 fallback。"""
+def test_input_parser_agent_does_not_emit_wrapper_agent_failed_event(monkeypatch, tmp_path) -> None:
+    """agent 异常时 runner 不再手写 wrapper failed 事件。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
     emitter = MemoryWorkflowTraceEmitter()
@@ -141,15 +152,13 @@ def test_input_parser_agent_emits_agent_failed_event(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(agent, "_import_langchain", lambda: ((lambda **kwargs: FakeAgent()), lambda **kwargs: object()))
 
     result = agent.run({"source_artifact_key": "01_input/raw_document.md"})
-    events = [item.event for item in emitter.events]
 
     assert result.error is None
-    assert events == ["agent_started", "agent_failed"]
-    assert emitter.events[-1].error_type == "RuntimeError"
+    assert emitter.events == []
 
 
-def test_input_parser_agent_emits_tool_success_and_failed_events(tmp_path) -> None:
-    """受控工具调用应发送 tool 成功和失败事件。"""
+def test_input_parser_agent_tools_do_not_emit_wrapper_trace(tmp_path) -> None:
+    """受控工具函数不再手写 trace 事件。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
     emitter = MemoryWorkflowTraceEmitter()
@@ -161,17 +170,5 @@ def test_input_parser_agent_emits_tool_success_and_failed_events(tmp_path) -> No
 
     read_tool.invoke({"artifact_key": "01_input/raw_document.md"})
     write_tool.invoke({"content": "not-json"})
-    trace_events = emitter.trace_events
-    event_names = [item["event"] for item in trace_events]
 
-    assert event_names == [
-        "tool_call_started",
-        "tool_call_completed",
-        "tool_call_started",
-        "tool_call_failed",
-    ]
-    assert trace_events[0]["tool_name"] == "read_source_artifact"
-    assert trace_events[1]["output_summary"]
-    assert "交底书正文" not in trace_events[1]["output_summary"]
-    assert trace_events[-1]["tool_name"] == "write_parsed_info"
-    assert trace_events[-1]["error_message"] == "invalid_json_object"
+    assert emitter.trace_events == []

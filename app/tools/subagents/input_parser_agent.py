@@ -1,5 +1,4 @@
 import json
-import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -9,8 +8,8 @@ from app.prompts.subagents.input_parser_prompt import INPUT_PARSER_PROMPT
 from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.file_extract import AttachmentExtractionError, extract_document
 from app.tools.office_to_md import OfficeConversionError, convert_docx_to_markdown, convert_pptx_to_markdown
-from app.tracing.sinks import WorkflowTraceEmitter, safe_emit_workflow_trace
-from app.tracing.workflow_trace import WorkflowTraceEvent, summarize_trace_value
+from app.tracing.langchain_trace import WorkflowTraceAgentMiddleware
+from app.tracing.sinks import WorkflowTraceEmitter
 
 
 SOURCE_ARTIFACT_KEY = "01_input/raw_document.md"
@@ -54,8 +53,6 @@ class LangChainInputParserAgent:
             return ToolObservation(tool_name="input_parser", error="invalid_source_artifact_key")
         if not self._can_use_langchain_agent():
             return self._write_fallback(source_key, "llm_unavailable")
-        started_at = time.perf_counter()
-        self._emit_agent_event("agent_started", "started")
         try:
             create_agent, chat_openai = self._import_langchain()
             model = chat_openai(
@@ -66,75 +63,26 @@ class LangChainInputParserAgent:
                 timeout=self.settings.llm_timeout,
                 max_retries=self.settings.llm_retry_count,
             )
-            agent = create_agent(model=model, tools=self._build_tools(source_key, list(tool_input.get("attachments") or [])), system_prompt=self._system_prompt())
+            agent = create_agent(
+                model=model,
+                tools=self._build_tools(source_key, list(tool_input.get("attachments") or [])),
+                system_prompt=self._system_prompt(),
+                middleware=[self._trace_middleware()],
+            )
             agent.invoke({"messages": [{"role": "user", "content": self._user_prompt(source_key)}]})
             if not self._parsed_info_is_valid():
-                self._emit_agent_event("agent_failed", "failed", duration_ms=self._duration_ms(started_at), error_type="InvalidAgentOutput", error_message="invalid_agent_json")
                 return self._write_fallback(source_key, "invalid_agent_json")
-            self._emit_agent_event("agent_completed", "completed", duration_ms=self._duration_ms(started_at), output_summary="parsed_info_written")
             return self._short_result()
-        except Exception as exc:
-            self._emit_agent_event("agent_failed", "failed", duration_ms=self._duration_ms(started_at), error_type=exc.__class__.__name__, error_message=str(exc) or exc.__class__.__name__)
+        except Exception:
             return self._write_fallback(source_key, "agent_unavailable")
 
-    def _duration_ms(self, started_at: float) -> int:
-        """计算从 started_at 到当前的毫秒耗时。"""
-        return int((time.perf_counter() - started_at) * 1000)
-
-    def _emit_agent_event(
-        self,
-        event: str,
-        status: str,
-        duration_ms: int | None = None,
-        output_summary: str | None = None,
-        error_type: str | None = None,
-        error_message: str | None = None,
-    ) -> None:
-        """发送 input_parser agent 生命周期事件。"""
-        safe_emit_workflow_trace(
+    def _trace_middleware(self) -> WorkflowTraceAgentMiddleware:
+        """构造 LangChain 官方 middleware trace adapter。"""
+        return WorkflowTraceAgentMiddleware(
             self.workflow_trace_emitter,
-            WorkflowTraceEvent(
-                node_name="drafting_parse_input",
-                node_type="agent",
-                event=event,
-                status=status,
-                stage="drafting.parse_input",
-                agent_name="input_parser_agent",
-                duration_ms=duration_ms,
-                output_summary=output_summary,
-                error_type=error_type,
-                error_message=error_message,
-            ),
-        )
-
-    def _emit_tool_event(
-        self,
-        event: str,
-        status: str,
-        tool_name: str,
-        duration_ms: int | None = None,
-        input_summary: str | None = None,
-        output_summary: str | None = None,
-        error_type: str | None = None,
-        error_message: str | None = None,
-    ) -> None:
-        """发送 input_parser 受控工具调用事件。"""
-        safe_emit_workflow_trace(
-            self.workflow_trace_emitter,
-            WorkflowTraceEvent(
-                node_name="drafting_parse_input",
-                node_type="tool",
-                event=event,
-                status=status,
-                stage="drafting.parse_input",
-                agent_name="input_parser_agent",
-                tool_name=tool_name,
-                duration_ms=duration_ms,
-                input_summary=input_summary,
-                output_summary=output_summary,
-                error_type=error_type,
-                error_message=error_message,
-            ),
+            node_name="drafting_parse_input",
+            stage="drafting.parse_input",
+            agent_name="input_parser_agent",
         )
 
     def _can_use_langchain_agent(self) -> bool:
@@ -165,90 +113,56 @@ class LangChainInputParserAgent:
         @tool
         def read_source_artifact(artifact_key: str = SOURCE_ARTIFACT_KEY) -> str:
             """读取本次输入 source artifact,只允许 01_input/raw_document.md。"""
-            started_at = time.perf_counter()
-            self._emit_tool_event("tool_call_started", "started", "read_source_artifact", input_summary=summarize_trace_value({"artifact_key": artifact_key}))
             if artifact_key != source_key:
-                result = json.dumps({"error": "artifact_not_allowed"}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "read_source_artifact", duration_ms=self._duration_ms(started_at), error_message="artifact_not_allowed")
-                return result
+                return json.dumps({"error": "artifact_not_allowed"}, ensure_ascii=False)
             observation = self.workspace.run({"action": "read", "artifact_key": source_key})
             if observation.error or not observation.evidence:
                 error = observation.error or "artifact_not_found"
-                result = json.dumps({"error": error}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "read_source_artifact", duration_ms=self._duration_ms(started_at), error_message=error)
-                return result
+                return json.dumps({"error": error}, ensure_ascii=False)
             content = str(observation.evidence[0].get("content") or "")
-            result = json.dumps({"artifact_key": source_key, "content": content}, ensure_ascii=False)
-            self._emit_tool_event("tool_call_completed", "completed", "read_source_artifact", duration_ms=self._duration_ms(started_at), output_summary=summarize_trace_value({"artifact_key": source_key, "content": content}))
-            return result
+            return json.dumps({"artifact_key": source_key, "content": content}, ensure_ascii=False)
 
         @tool
         def write_parsed_info(content: str) -> str:
             """写入 parsed_info JSON,只允许 01_input/parsed_info.json。"""
-            started_at = time.perf_counter()
-            self._emit_tool_event("tool_call_started", "started", "write_parsed_info", input_summary=summarize_trace_value({"content": content}))
             payload = self._json_object_or_none(content)
             if payload is None:
-                result = json.dumps({"error": "invalid_json_object"}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "write_parsed_info", duration_ms=self._duration_ms(started_at), error_message="invalid_json_object")
-                return result
+                return json.dumps({"error": "invalid_json_object"}, ensure_ascii=False)
             written = self._write_json(payload)
             if written.error:
-                result = json.dumps({"error": written.error}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "write_parsed_info", duration_ms=self._duration_ms(started_at), error_message=written.error)
-                return result
-            result = json.dumps({"artifact_key": PARSED_INFO_ARTIFACT_KEY, "done": True}, ensure_ascii=False)
-            self._emit_tool_event("tool_call_completed", "completed", "write_parsed_info", duration_ms=self._duration_ms(started_at), output_summary=summarize_trace_value({"artifact_key": PARSED_INFO_ARTIFACT_KEY, "done": True}))
-            return result
+                return json.dumps({"error": written.error}, ensure_ascii=False)
+            return json.dumps({"artifact_key": PARSED_INFO_ARTIFACT_KEY, "done": True}, ensure_ascii=False)
 
         @tool
         def file_extract(attachment_id: str) -> str:
             """抽取已校验附件正文,不接受任意本地路径。"""
-            started_at = time.perf_counter()
-            self._emit_tool_event("tool_call_started", "started", "file_extract", input_summary=summarize_trace_value({"attachment_id": attachment_id}))
             attachment = self._controlled_attachment(attachments, attachment_id)
             if attachment is None:
-                result = json.dumps({"error": "attachment_not_allowed"}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "file_extract", duration_ms=self._duration_ms(started_at), error_message="attachment_not_allowed")
-                return result
+                return json.dumps({"error": "attachment_not_allowed"}, ensure_ascii=False)
             path = self._controlled_attachment_path(attachment)
             if path is None:
-                result = json.dumps({"error": "attachment_path_not_allowed"}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "file_extract", duration_ms=self._duration_ms(started_at), error_message="attachment_path_not_allowed")
-                return result
+                return json.dumps({"error": "attachment_path_not_allowed"}, ensure_ascii=False)
             try:
                 extracted = extract_document(path, settings=self.settings)
             except AttachmentExtractionError as exc:
-                result = json.dumps({"error": str(exc)}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "file_extract", duration_ms=self._duration_ms(started_at), error_type=exc.__class__.__name__, error_message=str(exc))
-                return result
+                return json.dumps({"error": str(exc)}, ensure_ascii=False)
             payload = {"attachment_id": attachment_id, "format": extracted.format, "chars": extracted.chars, "truncated": extracted.truncated}
-            self._emit_tool_event("tool_call_completed", "completed", "file_extract", duration_ms=self._duration_ms(started_at), output_summary=summarize_trace_value(payload))
             return json.dumps(payload, ensure_ascii=False)
 
         @tool
         def office_to_md(attachment_id: str) -> str:
             """将已校验 Office 附件转 Markdown,不接受任意本地路径。"""
-            started_at = time.perf_counter()
-            self._emit_tool_event("tool_call_started", "started", "office_to_md", input_summary=summarize_trace_value({"attachment_id": attachment_id}))
             attachment = self._controlled_attachment(attachments, attachment_id)
             if attachment is None:
-                result = json.dumps({"error": "attachment_not_allowed"}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "office_to_md", duration_ms=self._duration_ms(started_at), error_message="attachment_not_allowed")
-                return result
+                return json.dumps({"error": "attachment_not_allowed"}, ensure_ascii=False)
             path = self._controlled_attachment_path(attachment)
             if path is None or path.suffix.lower() not in {".docx", ".pptx"}:
-                result = json.dumps({"error": "attachment_path_not_allowed"}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "office_to_md", duration_ms=self._duration_ms(started_at), error_message="attachment_path_not_allowed")
-                return result
+                return json.dumps({"error": "attachment_path_not_allowed"}, ensure_ascii=False)
             try:
                 text, media = convert_docx_to_markdown(path) if path.suffix.lower() == ".docx" else convert_pptx_to_markdown(path)
             except OfficeConversionError as exc:
-                result = json.dumps({"error": str(exc)}, ensure_ascii=False)
-                self._emit_tool_event("tool_call_failed", "failed", "office_to_md", duration_ms=self._duration_ms(started_at), error_type=exc.__class__.__name__, error_message=str(exc))
-                return result
+                return json.dumps({"error": str(exc)}, ensure_ascii=False)
             payload = {"attachment_id": attachment_id, "format": "markdown", "chars": len(text), "media_count": len(media)}
-            self._emit_tool_event("tool_call_completed", "completed", "office_to_md", duration_ms=self._duration_ms(started_at), output_summary=summarize_trace_value(payload))
             return json.dumps(payload, ensure_ascii=False)
 
         return [read_source_artifact, write_parsed_info, file_extract, office_to_md]

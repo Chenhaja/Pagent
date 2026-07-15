@@ -1,3 +1,14 @@
+# Pagent create_agent middleware trace Todo
+
+## 当前执行阶段
+
+- [x] P0 验证 LangChain 官方入口：`create_agent(..., middleware=...)` 覆盖 agent/model/tool，CompiledStateGraph 提供 `stream_events` / `astream_events` 作为 step 事件来源。
+- [x] P1 扩展 WorkflowTraceEvent：增加 model_call_* 与 agent_step_* 事件枚举。
+- [x] P2 新增 LangChain trace adapter：`WorkflowTraceAgentMiddleware` 与 `emit_langchain_step_event` 输出安全摘要化 WorkflowTraceEvent。
+- [x] P3 迁移 `LangChainInputParserAgent`：create_agent 传入 trace middleware，移除工具 wrapper 手写 trace。
+- [x] P4 保持 `DraftingParseInputNode` 汇总链路：adapter 事件进入 `NodeResult.trace_events`。
+- [x] P6 回归验证：运行 input parser、drafting nodes、workflow trace、orchestrator、patent drafting、安全合规、全量 pytest 与 compileall。
+
 # Pagent WorkflowTraceEvent schema 化与试点 Todo
 
 ## P0 — 统一口径确认：Workflow trace 是唯一事实承载

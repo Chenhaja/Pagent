@@ -5,6 +5,8 @@ from app.models.schemas import WorkflowState
 from app.nodes.drafting_research import DraftingParseInputNode, DraftingPatentSearchNode, DraftingPriorArtAnalysisNode
 from app.orchestrator.react_loop import ToolObservation
 from app.tools.draft_workspace import DraftWorkspaceTool
+from app.tracing.sinks import MemoryWorkflowTraceEmitter
+from app.tracing.workflow_trace import WorkflowTraceEvent
 
 
 class FakeToolRegistry:
@@ -103,6 +105,66 @@ def test_drafting_parse_input_default_runner_falls_back_without_llm(tmp_path) ->
     assert result.status == "success"
     assert payload["uncertain"] is True
     assert payload["technical_topic"] == "一种夹爪控制方法"
+
+
+def test_drafting_parse_input_aggregates_default_runner_trace_events(monkeypatch, tmp_path) -> None:
+    """默认 LangChain runner 的 agent/tool trace 应汇总进节点结果。"""
+    workspace = DraftWorkspaceTool(
+        Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    )
+    node = DraftingParseInputNode(settings=workspace.settings, workspace=workspace)
+
+    def fake_run(tool_input: dict) -> ToolObservation:
+        """模拟 runner 写入 parsed_info 并发送 agent/tool 事件。"""
+        workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": '{"technical_topic":"夹爪控制"}'})
+        node.input_parser_runner.workflow_trace_emitter.emit(
+            WorkflowTraceEvent(node_name="drafting_parse_input", node_type="agent", event="agent_started", status="started", stage="drafting.parse_input", agent_name="input_parser_agent")
+        )
+        node.input_parser_runner.workflow_trace_emitter.emit(
+            WorkflowTraceEvent(
+                node_name="drafting_parse_input",
+                node_type="tool",
+                event="tool_call_completed",
+                status="completed",
+                stage="drafting.parse_input",
+                agent_name="input_parser_agent",
+                tool_name="write_parsed_info",
+                output_summary="artifact_key=str(len=25), done=bool",
+            )
+        )
+        node.input_parser_runner.workflow_trace_emitter.emit(
+            WorkflowTraceEvent(node_name="drafting_parse_input", node_type="agent", event="agent_completed", status="completed", stage="drafting.parse_input", agent_name="input_parser_agent")
+        )
+        return ToolObservation(tool_name="input_parser", evidence=[{"artifact_key": "01_input/parsed_info.json", "done": True}], sufficient=True)
+
+    monkeypatch.setattr(node.input_parser_runner, "run", fake_run)
+
+    result = node.run(WorkflowState(raw_input="交底书正文"))
+    events = [item["event"] for item in result.trace_events]
+
+    assert result.status == "success"
+    assert events == ["drafting_source_written", "agent_started", "tool_call_completed", "agent_completed", "drafting_input_parsed"]
+    assert result.output == {"input_key": "01_input/raw_document.md", "parsed_info_key": "01_input/parsed_info.json"}
+    assert result.trace_events[1]["schema_version"] == "1"
+    assert result.trace_events[2]["tool_name"] == "write_parsed_info"
+    assert "交底书正文" not in str(result.output)
+    assert "交底书正文" not in str(result.trace_events)
+
+
+def test_drafting_parse_input_uses_injected_workflow_trace_emitter(tmp_path) -> None:
+    """显式注入 emitter 时节点与默认 runner 应共用同一 trace 出口。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path), allow_network=False, llm_base_url=None, llm_model="", llm_api_key=None))
+    emitter = MemoryWorkflowTraceEmitter()
+    node = DraftingParseInputNode(settings=workspace.settings, workspace=workspace, workflow_trace_emitter=emitter)
+
+    result = node.run(WorkflowState(raw_input="交底书正文"))
+
+    assert result.status == "success"
+    assert node.input_parser_runner.workflow_trace_emitter is emitter
+    assert result.trace_events == [
+        {"event": "drafting_source_written", "data": {"artifact_key": "01_input/raw_document.md", "chars": 5}},
+        {"event": "drafting_input_parsed", "data": {"artifact_key": "01_input/parsed_info.json"}},
+    ]
 
 
 def test_drafting_parse_input_fails_when_parser_writes_invalid_json(tmp_path) -> None:

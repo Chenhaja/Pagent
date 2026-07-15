@@ -343,14 +343,17 @@ class WorkflowState(BaseModel):
     user_feedback: str | None = None
     trace: list[dict[str, Any]] = Field(default_factory=list)
 
-    def add_trace_event(self, event: str, data: dict[str, Any] | None = None) -> None:
+    def add_trace_event(self, event: str | dict[str, Any], data: dict[str, Any] | None = None) -> None:
         """追加一条工作流审计事件。
 
         Args:
-            event: 稳定英文事件名,便于检索和聚合。
+            event: 稳定英文事件名或 schema 化 workflow trace 事件。
             data: 事件附加数据,不应包含密钥、隐私或过长原文。
 
         Returns:
             无返回值,会原地更新 trace。
         """
+        if isinstance(event, dict):
+            self.trace.append(dict(event))
+            return
         self.trace.append({"event": event, "data": data or {}})

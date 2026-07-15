@@ -7,6 +7,7 @@ from app.orchestrator.node_base import Node
 from app.orchestrator.tool_registry import ToolRegistry, build_default_tool_registry
 from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.subagents.input_parser_agent import LangChainInputParserAgent
+from app.tracing.sinks import MemoryWorkflowTraceEmitter, WorkflowTraceEmitter
 
 
 DRAFTING_SOURCE_ARTIFACT_KEY = "01_input/raw_document.md"
@@ -23,6 +24,7 @@ class DraftingParseInputNode(Node):
         workspace: 可注入的草稿 artifact 工作区工具。
         tool_registry: 显式传入时沿用旧 input_parser 子代理调用路径。
         input_parser_runner: 可注入输入解析 runner,默认使用 LangChain create_agent 试点 runner。
+        workflow_trace_emitter: 可选 workflow trace 事件发送端。
 
     Returns:
         写入 source 与 parsed_info artifact 的顶层 workflow 节点。
@@ -36,13 +38,19 @@ class DraftingParseInputNode(Node):
         workspace: DraftWorkspaceTool | None = None,
         tool_registry: ToolRegistry | Any | None = None,
         input_parser_runner: Any | None = None,
+        workflow_trace_emitter: WorkflowTraceEmitter | None = None,
     ) -> None:
         """初始化输入解析节点。"""
         super().__init__(name=self.name)
         self.settings = settings or get_settings()
         self.workspace = workspace or DraftWorkspaceTool(self.settings)
         self.tool_registry = tool_registry
-        self.input_parser_runner = input_parser_runner or (None if tool_registry is not None else LangChainInputParserAgent(settings=self.settings, workspace=self.workspace))
+        self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
+        self.input_parser_runner = input_parser_runner or (
+            None
+            if tool_registry is not None
+            else LangChainInputParserAgent(settings=self.settings, workspace=self.workspace, workflow_trace_emitter=self.workflow_trace_emitter)
+        )
 
     def run(self, state: WorkflowState) -> NodeResult:
         """写入原始输入 artifact 并委托 input_parser 生成 parsed_info。
@@ -73,6 +81,7 @@ class DraftingParseInputNode(Node):
         if not self._artifact_json_object_exists(parsed_key):
             return NodeResult.failed(errors=["parsed_info_missing"])
         state.drafting_context["parsed_info_key"] = parsed_key
+        trace_events.extend(self._workflow_trace_events())
         trace_events.append(self._trace_event("drafting_input_parsed", artifact_key=parsed_key))
         return NodeResult.success(
             output={"input_key": DRAFTING_SOURCE_ARTIFACT_KEY, "parsed_info_key": parsed_key},
@@ -117,6 +126,10 @@ class DraftingParseInputNode(Node):
         if not getattr(observation, "evidence", None):
             return 0
         return int(observation.evidence[0].get("chars") or 0)
+
+    def _workflow_trace_events(self) -> list[dict[str, Any]]:
+        """读取可进入 NodeResult 的 workflow trace 事件。"""
+        return list(getattr(self.workflow_trace_emitter, "trace_events", []) or [])
 
     def _trace_event(self, event: str, **data: Any) -> dict[str, Any]:
         """构造不包含正文内容的 trace 事件。"""

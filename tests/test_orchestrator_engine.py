@@ -95,6 +95,46 @@ def test_orchestrator_runs_nodes_in_order_and_records_trace() -> None:
     ]
 
 
+def test_orchestrator_preserves_schema_trace_events() -> None:
+    """Orchestrator 应保留 schema 化 workflow trace 事件字段。"""
+    class SchemaTraceNode(Node):
+        """返回 schema trace 的 fake node。"""
+
+        def run(self, state: WorkflowState) -> NodeResult:
+            """返回包含 WorkflowTraceEvent schema 字段的结果。"""
+            return NodeResult.success(
+                trace_events=[
+                    {
+                        "schema_version": "1",
+                        "node_name": "drafting_parse_input",
+                        "node_type": "agent",
+                        "event": "agent_started",
+                        "status": "started",
+                        "stage": "drafting.parse_input",
+                        "agent_name": "input_parser_agent",
+                    }
+                ]
+            )
+
+    state = WorkflowState(raw_input="一种方法")
+    orchestrator = Orchestrator(nodes={"schema": SchemaTraceNode("schema")})
+
+    result = orchestrator.run(state, workflow_def=["schema"])
+
+    assert result.status == "success"
+    assert state.trace == [
+        {
+            "schema_version": "1",
+            "node_name": "drafting_parse_input",
+            "node_type": "agent",
+            "event": "agent_started",
+            "status": "started",
+            "stage": "drafting.parse_input",
+            "agent_name": "input_parser_agent",
+        }
+    ]
+
+
 def test_orchestrator_logs_node_lifecycle_events(caplog) -> None:
     """Orchestrator 应输出节点开始和完成事件日志。"""
     state = WorkflowState(raw_input="一种方法")

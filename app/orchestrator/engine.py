@@ -104,6 +104,9 @@ class Orchestrator:
             无返回值,会原地更新 state.trace。
         """
         for trace_event in result.trace_events:
+            if trace_event.get("schema_version"):
+                state.add_trace_event(trace_event)
+                continue
             state.add_trace_event(
                 event=str(trace_event.get("event", "node_event")),
                 data=trace_event.get("data", {}),

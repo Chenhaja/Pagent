@@ -89,22 +89,22 @@
 
 ## P4 — `DraftingParseInputNode` 汇总到 workflow trace
 
-- [ ] 为 `DraftingParseInputNode.__init__()` 增加可选 `workflow_trace_emitter`。
+- [x] 为 `DraftingParseInputNode.__init__()` 增加可选 `workflow_trace_emitter`。
   - 验收：默认不传时节点现有行为不变。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py`
-- [ ] 默认构造 `LangChainInputParserAgent` 时传入同一个 emitter / collector。
+- [x] 默认构造 `LangChainInputParserAgent` 时传入同一个 emitter / collector。
   - 验收：parse node 与 input parser runner 使用同一 workflow trace 出口。
   - 验证：fake emitter 断言事件顺序。
-- [ ] 将 agent / tool `WorkflowTraceEvent` 汇总进 `NodeResult.trace_events`。
+- [x] 将 agent / tool `WorkflowTraceEvent` 汇总进 `NodeResult.trace_events`。
   - 验收：一次 parse node 执行可看到 source 写入、agent started、tool call、agent completed / failed、input parsed。
   - 验证：`tests/test_drafting_research_nodes.py` 或新增 `tests/test_drafting_parse_input_node.py`。
-- [ ] 确认 `NodeResult.output` 与 `trace_events` 不泄露长正文。
+- [x] 确认 `NodeResult.output` 与 `trace_events` 不泄露长正文。
   - 验收：output 只包含 `input_key` / `parsed_info_key`；trace 只包含短摘要。
   - 验证：节点测试断言。
-- [ ] 保持旧 `tool_registry` 注入路径可用。
+- [x] 保持旧 `tool_registry` 注入路径可用。
   - 验收：显式传入 `tool_registry` 时仍走旧 input_parser 工具路径，不因 trace 改造失败。
   - 验证：现有 drafting research 测试。
-- [ ] 运行 P4 验证。
+- [x] 运行 P4 验证。
   - 验收：drafting parse、input parser agent 与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py tests/test_input_parser_agent.py && conda run -n autoGLM python -m compileall app tests`
 

@@ -110,16 +110,16 @@
 
 ## P5 — 回归、非 drafting 兼容样例与推广边界确认
 
-- [ ] 运行 drafting 端到端回归。
+- [x] 运行 drafting 端到端回归。
   - 验收：trace 改造不影响完整 patent drafting workflow。
   - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [ ] 运行安全合规回归。
+- [x] 运行安全合规回归。
   - 验收：日志 / trace 不包含敏感字段、prompt 全文、正文长文本或工具完整输入输出。
   - 验证：`conda run -n autoGLM pytest tests/test_security_compliance.py`
-- [ ] 运行全量测试。
+- [x] 运行全量测试。
   - 验收：全量 pytest 通过。
   - 验证：`conda run -n autoGLM pytest`
-- [ ] 运行编译检查。
+- [x] 运行编译检查。
   - 验收：app 和 tests 编译通过。
   - 验证：`conda run -n autoGLM python -m compileall app tests`
 - [ ] 人工确认后续推广方向。

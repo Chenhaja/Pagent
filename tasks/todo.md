@@ -17,25 +17,25 @@
 
 ## P1 — WorkflowTraceEvent schema、脱敏摘要与 ProgressEvent projection
 
-- [ ] 新增 `WorkflowTraceEvent` 数据结构。
+- [x] 新增 `WorkflowTraceEvent` 数据结构。
   - 验收：包含 `schema_version`、`node_name`、`node_type`、`event`、`status`、`stage`、agent/tool 字段、summary 字段、progress 字段、metadata、timestamp。
   - 验证：`conda run -n autoGLM pytest tests/test_workflow_trace_events.py`
-- [ ] 新增通用事件 / 状态 / node_type 枚举。
+- [x] 新增通用事件 / 状态 / node_type 枚举。
   - 验收：覆盖 workflow、node、agent、tool、progress 事件；覆盖 `normal`、`agent`、`tool`、`gate`。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 新增脱敏摘要 helper。
+- [x] 新增脱敏摘要 helper。
   - 验收：输入长文本、dict、list、工具参数时，只输出类型、长度、数量、短摘要；过滤 `api_key`、`token`、`secret`、`password`。
   - 验证：`tests/test_workflow_trace_events.py` 覆盖长正文和敏感字段。
-- [ ] 新增可进入 `NodeResult.trace_events` 的 dict 输出 helper。
+- [x] 新增可进入 `NodeResult.trace_events` 的 dict 输出 helper。
   - 验收：输出就是新 schema dict，不再转换成另一套事实格式；旧 `{"event": ..., "data": ...}` 可兼容共存。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 新增 `ProgressEvent` projection。
+- [x] 新增 `ProgressEvent` projection。
   - 验收：只投影 `progress.visible=true`；输出 `stage`、`status`、`label`、`message`、`visible`、`order`、`timestamp` 等稳定字段。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 增加非 drafting schema 样例。
+- [x] 增加非 drafting schema 样例。
   - 验收：至少包含 `qa.retrieval`、`translate.translation` 或 `query_rewrite.rewrite` 示例，证明 schema 不绑定 drafting。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 运行 P1 验证。
+- [x] 运行 P1 验证。
   - 验收：workflow trace event 测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`
 

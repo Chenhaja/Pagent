@@ -1,42 +1,48 @@
-# Pagent Agent Trace Event 可观测性规格
+# Pagent WorkflowTraceEvent 可观测性规格
 
 ## 1. Objective
 
 ### 1.1 背景
 
-`DraftingParseInputNode` 已初步接入 `create_agent`，但当前无法观察 agent 内部活动，例如工具调用、工具返回、模型阶段输出与异常路径。这会导致节点行为在调试、回归和后续前端展示中都偏黑盒。
+当前项目已有 workflow trace：各节点通过 `NodeResult.trace_events` 返回事件，`Orchestrator` 再写入 `WorkflowState.trace`。但这些事件目前多为自由 dict，字段不统一，适合作为内部审计补充，却不适合作为后续前端进度展示或跨节点统一可观测协议。
 
-本规格目标是先为 agent 节点建立统一 trace event 事实流：底层只维护一套事件 schema，再由不同 sink / view 消费，分别满足后端技术日志排查与后续前端进度展示。
+`DraftingParseInputNode` 已初步接入 `create_agent`，但 agent 内部活动不可见，例如工具调用、工具返回、模型执行失败等。这个问题不应通过另起一套 agent trace 解决，而应通过**schema 化当前 Workflow trace**解决。
+
+本规格目标是定义统一 `WorkflowTraceEvent` schema，由现有 `NodeResult.trace_events` / `WorkflowState.trace` 统一管理。QA、translate、query_rewrite、drafting 等所有 workflow node 都应能使用同一 schema；第一阶段只在 `DraftingParseInputNode` 试点 agent / tool 细粒度事件。
 
 ### 1.2 目标
 
-- 定义统一 `trace event` schema，覆盖 node / agent / tool / error 等执行事实。
-- 技术日志流和前端进度流复用同一事件事实源，不维护两套分叉事件。
-- 先在 `DraftingParseInputNode` 试点，验证 `create_agent` 内部活动可观测。
-- 先实现后端日志 sink，前端进度 sink 只保留映射字段 / 接口边界，不实现 SSE、WebSocket 或 UI。
-- 事件必须可脱敏、可测试、可扩展到其他节点。
+- 将当前 workflow trace 规范化为统一 `WorkflowTraceEvent` schema。
+- `NodeResult.trace_events` 直接承载 `WorkflowTraceEvent`，`WorkflowState.trace` 是统一管理 / 存储 / 审计入口。
+- schema 面向全 workflow，覆盖普通 node、agent node、tool call、error、progress 等执行事实。
+- 后端技术日志和前端进度视图都从 `WorkflowTraceEvent` 派生，不维护两套事实流。
+- 第一阶段只在 `DraftingParseInputNode` / `LangChainInputParserAgent` 试点 agent / tool 内部活动可观测。
+- 第一阶段只实现 logger sink 与 progress projection，不实现 SSE、WebSocket、API 推送或前端 UI。
 
 完成标准：
 
-- `DraftingParseInputNode` 执行时能输出结构化 trace event。
-- 可观察 agent start / completed / failed、tool call / tool result / tool error 等关键事件。
-- 后端日志能按稳定英文 `event` 检索 agent 内部活动。
-- trace event 不记录交底书正文、prompt 全文、工具完整输入输出、API key、token 或隐私数据。
-- 前端进度视图可从同一 trace event 映射得到用户可理解的 `progress_label` / `progress_message`。
+- `WorkflowTraceEvent` 可表达普通节点事件、agent 生命周期事件、tool 调用事件、失败事件和进度事件。
+- `DraftingParseInputNode` 执行时能在 workflow trace 中看到 agent start / completed / failed、tool call / result / error。
+- QA / translate / query_rewrite 等非文书节点至少有 schema 级样例或测试，证明该 schema 不绑定 drafting。
+- 后端日志可从同一 `WorkflowTraceEvent` 输出稳定英文 `event` 和结构化字段。
+- 前端进度可从同一 `WorkflowTraceEvent` 投影出稳定 `ProgressEvent` 视图。
+- trace / 日志 / progress 不记录交底书正文、prompt 全文、工具完整输入输出、API key、token 或隐私数据。
 - 默认测试不触网、不调用真实外部 LLM。
 
 ### 1.3 目标用户
 
-- 后端维护者：需要通过日志流排查 `create_agent` 在节点内做了什么。
-- 后续前端：需要基于同一事件事实源展示用户可理解的办理进度。
-- agent 节点开发者：需要复用统一 emitter / schema，而不是每个节点自造日志格式。
+- 后端维护者：通过 workflow trace 和日志排查节点、agent、tool 的执行过程。
+- 后续前端：通过 progress projection 展示用户可理解的办理进度。
+- workflow node 开发者：用统一 `WorkflowTraceEvent` 记录 QA、translate、query_rewrite、drafting 等节点事件。
+- agent 节点开发者：复用同一 schema 记录 agent / tool 内部活动。
 
 ### 1.4 非目标
 
+- 不另起一套独立于 workflow trace 的 agent trace 事实流。
+- 不在本阶段迁移所有节点到新 schema。
 - 不在本阶段迁移所有节点到 `create_agent`。
-- 不在本阶段实现完整前端 UI。
-- 不在本阶段实现 SSE / WebSocket / API 推送。
-- 不维护独立的“技术日志事件”和“前端进度事件”两套事实流。
+- 不在本阶段实现完整前端 UI、SSE、WebSocket 或 API 推送。
+- 不在本阶段持久化 trace 到数据库或 workspace artifact。
 - 不记录完整 prompt、完整原文、完整工具输入输出或敏感信息。
 
 ---
@@ -46,11 +52,14 @@
 项目使用 conda 环境 `autoGLM`。所有 Python / pytest / 脚本命令必须通过 `conda run -n autoGLM` 执行。
 
 ```bash
-# trace event schema / emitter 单元测试
-conda run -n autoGLM pytest tests/test_trace_events.py
+# WorkflowTraceEvent schema / projection / sink 单元测试
+conda run -n autoGLM pytest tests/test_workflow_trace_events.py
+
+# LangChain input parser agent trace 试点测试
+conda run -n autoGLM pytest tests/test_input_parser_agent.py
 
 # DraftingParseInputNode trace 试点测试
-conda run -n autoGLM pytest tests/test_drafting_parse_input_node.py
+conda run -n autoGLM pytest tests/test_drafting_research_nodes.py
 
 # 相关 drafting 回归测试
 conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py
@@ -65,7 +74,7 @@ conda run -n autoGLM python -m compileall app tests
 约束：
 
 - 默认测试不得触网、不得调用真实外部 LLM。
-- 如新增依赖，必须同步更新 `requirements.txt`。
+- 如新增依赖，必须同步更新 `requirements.txt`；本阶段优先不新增依赖。
 - 不执行 `git push`、`git reset --hard`、强制推送等危险操作，除非用户明确确认。
 - 每完成一个可独立验证阶段，按项目规范单独提交。
 
@@ -79,46 +88,57 @@ conda run -n autoGLM python -m compileall app tests
 pagent/
   app/
     tracing/
-      events.py                 # TraceEvent schema、事件枚举、脱敏摘要工具
-      emitter.py                # TraceEmitter 接口与默认 logger sink
-      progress.py               # trace event -> 前端进度视图映射
+      workflow_trace.py        # WorkflowTraceEvent schema、事件枚举、脱敏摘要、NodeResult trace 适配
+      progress.py              # WorkflowTraceEvent -> ProgressEvent projection
+      sinks.py                 # logger sink / no-op sink / 测试用 memory sink
     nodes/
-      drafting_parse_input.py   # DraftingParseInputNode 试点接入 trace emitter
-    prompts/
-      ...                       # prompt 仍集中维护，不内联到 trace 逻辑
+      drafting_research.py     # DraftingParseInputNode 试点接入 WorkflowTraceEvent
+    tools/
+      subagents/
+        input_parser_agent.py  # LangChainInputParserAgent 捕获 agent / tool 事件
   tests/
-    test_trace_events.py
-    test_drafting_parse_input_node.py
+    test_workflow_trace_events.py
+    test_input_parser_agent.py
+    test_drafting_research_nodes.py
   SPEC.md
 ```
 
-如项目已有 trace / logging 模块，应优先扩展现有模块，不强行新增 `app/tracing/`。最终文件位置以现有代码结构为准，但职责边界保持一致。
+如实现时发现已有更合适的 trace 模块，应优先扩展现有模块，不强行新增目录。但职责边界必须保持：schema、progress projection、sink / emitter 分离。
 
-### 3.1 TraceEvent schema
+### 3.1 WorkflowTraceEvent schema
 
-统一事件事实流建议字段：
+`NodeResult.trace_events` 应逐步承载以下 schema。第一阶段允许兼容旧 `{"event": ..., "data": ...}` 事件，但新增 agent / tool 事件必须使用新 schema。
 
 ```json
 {
-  "trace_id": "string",
+  "schema_version": "1",
+  "trace_id": "string | null",
   "span_id": "string | null",
   "parent_span_id": "string | null",
   "workflow_id": "string | null",
-  "workspace_id": "string | null",
-  "node_name": "drafting_parse_input",
-  "agent_name": "drafting_parse_input_agent",
+  "session_id": "string | null",
+  "request_id": "string | null",
+  "node_name": "string",
+  "node_type": "normal | agent | tool | gate",
+  "event": "node_started",
+  "status": "started | running | completed | failed | skipped | waiting",
+  "stage": "string | null",
+  "agent_name": "string | null",
   "agent_run_id": "string | null",
-  "event": "agent_started",
-  "status": "started | completed | failed | skipped",
   "tool_name": "string | null",
   "tool_call_id": "string | null",
   "input_summary": "string | null",
   "output_summary": "string | null",
-  "progress_label": "string | null",
-  "progress_message": "string | null",
   "duration_ms": 0,
   "error_type": "string | null",
   "error_message": "string | null",
+  "progress": {
+    "visible": true,
+    "stage": "drafting.parse_input",
+    "label": "解析输入",
+    "message": "正在解析交底材料和用户要求",
+    "order": 10
+  },
   "metadata": {},
   "timestamp": "ISO-8601"
 }
@@ -127,84 +147,118 @@ pagent/
 要求：
 
 - `event` 使用稳定英文名。
-- `message` / `progress_message` 可使用中文。
+- `node_name` 适用于所有 workflow node，不得绑定 drafting。
+- `stage` 建议使用命名空间：`drafting.parse_input`、`qa.retrieval`、`translate.translation`、`query_rewrite.rewrite`。
+- `progress` 是前端视图投影所需信息，必须受控生成，不能直接暴露工具原始参数。
 - `input_summary` / `output_summary` 只能保存摘要、长度、类型、数量等脱敏信息。
 - `metadata` 只放短字段，不放长正文、完整 prompt、完整工具参数或密钥。
 - 如项目已接入 OpenTelemetry，应复用已有 `trace_id` / `span_id`，禁止自造冲突字段。
 
 ### 3.2 事件枚举
 
-第一阶段至少覆盖：
+通用事件：
 
-| event | 触发时机 | 典型字段 |
-| --- | --- | --- |
-| `agent_started` | `create_agent` 执行开始 | `node_name`, `agent_name`, `agent_run_id` |
-| `agent_completed` | agent 正常完成 | `duration_ms`, `output_summary` |
-| `agent_failed` | agent 执行失败 | `error_type`, `error_message` |
-| `agent_tool_call_started` | agent 准备调用工具 | `tool_name`, `tool_call_id`, `input_summary` |
-| `agent_tool_call_completed` | 工具调用成功返回 | `tool_name`, `tool_call_id`, `duration_ms`, `output_summary` |
-| `agent_tool_call_failed` | 工具调用失败 | `tool_name`, `tool_call_id`, `error_type`, `error_message` |
-| `node_progress` | 节点产生用户可理解进度 | `progress_label`, `progress_message` |
+| event | 触发时机 |
+| --- | --- |
+| `workflow_started` | workflow 开始 |
+| `workflow_completed` | workflow 成功完成 |
+| `workflow_failed` | workflow 失败 |
+| `node_started` | 节点开始 |
+| `node_completed` | 节点成功完成 |
+| `node_failed` | 节点失败 |
+| `node_skipped` | 节点跳过 |
+| `progress_updated` | 节点产生用户可见进度 |
 
-后续可扩展 `model_stream_started`、`model_stream_delta`、`model_stream_completed`，但本阶段不要求捕获 token 级流式输出。
+agent / tool 事件：
 
-### 3.3 TraceEmitter 接口
+| event | 触发时机 |
+| --- | --- |
+| `agent_started` | agent 开始 |
+| `agent_completed` | agent 正常完成 |
+| `agent_failed` | agent 执行失败 |
+| `tool_call_started` | 工具调用开始 |
+| `tool_call_completed` | 工具调用成功返回 |
+| `tool_call_failed` | 工具调用失败 |
+
+第一阶段重点实现 `DraftingParseInputNode` 的 `agent_*` 和 `tool_call_*`，但 schema 必须能表达 QA / translate / query_rewrite 的普通节点和工具事件。
+
+### 3.3 WorkflowTraceEmitter / sink
 
 建议接口：
 
 ```python
-class TraceEmitter:
-    """发送节点和 agent 执行过程中的结构化 trace event。"""
+class WorkflowTraceEmitter:
+    """发送 workflow trace 事件。"""
 
-    def emit(self, event: TraceEvent) -> None:
-        """发送单个 trace event。"""
+    def emit(self, event: WorkflowTraceEvent) -> None:
+        """发送单个 WorkflowTraceEvent。"""
 ```
 
 要求：
 
-- 节点构造参数可选传入 emitter；未传时使用安全 no-op 或默认 logger emitter。
+- 节点或 runner 可选传入 emitter；未传时使用安全 no-op 或默认 logger sink。
 - emitter 不应影响主流程成功失败；日志写入失败最多降级为 warning。
+- emitter 输出的事件应可进入 `NodeResult.trace_events`，并可由 logger sink 输出结构化日志。
 - 不为单个节点新增专用配置项；如需配置，应保持通用作用域。
-- 事件创建逻辑尽量复用 helper，避免每个节点手写字段拼装。
 
-### 3.4 后端日志 sink
+### 3.4 WorkflowState.trace 管理
 
-第一阶段实现 logger sink：
+目标关系：
 
-- 使用项目现有 logger 体系。
-- 输出结构化字段，包含 `event`, `trace_id`, `node_name`, `agent_name`, `tool_name`, `status`, `duration_ms` 等。
-- `event` 为英文稳定字段，`message` 为中文可读描述。
-- 异常事件保留堆栈，但不记录敏感输入。
-
-### 3.5 前端进度视图
-
-前端进度流不是第二套事实流，而是从 TraceEvent 映射出的视图字段。
-
-示例映射：
-
-| 原始 event | progress_label | progress_message |
-| --- | --- | --- |
-| `agent_started` | `解析输入` | `正在解析交底材料和用户要求` |
-| `agent_tool_call_started` | `调用工具` | `正在调用工具补充解析上下文` |
-| `agent_tool_call_completed` | `工具完成` | `工具调用已完成，正在汇总结果` |
-| `agent_completed` | `解析完成` | `输入解析完成` |
-| `agent_failed` | `解析失败` | `输入解析失败，请查看错误信息或重试` |
+```text
+Node / Agent / Tool
+  ↓ emit WorkflowTraceEvent
+NodeResult.trace_events
+  ↓ Orchestrator._record_trace_events()
+WorkflowState.trace
+  ├─ logger sink：后端技术日志
+  └─ progress projection：前端进度视图
+```
 
 要求：
 
-- 前端文案必须来自受控映射，不直接暴露工具原始参数或模型原始输出。
-- 本阶段只保留映射函数 / 字段，不实现推送接口。
-- 后续 SSE / WebSocket / API 可以消费同一 TraceEvent。
+- `WorkflowState.trace` 是统一事实源的 workflow 内承载，不为前端另起事实流。
+- 前端不直接消费原始 `WorkflowState.trace`，而是消费 `ProgressEvent` projection。
+- 第一阶段不要求重写 `Orchestrator._record_trace_events()`，但新增事件必须能被它安全记录。
+- 旧格式 trace 可兼容保留，新格式应逐步成为默认。
+
+### 3.5 ProgressEvent projection
+
+`ProgressEvent` 是从 `WorkflowTraceEvent` 投影出的前端视图，不是第二套事实事件。
+
+```json
+{
+  "trace_id": "string | null",
+  "workflow_id": "string | null",
+  "node_name": "drafting_parse_input",
+  "stage": "drafting.parse_input",
+  "status": "running",
+  "label": "解析输入",
+  "message": "正在解析交底材料和用户要求",
+  "visible": true,
+  "order": 10,
+  "timestamp": "ISO-8601"
+}
+```
+
+要求：
+
+- 只投影 `progress.visible=true` 的事件。
+- 文案来自受控映射或事件内受控 progress 字段。
+- 不暴露 `tool_call_id`、artifact key、工具原始参数、模型原始输出。
+- schema 兼容非 drafting stage，例如 `qa.retrieval`、`translate.translation`、`query_rewrite.rewrite`。
+- 本阶段只实现 projection / mapper，不实现推送接口。
 
 ### 3.6 `DraftingParseInputNode` 试点
 
 试点范围：
 
-- 在节点开始执行 agent 时发送 `agent_started`。
-- 捕获工具调用开始、成功、失败事件。
+- 在 `LangChainInputParserAgent` 开始执行 agent 时发送 `agent_started`。
+- 捕获 `read_source_artifact`、`write_parsed_info`、`file_extract`、`office_to_md` 的工具调用开始、成功、失败事件。
 - agent 完成时发送 `agent_completed`。
 - agent 异常时发送 `agent_failed`，并保留异常堆栈到后端日志。
 - 继续保持现有节点输入输出契约，不因 trace 改变业务结果。
+- `DraftingParseInputNode` 继续保留业务 trace，如 source 写入、parsed info 写入；新增 agent / tool 事件使用 `WorkflowTraceEvent` schema。
 
 优先使用 LangChain / `create_agent` 官方 callback 或 stream event 机制获取细粒度事件；如果现有版本能力不足，可先通过节点级 wrapper / tool wrapper 发出关键事件，但接口要允许后续切换为官方事件源。
 
@@ -212,7 +266,7 @@ class TraceEmitter:
 
 ## 4. Code Style
 
-- 优先最小化、局部化改动，复用现有 logger、trace、node、tool helper。
+- 优先最小化、局部化改动，复用现有 logger、workflow trace、node、tool helper。
 - 所有公开类、函数、方法必须写中文 Google 风格 docstring，包含 Args / Returns / Raises（如有）。
 - 注释和日志沿用中文风格；日志 `event` 字段使用稳定英文。
 - 行内注释只解释不直观的边界、脱敏、降级和 callback 适配逻辑。
@@ -226,29 +280,41 @@ class TraceEmitter:
 
 ## 5. Testing Strategy
 
-### 5.1 单元测试
+### 5.1 Schema / projection 测试
 
-`tests/test_trace_events.py`：
+`tests/test_workflow_trace_events.py`：
 
-- TraceEvent 必填字段完整。
-- `event` / `status` 枚举值受控。
+- `WorkflowTraceEvent` 必填字段完整。
+- `event` / `status` / `node_type` 枚举值受控。
 - `input_summary` / `output_summary` 不包含长文本。
 - 敏感字段名如 `api_key`、`token`、`secret`、`password` 不进入公开事件。
-- progress 映射能从同一 TraceEvent 生成前端可读字段。
+- `WorkflowTraceEvent` 可作为 `NodeResult.trace_events` 元素被安全记录。
+- `ProgressEvent` projection 只输出 `visible=true` 的受控字段。
+- 至少包含一个非 drafting 样例，例如 `qa.retrieval` 或 `translate.translation`，防止 schema 被设计成文书专用。
 
-### 5.2 节点试点测试
+### 5.2 input parser agent 测试
 
-`tests/test_drafting_parse_input_node.py`：
+`tests/test_input_parser_agent.py`：
 
 - fake agent 成功时发送 `agent_started` 与 `agent_completed`。
-- fake tool 成功时发送 `agent_tool_call_started` 与 `agent_tool_call_completed`。
-- fake tool 失败时发送 `agent_tool_call_failed`，节点按既有失败语义处理。
+- fake tool 成功时发送 `tool_call_started` 与 `tool_call_completed`。
+- fake tool 失败或返回 error 时发送 `tool_call_failed`。
 - fake agent 失败时发送 `agent_failed`，错误信息可解释且不泄露原文。
-- 未传 emitter 时节点仍可正常执行。
+- 未传 emitter 时现有行为不变。
 
-### 5.3 回归测试
+### 5.3 节点试点测试
+
+`tests/test_drafting_research_nodes.py` 或 `tests/test_drafting_parse_input_node.py`：
+
+- `DraftingParseInputNode` 成功执行时，workflow trace 包含 source 写入、agent started、tool call、agent completed、input parsed。
+- agent 失败并 fallback 时，workflow trace 包含 `agent_failed`，节点仍按现有失败 / fallback 语义处理。
+- `NodeResult.output` 不包含长正文。
+- trace 不包含 prompt 全文、交底书正文、工具完整输入输出或密钥。
+
+### 5.4 回归测试
 
 - `conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
+- `conda run -n autoGLM pytest tests/test_security_compliance.py`
 - `conda run -n autoGLM pytest`
 - `conda run -n autoGLM python -m compileall app tests`
 
@@ -264,12 +330,13 @@ class TraceEmitter:
 
 ### 6.1 Always do
 
-- 使用一套统一 TraceEvent 事实流，技术日志和前端进度都从它派生。
-- 先在 `DraftingParseInputNode` 试点，schema / emitter 按全局复用设计。
+- 将当前 workflow trace schema 化为 `WorkflowTraceEvent`，由 `NodeResult.trace_events` / `WorkflowState.trace` 统一管理。
+- schema 设计面向全部 workflow node，不绑定 drafting。
+- 第一阶段只在 `DraftingParseInputNode` 试点 agent / tool 细粒度事件。
+- 后端日志和前端 progress 都从 `WorkflowTraceEvent` 派生。
+- 前端消费 `ProgressEvent` projection，不直接消费原始 `WorkflowState.trace`。
 - 优先使用官方 callback / stream event 机制；不足时用 wrapper 过渡，但保持接口可替换。
-- 所有日志事件使用稳定英文 `event`。
-- 前端进度文案通过受控映射生成。
-- trace / 日志必须脱敏，只记录摘要、长度、数量、状态、耗时和错误类型。
+- trace / 日志 / progress 必须脱敏，只记录摘要、长度、数量、状态、耗时和错误类型。
 - emitter 失败不得破坏主业务流程。
 - 默认测试不访问真实网络和真实外部 LLM。
 - 配置项保持通用作用域，不绑定单个临时 Node。
@@ -277,14 +344,15 @@ class TraceEmitter:
 ### 6.2 Ask first
 
 - 是否实现 SSE / WebSocket / API 推送。
-- 是否把 trace event 持久化到数据库或 workspace artifact。
-- 是否将所有 drafting 节点一次性接入 emitter。
+- 是否把 workflow trace 持久化到数据库或 workspace artifact。
+- 是否将 QA / translate / query_rewrite / drafting 全部迁移到新 schema。
 - 是否捕获 token 级模型流式输出。
-- 是否调整现有 logger / OpenTelemetry 基础设施。
+- 是否调整现有 `WorkflowState.trace` 存储结构。
 - 是否新增第三方 tracing / observability 依赖。
 
 ### 6.3 Never do
 
+- 不另起一套独立于 workflow trace 的 agent trace 事实流。
 - 不维护两套互相分叉的技术日志事件和前端进度事件。
 - 不把 `create_agent` 活动继续作为完全黑盒隐藏在节点内部。
 - 不把完整 prompt、交底书正文、检索正文、工具完整输入输出写入日志或 trace。
@@ -300,25 +368,31 @@ class TraceEmitter:
 
 ### 7.1 架构验收
 
-- 存在统一 TraceEvent schema 与 TraceEmitter 边界。
-- 后端日志 sink 与前端进度映射复用同一 TraceEvent。
-- `DraftingParseInputNode` 能通过 emitter 输出 agent / tool 执行事件。
-- 未传 emitter 时保持安全默认行为。
+- 存在统一 `WorkflowTraceEvent` schema。
+- `NodeResult.trace_events` / `WorkflowState.trace` 是统一管理入口。
+- 后端日志 sink 与前端 progress projection 复用同一 `WorkflowTraceEvent`。
+- schema 至少通过一个非 drafting 样例验证通用性。
+- `DraftingParseInputNode` 能通过 workflow trace 输出 agent / tool 执行事件。
 
 ### 7.2 可观测验收
 
 - 一次 `DraftingParseInputNode` 执行可以看到 agent 开始、工具调用、工具返回、agent 完成或失败。
-- 每个事件包含 `trace_id`、`node_name`、`event`、`status`、时间信息和必要摘要。
+- 每个新事件包含 `schema_version`、`node_name`、`node_type`、`event`、`status`、时间信息和必要摘要。
 - 工具失败和 agent 失败有可解释错误事件。
 - 日志可按稳定 `event` 字段检索。
 
-### 7.3 安全验收
+### 7.3 前端视图验收
+
+- `ProgressEvent` projection 可从 `WorkflowTraceEvent` 生成。
+- 前端视图字段稳定：`stage`、`status`、`label`、`message`、`visible`、`order`、`timestamp`。
+- 前端视图不暴露技术敏感细节、工具完整参数或模型原始输出。
+
+### 7.4 安全验收
 
 - trace / 日志不包含交底书正文、prompt 全文、工具完整输入输出或密钥。
-- 前端进度视图不暴露技术敏感细节。
 - emitter 异常不会导致主流程失败。
 
-### 7.4 工程验收
+### 7.5 工程验收
 
 - 相关单元测试通过。
 - drafting 相关回归通过。

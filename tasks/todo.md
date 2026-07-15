@@ -41,22 +41,22 @@
 
 ## P2 — WorkflowTraceEmitter / sink 适配当前 trace 与 logger
 
-- [ ] 新增 `WorkflowTraceEmitter` 接口。
+- [x] 新增 `WorkflowTraceEmitter` 接口。
   - 验收：提供 `emit(event)`；节点和 runner 只依赖接口。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 新增 `NoopWorkflowTraceEmitter`。
+- [x] 新增 `NoopWorkflowTraceEmitter`。
   - 验收：未注入 emitter 时无副作用且不报错。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 新增测试用 `MemoryWorkflowTraceEmitter`。
+- [x] 新增测试用 `MemoryWorkflowTraceEmitter`。
   - 验收：收集到的事件可直接作为 `NodeResult.trace_events`。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 新增 logger sink。
+- [x] 新增 logger sink。
   - 验收：复用 `log_event()` 输出稳定英文事件和结构化字段，不重复实现 formatter。
   - 验证：`tests/test_workflow_trace_events.py` 或 `caplog` 断言。
-- [ ] 确保 emitter / sink 异常不破坏主业务流程。
+- [x] 确保 emitter / sink 异常不破坏主业务流程。
   - 验收：fake sink 抛错时，调用方可安全降级；最多输出 warning。
   - 验证：`tests/test_workflow_trace_events.py`。
-- [ ] 运行 P2 验证。
+- [x] 运行 P2 验证。
   - 验收：workflow trace、logging 相关测试与编译通过。
   - 验证：`conda run -n autoGLM pytest tests/test_workflow_trace_events.py tests/test_core_config_logging.py && conda run -n autoGLM python -m compileall app tests`
 

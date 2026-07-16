@@ -7,7 +7,7 @@
   - 验收：`tasks/plan.md`、`tasks/todo.md` 覆盖目标、依赖图、垂直切片、验收标准、验证命令、阶段检查点。
   - 验证：`git status`。
 
-- [ ] [Phase 1] 实现 `FileToolPolicy` 与 policy 单测。
+- [x] [Phase 1] 实现 `FileToolPolicy` 与 policy 单测。
   - 依赖：Phase 0。
   - 验收：支持 `readRoots`、`writeRoots`、`allowGlobs`、`denyGlobs`；默认拒绝未显式允许的读写；写权限不能由读权限推导；deny 优先；拒绝 `../`、绝对路径、`.env`、`secrets/`、`*.pem`、`*.key`。
   - 验证：`conda run -n autoGLM pytest tests/test_file_tool_policy.py && conda run -n autoGLM python -m compileall app tests`。

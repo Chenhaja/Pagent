@@ -1,0 +1,58 @@
+import json
+
+from app.core.config import Settings
+from app.models.schemas import WorkflowState
+from app.nodes.drafting_content import (
+    DraftingAbstractWriterNode,
+    DraftingClaimsWriterNode,
+    DraftingDescriptionWriterNode,
+    DraftingDiagramGeneratorNode,
+    DraftingGenerateOutlineNode,
+)
+from app.tools.draft_workspace import DraftWorkspaceTool
+
+
+def _workspace_with_research(tmp_path) -> DraftWorkspaceTool:
+    """构造包含 parsed/search/prior_art 的测试工作区。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path), allow_network=False, llm_base_url=None, llm_model="", llm_api_key=None))
+    workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": '{"technical_topic":"夹爪控制"}'})
+    workspace.run({"action": "write", "artifact_key": "02_research/patent_search_results.json", "content": json.dumps({"results": [], "sufficient": False}, ensure_ascii=False)})
+    workspace.run({"action": "write", "artifact_key": "02_research/prior_art_analysis.json", "content": json.dumps({"distinguishing_features": ["柔性夹持"], "confidence": "low"}, ensure_ascii=False)})
+    return workspace
+
+
+def test_outline_node_no_longer_requires_legacy_drawing_or_style(tmp_path) -> None:
+    """outline 节点不应依赖旧 drawing/style guide artifact。"""
+    workspace = _workspace_with_research(tmp_path)
+    node = DraftingGenerateOutlineNode(settings=workspace.settings, workspace=workspace)
+    state = WorkflowState(raw_input="", drafting_context={"parsed_info_key": "01_input/parsed_info.json"})
+
+    result = node.run(state)
+    stored = workspace.run({"action": "read", "artifact_key": "03_outline/patent_outline.md"})
+
+    assert result.status == "success"
+    assert result.output == {"outline_key": "03_outline/patent_outline.md"}
+    assert "夹爪控制" in stored.evidence[0]["content"]
+
+
+def test_explicit_content_nodes_write_expected_artifacts(tmp_path) -> None:
+    """显式内容节点应离线写入 claims/description/figures/abstract artifacts。"""
+    workspace = _workspace_with_research(tmp_path)
+    state = WorkflowState(raw_input="", drafting_context={"parsed_info_key": "01_input/parsed_info.json"})
+    outline = DraftingGenerateOutlineNode(settings=workspace.settings, workspace=workspace).run(state)
+    claims = DraftingClaimsWriterNode(settings=workspace.settings, workspace=workspace).run(state)
+    description = DraftingDescriptionWriterNode(settings=workspace.settings, workspace=workspace).run(state)
+    figures = DraftingDiagramGeneratorNode(settings=workspace.settings, workspace=workspace).run(state)
+    abstract = DraftingAbstractWriterNode(settings=workspace.settings, workspace=workspace).run(state)
+
+    assert outline.status == "success"
+    assert claims.output == {"claims_key": "04_content/claims.md"}
+    assert description.output == {"description_key": "04_content/description.md"}
+    assert figures.output == {"figures_key": "04_content/figures.md"}
+    assert abstract.output == {"abstract_key": "04_content/abstract.md"}
+    assert workspace.run({"action": "read", "artifact_key": "04_content/description_part1.md"}).error is None
+    assert workspace.run({"action": "read", "artifact_key": "04_content/description_part2.md"}).error is None
+    assert "# 权利要求书" in workspace.run({"action": "read", "artifact_key": "04_content/claims.md"}).evidence[0]["content"]
+    assert "# 专利说明书" in workspace.run({"action": "read", "artifact_key": "04_content/description.md"}).evidence[0]["content"]
+    assert "# 说明书附图" in workspace.run({"action": "read", "artifact_key": "04_content/figures.md"}).evidence[0]["content"]
+    assert "# 摘要" in workspace.run({"action": "read", "artifact_key": "04_content/abstract.md"}).evidence[0]["content"]

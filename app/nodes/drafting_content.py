@@ -4,7 +4,15 @@ from typing import Any
 from app.core.config import Settings, get_settings
 from app.models.schemas import NodeResult, WorkflowState
 from app.orchestrator.node_base import Node
+from app.prompts.subagents.abstract_writer_prompt import ABSTRACT_WRITER_PROMPT
+from app.prompts.subagents.claims_writer_prompt import CLAIMS_WRITER_PROMPT
+from app.prompts.subagents.description_writer_part1_prompt import DESCRIPTION_WRITER_PART1_PROMPT
+from app.prompts.subagents.description_writer_part2_prompt import DESCRIPTION_WRITER_PART2_PROMPT
+from app.prompts.subagents.diagram_generator_prompt import DIAGRAM_GENERATOR_PROMPT
+from app.prompts.subagents.outline_generator_prompt import OUTLINE_GENERATOR_PROMPT
 from app.tools.draft_workspace import DraftWorkspaceTool
+from app.tools.subagents.drafting_agent import LangChainDraftingAgent
+from app.tracing.sinks import MemoryWorkflowTraceEmitter, WorkflowTraceEmitter
 
 
 DRAFTING_OUTLINE_ARTIFACT_KEY = "03_outline/patent_outline.md"
@@ -59,6 +67,24 @@ class DraftingContentNodeBase(Node):
         observation = self.workspace.run({"action": "write", "artifact_key": artifact_key, "content": content})
         return observation.error
 
+    def _topic(self, state: WorkflowState) -> str:
+        """从 parsed info 或大纲中读取技术主题。"""
+        parsed = self._read_json(str(state.drafting_context.get("parsed_info_key") or "01_input/parsed_info.json")) or {}
+        return str(parsed.get("technical_topic") or parsed.get("title") or "技术方案")
+
+    def _run_text_agent(self, runner: Any, artifact_key: str, task: str) -> NodeResult | None:
+        """执行文本生成 runner 并验证目标 artifact 存在。"""
+        observation = runner.run({"task": task})
+        if getattr(observation, "error", None):
+            return NodeResult.failed(errors=[str(observation.error)])
+        if self._read_text(artifact_key) is None:
+            return NodeResult.failed(errors=[f"artifact_missing:{artifact_key}"])
+        return None
+
+    def _trace_events_from(self, emitter: WorkflowTraceEmitter | None) -> list[dict[str, Any]]:
+        """读取 emitter 中可进入 NodeResult 的 trace 事件。"""
+        return list(getattr(emitter, "trace_events", []) or [])
+
 
 class DraftingGenerateOutlineNode(DraftingContentNodeBase):
     """专利文书大纲生成节点。
@@ -73,9 +99,29 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
 
     name = "drafting_generate_outline"
 
-    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        workspace: DraftWorkspaceTool | None = None,
+        outline_runner: Any | None = None,
+        workflow_trace_emitter: WorkflowTraceEmitter | None = None,
+    ) -> None:
         """初始化大纲生成节点。"""
         super().__init__(name=self.name, settings=settings, workspace=workspace)
+        self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
+        self.outline_runner = outline_runner or LangChainDraftingAgent(
+            node_name=self.name,
+            stage="drafting.outline",
+            agent_name="outline_generator_agent",
+            prompt_name="OUTLINE_GENERATOR_PROMPT",
+            system_prompt=OUTLINE_GENERATOR_PROMPT,
+            allowed_read_artifact_keys=["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json"],
+            output_artifact_key=DRAFTING_OUTLINE_ARTIFACT_KEY,
+            fallback_builder=self._build_outline_fallback,
+            settings=self.settings,
+            workspace=self.workspace,
+            workflow_trace_emitter=self.workflow_trace_emitter,
+        )
 
     def run(self, state: WorkflowState) -> NodeResult:
         """生成专利文书大纲 artifact。
@@ -88,23 +134,14 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
         """
         parsed = self._read_json(str(state.drafting_context.get("parsed_info_key") or "01_input/parsed_info.json"))
         prior_art = self._read_json(str(state.drafting_context.get("prior_art_analysis_key") or "02_research/prior_art_analysis.json"))
-        drawing = self._read_json(str(state.drafting_context.get("drawing_analysis_key") or "02_research/drawing_analysis.json"))
-        guide = self._read_json(str(state.drafting_context.get("writing_style_guide_key") or "02_research/writing_style_guide.json"))
         if parsed is None:
             return NodeResult.failed(errors=["parsed_info_missing"])
         if prior_art is None:
             return NodeResult.failed(errors=["prior_art_analysis_missing"])
-        if drawing is None:
-            return NodeResult.failed(errors=["drawing_analysis_missing"])
-        if guide is None:
-            return NodeResult.failed(errors=["writing_style_guide_missing"])
-        topic = str(parsed.get("technical_topic") or "技术方案")
-        focus_features = list(prior_art.get("distinguishing_features") or guide.get("claim_style", {}).get("focus_features") or [])
-        figures = list(drawing.get("figures") or [])
-        content = self._outline_content(topic, focus_features, figures)
-        error = self._write(DRAFTING_OUTLINE_ARTIFACT_KEY, content)
-        if error:
-            return NodeResult.failed(errors=[error])
+        failed = self._run_text_agent(self.outline_runner, DRAFTING_OUTLINE_ARTIFACT_KEY, "生成专利文书大纲")
+        if failed is not None:
+            return failed
+        content = self._read_text(DRAFTING_OUTLINE_ARTIFACT_KEY) or ""
         state.drafting_context["outline_key"] = DRAFTING_OUTLINE_ARTIFACT_KEY
         return NodeResult.success(
             output={"outline_key": DRAFTING_OUTLINE_ARTIFACT_KEY},
@@ -116,6 +153,116 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
         feature_text = "、".join(str(item) for item in focus_features) or "待结合交底书确认"
         figure_text = "、".join(str(item.get("figure_no")) for item in figures if isinstance(item, dict) and item.get("figure_no")) or "无明确附图"
         return f"# 专利大纲\n\n## 技术主题\n\n{topic}\n\n## 权利要求重点\n\n{feature_text}\n\n## 说明书结构\n\n技术领域、背景技术、发明内容、附图说明、具体实施方式。\n\n## 附图\n\n{figure_text}"
+
+    def _build_outline_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成大纲 fallback 正文。"""
+        parsed = self._read_json("01_input/parsed_info.json") or {}
+        prior_art = self._read_json("02_research/prior_art_analysis.json") or {}
+        topic = str(parsed.get("technical_topic") or "技术方案")
+        return self._outline_content(topic, list(prior_art.get("distinguishing_features") or []), [])
+
+
+class _SingleArtifactWriterNode(DraftingContentNodeBase):
+    """单 artifact 文书内容生成节点基类。"""
+
+    def __init__(self, name: str, stage: str, agent_name: str, prompt_name: str, system_prompt: str, allowed_read_artifact_keys: list[str], output_artifact_key: str, fallback_builder: Any, output_field: str, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None, runner: Any | None = None, workflow_trace_emitter: WorkflowTraceEmitter | None = None) -> None:
+        """初始化单 artifact 文书内容生成节点。"""
+        super().__init__(name=name, settings=settings, workspace=workspace)
+        self.output_artifact_key = output_artifact_key
+        self.output_field = output_field
+        self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
+        self.runner = runner or LangChainDraftingAgent(name, stage, agent_name, prompt_name, system_prompt, allowed_read_artifact_keys, output_artifact_key, fallback_builder, self.settings, self.workspace, self.workflow_trace_emitter)
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """执行单 artifact 内容生成。"""
+        failed = self._run_text_agent(self.runner, self.output_artifact_key, f"生成 {self.output_artifact_key}")
+        if failed is not None:
+            return failed
+        state.drafting_context[self.output_field] = self.output_artifact_key
+        return NodeResult.success(output={self.output_field: self.output_artifact_key}, trace_events=[*self._trace_events_from(self.workflow_trace_emitter), {"event": f"{self.name}_completed", "data": {"artifact_key": self.output_artifact_key}}])
+
+
+class DraftingClaimsWriterNode(_SingleArtifactWriterNode):
+    """专利权利要求书生成节点。"""
+
+    name = "drafting_claims_writer"
+
+    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None, claims_runner: Any | None = None, workflow_trace_emitter: WorkflowTraceEmitter | None = None) -> None:
+        """初始化权利要求书生成节点。"""
+        super().__init__(self.name, "drafting.claims", "claims_writer_agent", "CLAIMS_WRITER_PROMPT", CLAIMS_WRITER_PROMPT, ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json", DRAFTING_OUTLINE_ARTIFACT_KEY], DRAFTING_CLAIMS_ARTIFACT_KEY, self._build_fallback, "claims_key", settings, workspace, claims_runner, workflow_trace_emitter)
+
+    def _build_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成权利要求书 fallback 正文。"""
+        topic = self._topic(WorkflowState(raw_input=""))
+        return f"# 权利要求书\n\n1. 一种{topic},其特征在于,包括基于输入材料限定的核心技术特征。\n\n2. 根据权利要求1所述的{topic},其特征在于,所述核心技术特征用于实现柔性夹持。"
+
+
+class DraftingDescriptionWriterNode(DraftingContentNodeBase):
+    """专利说明书生成节点,内部串行生成 Part1 与 Part2。"""
+
+    name = "drafting_description_writer"
+
+    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None, part1_runner: Any | None = None, part2_runner: Any | None = None, workflow_trace_emitter: WorkflowTraceEmitter | None = None) -> None:
+        """初始化说明书生成节点。"""
+        super().__init__(name=self.name, settings=settings, workspace=workspace)
+        self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
+        common_reads = ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json", DRAFTING_OUTLINE_ARTIFACT_KEY, DRAFTING_CLAIMS_ARTIFACT_KEY]
+        self.part1_runner = part1_runner or LangChainDraftingAgent(self.name, "drafting.description.part1", "description_writer_part1_agent", "DESCRIPTION_WRITER_PART1_PROMPT", DESCRIPTION_WRITER_PART1_PROMPT, common_reads, "04_content/description_part1.md", self._build_part1_fallback, self.settings, self.workspace, self.workflow_trace_emitter)
+        self.part2_runner = part2_runner or LangChainDraftingAgent(self.name, "drafting.description.part2", "description_writer_part2_agent", "DESCRIPTION_WRITER_PART2_PROMPT", DESCRIPTION_WRITER_PART2_PROMPT, [*common_reads, "04_content/description_part1.md"], "04_content/description_part2.md", self._build_part2_fallback, self.settings, self.workspace, self.workflow_trace_emitter)
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        """生成说明书 Part1、Part2 并合并为完整说明书。"""
+        failed = self._run_text_agent(self.part1_runner, "04_content/description_part1.md", "生成说明书第一部分")
+        if failed is not None:
+            return failed
+        failed = self._run_text_agent(self.part2_runner, "04_content/description_part2.md", "生成说明书第二部分")
+        if failed is not None:
+            return failed
+        part1 = self._read_text("04_content/description_part1.md") or ""
+        part2 = self._read_text("04_content/description_part2.md") or ""
+        error = self._write(DRAFTING_DESCRIPTION_ARTIFACT_KEY, f"{part1}\n\n{part2}".strip())
+        if error:
+            return NodeResult.failed(errors=[error])
+        state.drafting_context["description_key"] = DRAFTING_DESCRIPTION_ARTIFACT_KEY
+        return NodeResult.success(output={"description_key": DRAFTING_DESCRIPTION_ARTIFACT_KEY}, trace_events=[*self._trace_events_from(self.workflow_trace_emitter), {"event": "drafting_description_writer_completed", "data": {"artifact_key": DRAFTING_DESCRIPTION_ARTIFACT_KEY}}])
+
+    def _build_part1_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成说明书第一部分 fallback 正文。"""
+        topic = self._topic(WorkflowState(raw_input=""))
+        return f"# 专利说明书\n\n## 技术领域\n\n本申请涉及{topic}。\n\n## 背景技术\n\n现有技术仍需改进。\n\n## 发明内容\n\n本申请提供一种{topic},以提升技术效果。\n\n## 附图说明\n\n图1为本申请实施例的流程示意图。"
+
+    def _build_part2_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成说明书第二部分 fallback 正文。"""
+        return "## 具体实施方式\n\n以下结合附图对本申请的技术方案进行说明。本实施例用于说明本申请,不构成限制。"
+
+
+class DraftingDiagramGeneratorNode(_SingleArtifactWriterNode):
+    """说明书附图生成节点。"""
+
+    name = "drafting_diagram_generator"
+
+    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None, diagram_runner: Any | None = None, workflow_trace_emitter: WorkflowTraceEmitter | None = None) -> None:
+        """初始化说明书附图生成节点。"""
+        super().__init__(self.name, "drafting.diagram", "diagram_generator_agent", "DIAGRAM_GENERATOR_PROMPT", DIAGRAM_GENERATOR_PROMPT, ["01_input/parsed_info.json", DRAFTING_OUTLINE_ARTIFACT_KEY, DRAFTING_DESCRIPTION_ARTIFACT_KEY], DRAFTING_FIGURES_ARTIFACT_KEY, self._build_fallback, "figures_key", settings, workspace, diagram_runner, workflow_trace_emitter)
+
+    def _build_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成附图 fallback 正文。"""
+        return "# 说明书附图\n\n```mermaid\nflowchart TB\n    A[101：获取输入] --> B[102：执行处理]\n```\n\n图1"
+
+
+class DraftingAbstractWriterNode(_SingleArtifactWriterNode):
+    """专利摘要生成节点。"""
+
+    name = "drafting_abstract_writer"
+
+    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None, abstract_runner: Any | None = None, workflow_trace_emitter: WorkflowTraceEmitter | None = None) -> None:
+        """初始化专利摘要生成节点。"""
+        super().__init__(self.name, "drafting.abstract", "abstract_writer_agent", "ABSTRACT_WRITER_PROMPT", ABSTRACT_WRITER_PROMPT, [DRAFTING_CLAIMS_ARTIFACT_KEY, DRAFTING_DESCRIPTION_ARTIFACT_KEY], DRAFTING_ABSTRACT_ARTIFACT_KEY, self._build_fallback, "abstract_key", settings, workspace, abstract_runner, workflow_trace_emitter)
+
+    def _build_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成摘要 fallback 正文。"""
+        topic = self._topic(WorkflowState(raw_input=""))
+        return f"# 发明名称\n\n{topic}\n\n# 摘要\n\n本申请公开了一种{topic},能够基于输入材料限定的技术特征解决相关技术问题。"
 
 
 class DraftingGenerateSectionsNode(DraftingContentNodeBase):

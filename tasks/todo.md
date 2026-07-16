@@ -44,10 +44,11 @@
   - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py tests/test_langchain_agent_runner.py`；`conda run -n autoGLM python -m compileall app tests scripts`。
   - 状态：已验证通过，待提交。
 
-- [ ] [Task 7] 全量验证与收尾。
+- [x] [Task 7] 全量验证与收尾。
   - 依赖：Task 6。
   - 验收：分阶段验证命令全部通过；全量 pytest 通过；compileall 通过；diff 不包含无关改动、临时文件、密钥或调试代码；每个完成阶段都有独立 commit。
   - 验证：`conda run -n autoGLM pytest tests/test_case_service.py`；`conda run -n autoGLM pytest tests/test_agent_api.py tests/test_attachment_upload.py tests/test_attachment_inject.py`；`conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py`；`conda run -n autoGLM pytest tests/test_skill_loader.py tests/test_todo_tool.py`；`conda run -n autoGLM pytest`；`conda run -n autoGLM python -m compileall app tests scripts`；`git status --short`。
+  - 状态：分阶段验证、全量 pytest 和 compileall 已通过。
 
 ## 当前检查点
 

@@ -220,7 +220,7 @@ def test_drafting_patent_search_default_runner_allows_patent_search(monkeypatch,
 
     DraftingPatentSearchNode(settings=Settings(draft_workspace_dir=str(tmp_path)))
 
-    assert captured["allowed_tools"] == ["read_file", "write_file", "patent_search"]
+    assert captured["allowed_tools"] == ["read_file", "write_file", "mkdir", "list_directory", "patent_search"]
 
 
 class FakePatentSearchRegistry:

@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from app.orchestrator.react_loop import ReActTool, ToolObservation
 from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.subagents.file_policy import FileToolPolicy
 
@@ -51,6 +52,47 @@ def build_file_tools(workspace: DraftWorkspaceTool, policy: FileToolPolicy) -> d
     return {"read_file": read_file, "write_file": write_file}
 
 
+def build_react_tool_adapters(tools: dict[str, ReActTool]) -> dict[str, ToolCallable]:
+    """将内部 ReAct 工具包装为 LangChain tool callable。
+
+    Args:
+        tools: 以稳定工具名索引的内部工具实例。
+
+    Returns:
+        可直接传给 create_agent 的 LangChain tool callable 字典。
+    """
+    try:
+        from langchain_core.tools import tool
+    except ImportError:
+        return {}
+
+    patent_tool = tools.get("patent_search")
+    skill_tool = tools.get("skill_loader")
+    adapters: dict[str, ToolCallable] = {}
+
+    if patent_tool is not None:
+
+        @tool
+        def patent_search(query: str, top_k: int | None = None, country: str = "CN", status: str = "GRANT") -> str:
+            """检索专利证据,返回结构化 JSON observation。"""
+            observation = patent_tool.run({"query": query, "top_k": top_k, "country": country, "status": status})
+            return _observation_to_json(observation)
+
+        adapters["patent_search"] = patent_search
+
+    if skill_tool is not None:
+
+        @tool
+        def skill_loader(skill_name: str) -> str:
+            """读取白名单 skill 文档,返回结构化 JSON observation。"""
+            observation = skill_tool.run({"skill_name": skill_name})
+            return _observation_to_json(observation)
+
+        adapters["skill_loader"] = skill_loader
+
+    return adapters
+
+
 def select_tools(tools: dict[str, ToolCallable], allowed_tools: list[str]) -> list[ToolCallable]:
     """按 allowed_tools 白名单选择可传给 create_agent 的工具。
 
@@ -67,3 +109,18 @@ def select_tools(tools: dict[str, ToolCallable], allowed_tools: list[str]) -> li
 def _json_error(error: Any) -> str:
     """生成不泄露路径细节的工具错误 JSON。"""
     return json.dumps({"error": str(error or "tool_error")}, ensure_ascii=False)
+
+
+def _observation_to_json(observation: ToolObservation) -> str:
+    """将内部 observation 转为 LangChain tool 返回 JSON。"""
+    if observation.error:
+        payload = {"error": observation.error, "tool_name": observation.tool_name, "external": observation.external}
+    else:
+        payload = {
+            "tool_name": observation.tool_name,
+            "evidence": observation.evidence,
+            "sufficient": observation.sufficient,
+            "external": observation.external,
+            "top_score": observation.top_score,
+        }
+    return json.dumps(payload, ensure_ascii=False)

@@ -4,8 +4,10 @@ from typing import Any
 from app.core.config import Settings, get_settings
 from app.orchestrator.react_loop import ToolObservation
 from app.tools.draft_workspace import DraftWorkspaceTool
+from app.tools.patent_search import PatentSearchTool
+from app.tools.skill_loader import SkillLoaderTool
 from app.tools.subagents.file_policy import FileToolPolicy
-from app.tools.subagents.file_tools import build_file_tools, select_tools
+from app.tools.subagents.file_tools import build_file_tools, build_react_tool_adapters, select_tools
 from app.tracing.langchain_trace import WorkflowTraceAgentMiddleware
 from app.tracing.sinks import WorkflowTraceEmitter
 
@@ -97,6 +99,14 @@ class LangChainAgentRunner:
     def _allowed_langchain_tools(self) -> list[Any]:
         """构造并筛选允许传给 create_agent 的工具。"""
         tools = build_file_tools(self.workspace, self.file_policy)
+        tools.update(
+            build_react_tool_adapters(
+                {
+                    "patent_search": PatentSearchTool(self.settings),
+                    "skill_loader": SkillLoaderTool(self.settings),
+                }
+            )
+        )
         return select_tools(tools, self.allowed_tools)
 
     def _trace_middleware(self) -> WorkflowTraceAgentMiddleware:

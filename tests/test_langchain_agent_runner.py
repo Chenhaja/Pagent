@@ -1,6 +1,7 @@
 import json
 
 from app.core.config import Settings
+from app.orchestrator.react_loop import ToolObservation
 from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.subagents.agent_runner import LangChainAgentRunner
 from app.tools.subagents.file_policy import FileToolPolicy
@@ -51,6 +52,109 @@ def test_select_tools_uses_allowed_tools_order() -> None:
     selected = select_tools(tools, ["write_file", "missing"])
 
     assert selected == [tools["write_file"]]
+
+
+def test_agent_runner_exposes_skill_loader_adapter(monkeypatch, tmp_path) -> None:
+    """runner 应能按白名单暴露 skill_loader LangChain tool。"""
+
+    class FakeSkillLoaderTool:
+        """测试用 skill_loader。"""
+
+        def __init__(self, settings: Settings) -> None:
+            """接收 runner 传入的配置。"""
+
+        def run(self, tool_input: dict) -> ToolObservation:
+            """返回固定 skill evidence。"""
+            return ToolObservation(tool_name="skill_loader", evidence=[{"skill_name": tool_input["skill_name"], "content": "规则"}], sufficient=True)
+
+    monkeypatch.setattr("app.tools.subagents.agent_runner.SkillLoaderTool", FakeSkillLoaderTool)
+    runner = _runner_for_allowed_tools(tmp_path, ["skill_loader"])
+
+    tools = runner._allowed_langchain_tools()
+    result = json.loads(tools[0].invoke({"skill_name": "patent_drafting"}))
+
+    assert [tool.name for tool in tools] == ["skill_loader"]
+    assert result == {
+        "tool_name": "skill_loader",
+        "evidence": [{"skill_name": "patent_drafting", "content": "规则"}],
+        "sufficient": True,
+        "external": False,
+        "top_score": 0.0,
+    }
+
+
+def test_agent_runner_exposes_patent_search_adapter(monkeypatch, tmp_path) -> None:
+    """runner 应能按白名单暴露 patent_search LangChain tool。"""
+
+    class FakePatentSearchTool:
+        """测试用 patent_search。"""
+
+        def __init__(self, settings: Settings) -> None:
+            """接收 runner 传入的配置。"""
+
+        def run(self, tool_input: dict) -> ToolObservation:
+            """返回固定专利 evidence。"""
+            return ToolObservation(
+                tool_name="patent_search",
+                evidence=[{"title": tool_input["query"], "publication_number": "CN1"}],
+                sufficient=True,
+                external=True,
+                top_score=0.8,
+            )
+
+    monkeypatch.setattr("app.tools.subagents.agent_runner.PatentSearchTool", FakePatentSearchTool)
+    runner = _runner_for_allowed_tools(tmp_path, ["patent_search"])
+
+    tools = runner._allowed_langchain_tools()
+    result = json.loads(tools[0].invoke({"query": "折叠屏", "top_k": 1}))
+
+    assert [tool.name for tool in tools] == ["patent_search"]
+    assert result == {
+        "tool_name": "patent_search",
+        "evidence": [{"title": "折叠屏", "publication_number": "CN1"}],
+        "sufficient": True,
+        "external": True,
+        "top_score": 0.8,
+    }
+
+
+def test_agent_runner_adapter_returns_structured_error(monkeypatch, tmp_path) -> None:
+    """内部工具错误应转为结构化 JSON。"""
+
+    class FakePatentSearchTool:
+        """测试用失败 patent_search。"""
+
+        def __init__(self, settings: Settings) -> None:
+            """接收 runner 传入的配置。"""
+
+        def run(self, tool_input: dict) -> ToolObservation:
+            """返回固定错误 observation。"""
+            return ToolObservation(tool_name="patent_search", error="network_disabled", external=True)
+
+    monkeypatch.setattr("app.tools.subagents.agent_runner.PatentSearchTool", FakePatentSearchTool)
+    runner = _runner_for_allowed_tools(tmp_path, ["patent_search"])
+
+    result = json.loads(runner._allowed_langchain_tools()[0].invoke({"query": "折叠屏"}))
+
+    assert result == {"error": "network_disabled", "tool_name": "patent_search", "external": True}
+
+
+def _runner_for_allowed_tools(tmp_path, allowed_tools: list[str]) -> LangChainAgentRunner:
+    """构造只用于检查工具白名单的 runner。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    return LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=allowed_tools,
+        file_policy=FileToolPolicy(readRoots=["input/"], writeRoots=["output/"]),
+        output_artifact_key="output/result.md",
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=DraftWorkspaceTool(settings),
+    )
 
 
 def _fallback_content(reason: str, workspace: DraftWorkspaceTool) -> str:

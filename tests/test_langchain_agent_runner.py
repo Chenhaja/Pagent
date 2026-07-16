@@ -86,33 +86,31 @@ def test_select_tools_uses_allowed_tools_order() -> None:
     assert selected == [tools["mkdir"], tools["write_file"]]
 
 
-def test_agent_runner_exposes_skill_loader_adapter(monkeypatch, tmp_path) -> None:
-    """runner 应能按白名单暴露 skill_loader LangChain tool。"""
+def test_agent_runner_exposes_skill_list_and_load_adapters(monkeypatch, tmp_path) -> None:
+    """runner 应能按白名单暴露 list_skills/load_skill LangChain tools。"""
 
     class FakeSkillLoaderTool:
-        """测试用 skill_loader。"""
+        """测试用 skill loader。"""
 
         def __init__(self, settings: Settings) -> None:
             """接收 runner 传入的配置。"""
 
         def run(self, tool_input: dict) -> ToolObservation:
             """返回固定 skill evidence。"""
-            return ToolObservation(tool_name="skill_loader", evidence=[{"skill_name": tool_input["skill_name"], "content": "规则"}], sufficient=True)
+            if tool_input.get("action") == "list":
+                return ToolObservation(tool_name="skill_loader", evidence=[{"skills": [{"name": "patent_guide", "description": "指南"}]}], sufficient=True)
+            return ToolObservation(tool_name="skill_loader", evidence=[{"name": tool_input["name"], "content": "规则"}], sufficient=True)
 
     monkeypatch.setattr("app.tools.subagents.agent_runner.SkillLoaderTool", FakeSkillLoaderTool)
-    runner = _runner_for_allowed_tools(tmp_path, ["skill_loader"])
+    runner = _runner_for_allowed_tools(tmp_path, ["list_skills", "load_skill"])
 
     tools = runner._allowed_langchain_tools()
-    result = json.loads(tools[0].invoke({"skill_name": "patent_drafting"}))
+    listed = json.loads(tools[0].invoke({}))
+    loaded = json.loads(tools[1].invoke({"name": "patent_guide"}))
 
-    assert [tool.name for tool in tools] == ["skill_loader"]
-    assert result == {
-        "tool_name": "skill_loader",
-        "evidence": [{"skill_name": "patent_drafting", "content": "规则"}],
-        "sufficient": True,
-        "external": False,
-        "top_score": 0.0,
-    }
+    assert [tool.name for tool in tools] == ["list_skills", "load_skill"]
+    assert listed["evidence"] == [{"skills": [{"name": "patent_guide", "description": "指南"}]}]
+    assert loaded["evidence"] == [{"name": "patent_guide", "content": "规则"}]
 
 
 def test_agent_runner_exposes_patent_search_adapter(monkeypatch, tmp_path) -> None:

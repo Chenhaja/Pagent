@@ -25,8 +25,8 @@ def _workspace_with_research(tmp_path) -> DraftWorkspaceTool:
     return workspace
 
 
-def test_content_default_runners_allow_skill_loader(monkeypatch, tmp_path) -> None:
-    """内容节点默认 runner 应允许 skill_loader。"""
+def test_content_default_runners_allow_list_skills(monkeypatch, tmp_path) -> None:
+    """内容节点默认 runner 应允许 list/load skill 工具。"""
     captured_allowed_tools = []
 
     class FakeLangChainAgentRunner:
@@ -47,11 +47,11 @@ def test_content_default_runners_allow_skill_loader(monkeypatch, tmp_path) -> No
     DraftingMergeDocumentNode(settings=settings, workspace=workspace)
 
     assert captured_allowed_tools == [
-        ["read_file", "write_file", "skill_loader"],
-        ["read_file", "write_file", "skill_loader"],
-        ["read_file", "write_file", "skill_loader"],
-        ["read_file", "write_file", "skill_loader"],
-        ["read_file", "write_file", "skill_loader"],
+        ["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
+        ["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
+        ["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
+        ["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
+        ["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
     ]
 
 

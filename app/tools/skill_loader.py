@@ -5,13 +5,14 @@ from app.orchestrator.react_loop import ToolObservation
 
 
 ALLOWED_SKILL_DOCS = {
-    "patent_drafting": "patent_drafting.md",
-    "mermaid": "mermaid.md",
+    "patent_guide": {"filename": "patent_guide.md", "description": "专利申请文件撰写指南"},
+    "mermaid_flowchart": {"filename": "mermaid_flowchart.md", "description": "Mermaid flowchart 语法指南"},
+    "mermaid_sequence_diagram": {"filename": "mermaid_sequence_diagram.md", "description": "Mermaid sequence diagram 语法指南"},
 }
 
 
 class SkillLoaderTool:
-    """按白名单读取本地 Markdown skill 文档的工具。"""
+    """按白名单列出和读取本地 Markdown skill 文档的工具。"""
 
     def __init__(self, settings: Settings | None = None, skills_dir: Path | str | None = None) -> None:
         """初始化 skill loader。
@@ -28,24 +29,37 @@ class SkillLoaderTool:
         self.skills_dir = Path(configured_dir).resolve()
 
     def run(self, tool_input: dict) -> ToolObservation:
-        """读取白名单 Markdown skill 文档。
+        """列出或读取白名单 Markdown skill 文档。
 
         Args:
-            tool_input: 包含 skill_name 的输入。
+            tool_input: 包含 action=list 或 action=load/name 的输入。
 
         Returns:
-            包含 skill 文档内容的 observation;未知 skill 返回安全错误。
+            list 返回 name/description 列表;load 返回指定 skill 文档正文。
         """
-        skill_name = str(tool_input.get("skill_name") or "").strip()
-        filename = ALLOWED_SKILL_DOCS.get(skill_name)
-        if filename is None:
+        action = str(tool_input.get("action") or "").strip()
+        if action == "list":
+            return self._list_skills()
+        if action == "load":
+            return self._load_skill(str(tool_input.get("name") or "").strip())
+        return ToolObservation(tool_name="skill_loader", error="invalid_action")
+
+    def _list_skills(self) -> ToolObservation:
+        """列出可加载 skill 的名称和描述。"""
+        skills = [{"name": name, "description": str(spec["description"])} for name, spec in ALLOWED_SKILL_DOCS.items()]
+        return ToolObservation(tool_name="skill_loader", evidence=[{"skills": skills}], sufficient=True)
+
+    def _load_skill(self, name: str) -> ToolObservation:
+        """按精确名称读取 skill 正文。"""
+        spec = ALLOWED_SKILL_DOCS.get(name)
+        if spec is None:
             return ToolObservation(tool_name="skill_loader", error="skill_unavailable")
-        path = (self.skills_dir / filename).resolve()
+        path = (self.skills_dir / str(spec["filename"])).resolve()
         if self.skills_dir not in path.parents or path.suffix != ".md" or not path.exists():
             return ToolObservation(tool_name="skill_loader", error="skill_unavailable")
         content = path.read_text(encoding="utf-8")
         return ToolObservation(
             tool_name="skill_loader",
-            evidence=[{"skill_name": skill_name, "content": content, "chars": len(content), "path": str(path)}],
+            evidence=[{"name": name, "content": content, "chars": len(content), "path": str(path)}],
             sufficient=bool(content),
         )

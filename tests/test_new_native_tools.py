@@ -36,13 +36,16 @@ def test_skill_loader_reads_only_known_skills() -> None:
     """skill_loader 只允许读取白名单 Markdown 技能文档。"""
     tool = SkillLoaderTool()
 
-    loaded = tool.run({"skill_name": "patent_drafting"})
-    rejected = tool.run({"skill_name": "../secret"})
+    listed = tool.run({"action": "list"})
+    loaded = tool.run({"action": "load", "name": "patent_guide"})
+    rejected = tool.run({"action": "load", "name": "../secret"})
 
+    assert listed.error is None
+    assert {item["name"] for item in listed.evidence[0]["skills"]} == {"patent_guide", "mermaid_flowchart", "mermaid_sequence_diagram"}
     assert loaded.error is None
-    assert loaded.evidence[0]["skill_name"] == "patent_drafting"
+    assert loaded.evidence[0]["name"] == "patent_guide"
     assert loaded.evidence[0]["content"]
-    assert loaded.evidence[0]["path"].endswith("patent_drafting.md")
+    assert loaded.evidence[0]["path"].endswith("patent_guide.md")
     assert rejected.error == "skill_unavailable"
 
 
@@ -74,5 +77,5 @@ def test_default_tool_registry_registers_drafting_native_tools(tmp_path) -> None
     registry = build_default_tool_registry(settings)
 
     assert registry.run("draft_workspace", {"action": "write", "artifact_key": "outline", "content": "提纲"}).error is None
-    assert registry.run("skill_loader", {"skill_name": "patent_drafting"}).error is None
+    assert registry.run("skill_loader", {"action": "load", "name": "patent_guide"}).error is None
     assert registry.run("patent_search", {"query": "夹爪"}).error == "network_disabled"

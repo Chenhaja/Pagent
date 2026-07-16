@@ -28,7 +28,7 @@
   - 验收：`DraftWorkspaceTool` 支持 `mkdir`、`list_directory`；`list_directory` 只列直接子项；内存模式可推导目录；LangChain file tools 暴露 `mkdir`、`list_directory`；读类工具走 read policy，写类工具走 write policy；runner file policy prompt 说明当前 case workspace 相对路径；需要目录能力的 drafting agent 显式加入 allowed tools。
   - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py`；`conda run -n autoGLM python -m compileall app tests scripts`。
 
-- [ ] [Task 5] 改造 skill list/load。
+- [x] [Task 5] 改造 skill list/load。
   - 依赖：Task 4。
   - 验收：registry 使用真实文档 `patent_guide`、`mermaid_flowchart`、`mermaid_sequence_diagram` 并包含 description；`action="list"` 只返回 `name + description`；`action="load"` 精确加载正文；未知 name/路径穿越/旧猜测名称安全失败；LangChain adapters 暴露 `list_skills()`、`load_skill(name)`；新 drafting allowed tools 使用 `list_skills`、`load_skill`。
   - 验证：`conda run -n autoGLM pytest tests/test_skill_loader.py tests/test_new_native_tools.py`；`conda run -n autoGLM pytest tests/test_langchain_agent_runner.py tests/test_drafting_content_nodes.py`；`conda run -n autoGLM python -m compileall app tests scripts`。

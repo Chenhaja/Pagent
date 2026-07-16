@@ -32,13 +32,13 @@ class SubagentDefinition:
 SUBAGENT_DEFINITIONS = [
     SubagentDefinition("input_parser", "输入解析", INPUT_PARSER_PROMPT, "01_input/parsed_info.json", ["draft_workspace", "office_to_md", "file_extract"]),
     SubagentDefinition("patent_searcher", "专利检索分析", PATENT_SEARCHER_PROMPT, "02_research/prior_art_analysis.md", ["draft_workspace", "patent_search", "office_to_md", "file_extract"]),
-    SubagentDefinition("outline_generator", "专利大纲", OUTLINE_GENERATOR_PROMPT, "03_outline/patent_outline.md", ["draft_workspace", "skill_loader"]),
-    SubagentDefinition("abstract_writer", "摘要", ABSTRACT_WRITER_PROMPT, "04_content/abstract.md", ["draft_workspace", "skill_loader"]),
-    SubagentDefinition("claims_writer", "权利要求书", CLAIMS_WRITER_PROMPT, "04_content/claims.md", ["draft_workspace", "skill_loader"]),
-    SubagentDefinition("description_writer_part1", "说明书第一部分", DESCRIPTION_WRITER_PART1_PROMPT, "04_content/description.md", ["draft_workspace", "skill_loader"]),
-    SubagentDefinition("description_writer_part2", "说明书第二部分", DESCRIPTION_WRITER_PART2_PROMPT, "04_content/description.md", ["draft_workspace", "skill_loader"]),
-    SubagentDefinition("diagram_generator", "说明书附图", DIAGRAM_GENERATOR_PROMPT, "04_content/figures.md", ["draft_workspace", "skill_loader"]),
-    SubagentDefinition("markdown_merger", "终稿合并", MARKDOWN_MERGER_PROMPT, "05_final/complete_patent.md", ["draft_workspace", "skill_loader"]),
+    SubagentDefinition("outline_generator", "专利大纲", OUTLINE_GENERATOR_PROMPT, "03_outline/patent_outline.md", ["draft_workspace", "list_skills", "load_skill"]),
+    SubagentDefinition("abstract_writer", "摘要", ABSTRACT_WRITER_PROMPT, "04_content/abstract.md", ["draft_workspace", "list_skills", "load_skill"]),
+    SubagentDefinition("claims_writer", "权利要求书", CLAIMS_WRITER_PROMPT, "04_content/claims.md", ["draft_workspace", "list_skills", "load_skill"]),
+    SubagentDefinition("description_writer_part1", "说明书第一部分", DESCRIPTION_WRITER_PART1_PROMPT, "04_content/description.md", ["draft_workspace", "list_skills", "load_skill"]),
+    SubagentDefinition("description_writer_part2", "说明书第二部分", DESCRIPTION_WRITER_PART2_PROMPT, "04_content/description.md", ["draft_workspace", "list_skills", "load_skill"]),
+    SubagentDefinition("diagram_generator", "说明书附图", DIAGRAM_GENERATOR_PROMPT, "04_content/figures.md", ["draft_workspace", "list_skills", "load_skill"]),
+    SubagentDefinition("markdown_merger", "终稿合并", MARKDOWN_MERGER_PROMPT, "05_final/complete_patent.md", ["draft_workspace", "list_skills", "load_skill"]),
 ]
 
 

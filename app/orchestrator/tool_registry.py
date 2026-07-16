@@ -265,11 +265,14 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="skill_loader",
             runner=SkillLoaderTool(current_settings),
-            description="按白名单读取本地 Markdown 专利技能文档,不允许任意路径或 Python 源码。",
+            description="按白名单列出或读取本地 Markdown 专利技能文档,不允许任意路径或 Python 源码。",
             input_schema={
                 "type": "object",
-                "properties": {"skill_name": {"type": "string", "enum": list(ALLOWED_SKILL_DOCS)}},
-                "required": ["skill_name"],
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "load"]},
+                    "name": {"type": "string", "enum": list(ALLOWED_SKILL_DOCS)},
+                },
+                "required": ["action"],
                 "additionalProperties": False,
             },
             external=False,

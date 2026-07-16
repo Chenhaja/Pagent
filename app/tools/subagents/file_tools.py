@@ -109,12 +109,19 @@ def build_react_tool_adapters(tools: dict[str, ReActTool]) -> dict[str, ToolCall
     if skill_tool is not None:
 
         @tool
-        def skill_loader(skill_name: str) -> str:
-            """读取白名单 skill 文档,返回结构化 JSON observation。"""
-            observation = skill_tool.run({"skill_name": skill_name})
+        def list_skills() -> str:
+            """列出可加载 skill 的 name 和 description。"""
+            observation = skill_tool.run({"action": "list"})
             return _observation_to_json(observation)
 
-        adapters["skill_loader"] = skill_loader
+        @tool
+        def load_skill(name: str) -> str:
+            """按精确 name 加载 skill 文档正文。"""
+            observation = skill_tool.run({"action": "load", "name": name})
+            return _observation_to_json(observation)
+
+        adapters["list_skills"] = list_skills
+        adapters["load_skill"] = load_skill
 
     return adapters
 

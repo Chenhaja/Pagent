@@ -79,7 +79,8 @@ def test_subagent_tool_specs_expose_restricted_tools(tmp_path) -> None:
     by_name = {spec.name: spec for spec in specs}
 
     assert "patent_search" in by_name["patent_searcher"].input_schema["x_allowed_tools"]
-    assert "skill_loader" in by_name["abstract_writer"].input_schema["x_allowed_tools"]
+    assert "list_skills" in by_name["abstract_writer"].input_schema["x_allowed_tools"]
+    assert "load_skill" in by_name["abstract_writer"].input_schema["x_allowed_tools"]
     assert "patent_search" not in by_name["abstract_writer"].input_schema["x_allowed_tools"]
 
 

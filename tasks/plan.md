@@ -1,311 +1,307 @@
-# 通用 LangChain Agent 与 Policy File Tools 实施计划
+# Implementation Plan: 案件级 Workspace 生命周期与 Agent 工具稳定性改造
 
-## 目标
+## Overview
 
-基于 `SPEC.md`，把当前 `LangChainDraftingAgent` / `LangChainInputParserAgent` 收敛为一个通用 LangChain Agent runner，并配套通用 file tools 与 file policy。业务差异由 node/agent 参数表达：`node_name`、`agent_name`、prompt、`allowed_tools`、file policy、fallback 等。
+本计划基于 `SPEC.md`，在已完成的案件创建 API 基础上，继续实现案件 workspace 复用、附件绑定案件、目录文件工具、skill list/load、LangChain todo middleware 和全量验证。目标是不引入 UI、不重做工具系统，同时让同一 `case_id` 下多个 `session_id`、附件和 agent 文件操作复用同一个 `.draft_workspace/tmp_{workspace_id}`，并继续由 file policy 约束所有文件路径。
 
-## 当前代码观察
+## Current Baseline
 
-- 现有业务 Agent 类位于：
-  - `app/tools/subagents/input_parser_agent.py`
-  - `app/tools/subagents/drafting_agent.py`
-- 现有调用点：
-  - `app/nodes/drafting_research.py`：`DraftingParseInputNode`、`DraftingPatentSearchNode`
-  - `app/nodes/drafting_content.py`：大纲、权利要求、说明书、附图、摘要、合并节点
-- 现有工具构建问题：
-  - input parser 通过 `_build_tools(source_key, attachments)` 内联构造 `read_source_artifact`、`write_parsed_info`、`file_extract`、`office_to_md`。
-  - drafting 通过 `_build_tools()` 内联构造 `read_artifact`、`write_output_artifact`。
-  - 权限逻辑散落在工具闭包中，尚未形成统一 policy 层。
-- 可复用基础：
-  - `DraftWorkspaceTool` 已提供 artifact read/write/list/merge 与基础安全 key 校验。
-  - `WorkflowTraceAgentMiddleware` 已承接 create_agent middleware trace。
-  - 现有测试已覆盖 fallback、middleware 传递、受限读写和不手写 wrapper trace。
+已完成并提交：
 
-## 依赖图
+- `CaseService` 基础创建/读取能力。
+- `POST /agent/cases`。
+- `AgentRequest.case_id` 必填。
+- `WorkflowState.case_id` / `workspace_id`。
+- `/agent` 校验未知 case 并透传 `case_id` / `workspace_id`。
+
+后续任务从 workspace 复用开始，不重复实现已完成切片。
+
+## Architecture Decisions
+
+- **案件是 workspace 生命周期入口**：`/agent` 与 `/agent/attachments` 不隐式创建 case，调用方必须先调用 `/agent/cases`。
+- **workspace 只通过 ID 和相对展示路径暴露**：API 返回 `.draft_workspace/tmp_{workspace_id}`，内部可解析到磁盘路径，但不向调用方暴露绝对路径。
+- **同案共享 workspace，会话记忆独立**：`case_id` 决定 workspace；`session_id` 仍只决定 session memory，避免历史串扰。
+- **文件访问双层约束**：`DraftWorkspaceTool` 保留自身安全 key/path 校验，LangChain file tools 先通过 `FileToolPolicy` 再调用 workspace。
+- **skill 从“猜名称”变成“列举后精确加载”**：新 LangChain tools 暴露 `list_skills()` 和 `load_skill(name)`；旧 `skill_loader` 仅可短期作为内部兼容。
+- **todo 使用官方 middleware，失败降级**：runner 接入 LangChain todo middleware；导入失败时记录 warning/trace 并仅禁用 todo middleware。
+
+## Dependency Graph
 
 ```text
-SPEC.md
-  -> file_policy.py
-      -> file_tools.py
-          -> agent_runner.py
-              -> drafting_research.py 调用迁移
-              -> drafting_content.py 调用迁移
-                  -> 删除旧业务 Agent 类与导出
-                      -> 测试迁移与安全回归
+已完成 Task 1: 案件生命周期 API
+  -> Task 2: 案件 workspace 复用
+      -> Task 3: 附件绑定案件并导入 workspace
+      -> Task 4: 目录工具与 file policy
+          -> Task 5: Skill list/load 与 allowed tools 更新
+              -> Task 6: Todo middleware 接入
+                  -> Task 7: 全量验证与收尾
 ```
 
 关键依赖：
 
-1. `FileToolPolicy` 必须先存在，否则通用 file tools 无法在执行前校验路径。
-2. 通用 file tools 必须先存在，否则 runner 无法用 `allowed_tools` 统一筛选工具。
-3. 通用 runner 必须先完成，否则 node 无法脱离 `LangChainDraftingAgent` / `LangChainInputParserAgent`。
-4. node 迁移完成后，才能删除旧业务 Agent 类。
-5. 测试需随每个垂直切片同步迁移，避免最后一次性破坏大量调用点。
+1. 附件导入 workspace 依赖同一 case workspace 可被 service/dispatch 构造。
+2. LangChain `mkdir` / `list_directory` 依赖 `DraftWorkspaceTool` 先具备目录 action。
+3. Skill list/load 需要同步 `SkillLoaderTool`、LangChain adapters、allowed tools 和旧 registry 测试。
+4. Todo middleware 最后接入，避免和文件/skill 工具变更互相干扰。
 
-## 纵向切片原则
+## Task List
 
-每个阶段都产出一条可验证路径，而不是只做一层抽象：
+## Task 2: 复用案件 workspace
 
-- 先让 policy 独立可测。
-- 再让 file tool 通过 policy 读写 workspace。
-- 再让 runner 把 wrapped tools 传给 `create_agent`。
-- 再迁移一个真实 node 验证调用侧参数化。
-- 最后批量迁移 drafting 内容节点并删除旧类。
+**Description:** 让 `/agent` dispatch 和 patent drafting 节点根据 `case_id` 使用同一 `DraftWorkspaceTool(workspace_name="tmp_{workspace_id}")`，同一案件不同 session 复用 workspace，session memory 仍独立。
 
-## 阶段计划
+**Acceptance criteria:**
 
-### Phase 0 — 文档与基线确认
+- [ ] `DraftWorkspaceTool` 保留旧 `project_id` 行为，并新增可选 `workspace_name`。
+- [ ] `workspace_name="tmp_{workspace_id}"` 时磁盘路径为 `<draft_workspace_dir>/tmp_{workspace_id}`；未传入时仍为 `<draft_workspace_dir>/temp_{project_id}`。
+- [ ] `AgentDispatchService` 通过 `CaseService.get_workspace(case_id)` 获取 workspace 信息并传给 patent drafting 相关节点。
+- [ ] 同一 `case_id` 下多个 `session_id` 共享同一个 workspace。
+- [ ] session memory 仍按 `session_id` 读写，互不串扰。
 
-工作：
+**Verification:**
 
-- 用本文件和 `tasks/todo.md` 固化实施顺序。
-- 确认本阶段只做 read-only 规划，不实现代码。
-- 记录最终验证命令和阶段检查点。
+- [ ] `conda run -n autoGLM pytest tests/test_case_service.py tests/test_agent_dispatch_service.py tests/test_patent_drafting_workflow.py`
+- [ ] `conda run -n autoGLM pytest tests/test_draft_workspace.py`
+- [ ] `conda run -n autoGLM python -m compileall app tests scripts`
 
-验收标准：
+**Dependencies:** Task 1.
 
-- `tasks/plan.md`、`tasks/todo.md` 与 `SPEC.md` 一致。
-- 计划明确删除旧业务 Agent 类，不保留薄封装/命名工厂。
+**Files likely touched:**
 
-验证：
+- `app/tools/draft_workspace.py`
+- `app/services/case_service.py`
+- `app/services/agent_dispatch_service.py`
+- `app/nodes/drafting_research.py`
+- `app/nodes/drafting_content.py`
+- `tests/test_draft_workspace.py`
+- `tests/test_agent_dispatch_service.py`
+- `tests/test_patent_drafting_workflow.py`
 
-```bash
-git status
-```
-
-检查点：用户审阅 plan/todo 后再进入实现。
-
----
-
-### Phase 1 — 建立 FileToolPolicy 垂直切片
-
-工作：
-
-- 新增 `app/tools/subagents/file_policy.py`。
-- 定义 `FileToolPolicy` / 相关结果或异常类型。
-- 支持字段：`readRoots`、`writeRoots`、`allowGlobs`、`denyGlobs`。
-- 路径统一转 POSIX 风格相对路径，拒绝空路径、绝对路径、`..`、逃逸 workspace 的路径。
-- 判定顺序：normalize -> denyGlobs -> operation roots -> allowGlobs -> default deny。
-- 写权限必须显式配置，不能由读权限推导。
-
-验收标准：
-
-- allow read/write 正常通过。
-- 未显式允许读写时默认拒绝。
-- `denyGlobs` 优先。
-- `allowGlobs` 可细粒度收窄/补充。
-- `../`、绝对路径、`.env`、`secrets/`、`*.pem`、`*.key` 被拒绝。
-
-验证：
-
-```bash
-conda run -n autoGLM pytest tests/test_file_tool_policy.py
-conda run -n autoGLM python -m compileall app tests
-```
-
-检查点：policy 语义稳定后再接入工具层。
+**Estimated scope:** Medium.
 
 ---
 
-### Phase 2 — 建立通用 file tools 垂直切片
+## Task 3: 绑定附件到案件并导入 workspace
 
-工作：
+**Description:** 附件上传和读取都绑定 `case_id`；保存原始附件到现有 attachment storage，同时将抽取正文写入案件 workspace，并在 dispatch 注入附件时校验归属。
 
-- 新增 `app/tools/subagents/file_tools.py`。
-- 基于 `DraftWorkspaceTool` 实现通用工具注册/构建能力。
-- 至少实现当前迁移必需工具：
-  - `read_file`：读取 policy 允许的 artifact。
-  - `write_file`：写入 policy 允许的 artifact。
-- 如成本低，可同时提供 `list_files`；`search_files` 可保留设计但不强行实现。
-- 工具执行前调用 policy，而不是依赖 prompt 自律。
-- 工具返回 JSON 字符串，错误受控，不泄露敏感路径细节。
+**Acceptance criteria:**
 
-验收标准：
+- [ ] `/agent/attachments` 增加必填 `case_id` 表单字段。
+- [ ] `AttachmentService.save_upload(..., case_id=case_id)` 校验 case 存在。
+- [ ] 附件 `metadata.json` 增加 `case_id`、`workspace_artifact_key`。
+- [ ] 抽取正文写入案件 workspace：`01_input/attachments/{attachment_id}/extracted.md` 或 `.txt`。
+- [ ] `AttachmentService.load_document(attachment_id, case_id=case_id)` 校验附件归属。
+- [ ] 跨 case 读取附件返回 `attachment_not_found`，不泄露附件存在性。
+- [ ] `AgentDispatchService._inject_attachments()` 使用当前 `case_id` 加载附件。
 
-- `read_file` 只能读取 policy 允许路径。
-- `write_file` 只能写入 policy 允许路径。
-- policy 拒绝时不调用 `DraftWorkspaceTool.run()` 访问真实文件系统/工作区。
-- 工具名稳定，可被 runner 用 `allowed_tools` 筛选。
+**Verification:**
 
-验证：
+- [ ] `conda run -n autoGLM pytest tests/test_attachment_upload.py tests/test_attachment_inject.py`
+- [ ] `conda run -n autoGLM pytest tests/test_agent_api.py tests/test_patent_drafting_workflow.py`
+- [ ] `conda run -n autoGLM python -m compileall app tests scripts`
 
-```bash
-conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py
-conda run -n autoGLM python -m compileall app tests
-```
+**Dependencies:** Task 2.
 
-检查点：通用工具层通过后，再替换 runner `_build_tools`。
+**Files likely touched:**
 
----
+- `app/api/routes.py`
+- `app/api/schemas.py`
+- `app/services/attachment_service.py`
+- `app/services/agent_dispatch_service.py`
+- `tests/test_attachment_upload.py`
+- `tests/test_attachment_inject.py`
+- `tests/test_agent_api.py`
 
-### Phase 3 — 建立通用 LangChainAgentRunner
-
-工作：
-
-- 新增 `app/tools/subagents/agent_runner.py`。
-- 支持参数：
-  - `node_name`
-  - `stage`
-  - `agent_name`
-  - `prompt_name`
-  - `system_prompt`
-  - `allowed_tools`
-  - `file_policy`
-  - `output_artifact_key`
-  - `fallback_builder`
-  - `settings`
-  - `workspace`
-  - `workflow_trace_emitter`
-- 复用现有网络开关、延迟导入 `create_agent` / `ChatOpenAI`、`WorkflowTraceAgentMiddleware`、fallback、短 observation 行为。
-- 根据 `allowed_tools` 从通用工具注册表筛选工具，再传给 `create_agent`。
-- 用户 prompt 中说明必须读取/写入的 artifact，但真实权限仍由 tool policy enforcing。
-
-验收标准：
-
-- LLM 不可用时离线 fallback 写入目标 artifact。
-- fake `create_agent` 可捕获 tools，仅包含 `allowed_tools`。
-- fake `create_agent` 可捕获 middleware，node/agent/stage 正确。
-- policy 拒绝时 wrapped tool 不访问 workspace。
-- observation 不返回长正文。
-
-验证：
-
-```bash
-conda run -n autoGLM pytest tests/test_langchain_agent_runner.py tests/test_workflow_trace_events.py
-conda run -n autoGLM python -m compileall app tests
-```
-
-检查点：runner 单独可用后，开始迁移真实 node。
+**Estimated scope:** Medium.
 
 ---
 
-### Phase 4 — 迁移 input parser 路径并删除专用 input parser Agent
+## Checkpoint: Case workspace + attachments
 
-工作：
-
-- 将 `DraftingParseInputNode` 默认 runner 改为通用 `LangChainAgentRunner`。
-- 通过 node 参数传入：
-  - `node_name="drafting_parse_input"`
-  - `agent_name="input_parser_agent"`
-  - `prompt_name="INPUT_PARSER_PROMPT"`
-  - `allowed_tools` 至少包含读取 source、写 parsed info 所需的通用 file tools。
-  - file policy：读 `01_input/raw_document.md`，写 `01_input/parsed_info.json`。
-- 保留 input parser 特有的 JSON 校验/fallback 逻辑，可放在 node 或 runner 的可注入验证步骤中，避免为了它保留业务 Agent 类。
-- 处理 `file_extract` / `office_to_md`：若当前真实流程仍需要，作为后续专门受控 attachment tools 处理；本阶段不把任意本地路径纳入通用 file tools。
-- 删除 `LangChainInputParserAgent` 类和直接测试依赖。
-
-验收标准：
-
-- `DraftingParseInputNode` 不再 import / 实例化 `LangChainInputParserAgent`。
-- source artifact key 异常仍被拒绝。
-- fallback 仍写合法 `01_input/parsed_info.json` JSON object。
-- 写权限不能写到 parsed info 以外的 artifact。
-
-验证：
-
-```bash
-conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_research_nodes.py
-conda run -n autoGLM pytest tests/test_workflow_trace_events.py
-conda run -n autoGLM python -m compileall app tests
-```
-
-检查点：input parser 真实调用路径完成通用 runner 验证。
+- [ ] `/agent/cases` -> `/agent/attachments` -> `/agent` 的同案流程可运行。
+- [ ] 同一 case 的附件正文和 agent artifacts 落在同一 workspace。
+- [ ] 不存在无 `case_id` 的生产入口兼容逻辑。
+- [ ] 相关测试与 compileall 通过。
 
 ---
 
-### Phase 5 — 迁移 drafting research/content 路径并删除 drafting Agent
+## Task 4: 扩展目录工具与 file policy
 
-工作：
+**Description:** 为 workspace 与 LangChain file tools 增加目录创建和目录枚举能力，确保目录操作仍只作用于当前案件 workspace，且必须先通过 file policy。
 
-- 将 `DraftingPatentSearchNode`、`DraftingGenerateOutlineNode`、`_SingleArtifactWriterNode`、`DraftingDescriptionWriterNode`、`DraftingMergeDocumentNode` 默认 runner 改为通用 `LangChainAgentRunner`。
-- 为每个 node 构造明确 file policy：
-  - read roots / allow globs 对应当前 `allowed_read_artifact_keys`。
-  - write roots / allow globs 对应唯一输出 artifact 或 part artifact。
-- 用 `allowed_tools=["read_file", "write_file"]` 替代 `allowed_read_artifact_keys + _build_tools`。
-- 删除 `LangChainDraftingAgent` 类和直接测试依赖。
+**Acceptance criteria:**
 
-验收标准：
+- [ ] `DraftWorkspaceTool.run()` 支持 `action="mkdir"`，在 workspace 内幂等创建目录。
+- [ ] `DraftWorkspaceTool.run()` 支持 `action="list_directory"`，只列指定目录直接子目录和文件，不递归返回全部内容。
+- [ ] 内存模式通过 artifact key 前缀推导目录结构，测试环境可运行。
+- [ ] `build_file_tools()` 暴露 `mkdir(path: str)`、`list_directory(path: str = "")`。
+- [ ] `read_file`、`list_directory` 使用 `policy.check("read", path)`。
+- [ ] `write_file`、`mkdir` 使用 `policy.check("write", path)`。
+- [ ] `LangChainAgentRunner._file_policy_prompt()` 说明所有路径都是当前 case workspace 内相对路径。
+- [ ] 需要目录能力的 drafting agent 在 `allowed_tools` 中显式加入 `mkdir` / `list_directory`。
 
-- `app/nodes/drafting_research.py`、`app/nodes/drafting_content.py` 不再 import / 实例化 `LangChainDraftingAgent`。
-- 所有 drafting create_agent 节点仍能离线 fallback 产出目标 artifact。
-- 每个 node 只能读取声明的输入 artifact、写声明的输出 artifact。
-- trace middleware 行为保持。
+**Verification:**
 
-验证：
+- [ ] `conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py`
+- [ ] `conda run -n autoGLM python -m compileall app tests scripts`
 
-```bash
-conda run -n autoGLM pytest tests/test_drafting_agent.py tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py
-conda run -n autoGLM pytest tests/test_workflow_trace_events.py
-conda run -n autoGLM python -m compileall app tests
-```
+**Dependencies:** Task 2.
 
-检查点：旧业务 Agent 类删除前，确认所有调用点已迁移。
+**Files likely touched:**
 
----
+- `app/tools/draft_workspace.py`
+- `app/tools/subagents/file_tools.py`
+- `app/tools/subagents/agent_runner.py`
+- `app/tools/subagents/file_policy.py`
+- `app/nodes/drafting_research.py`
+- `app/nodes/drafting_content.py`
+- `tests/test_draft_workspace.py`
+- `tests/test_file_tool_policy.py`
+- `tests/test_langchain_agent_runner.py`
 
-### Phase 6 — 清理导出、测试与安全回归
-
-工作：
-
-- 更新 `app/tools/subagents/__init__.py` 导出。
-- 全仓搜索 `LangChainDraftingAgent` / `LangChainInputParserAgent`，确保只在历史文档或无关文本中出现；代码和测试不得依赖。
-- 调整/新增测试：
-  - `tests/test_file_tool_policy.py`
-  - `tests/test_langchain_agent_runner.py`
-  - 迁移后的 `tests/test_input_parser_agent.py`
-  - 迁移后的 `tests/test_drafting_agent.py` 可重命名或改为 runner 测试。
-- 安全回归确认 trace/log 不含敏感内容。
-
-验收标准：
-
-- 旧业务 Agent 类不可实例化使用。
-- `allowed_tools` 未声明工具不会传给 `create_agent`。
-- policy 拒绝优先，默认拒绝读写。
-- 安全合规测试通过。
-
-验证：
-
-```bash
-conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py
-conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_agent.py
-conda run -n autoGLM pytest tests/test_security_compliance.py tests/test_workflow_trace_events.py
-conda run -n autoGLM python -m compileall app tests
-```
-
-检查点：功能测试和安全测试均通过后再全量回归。
+**Estimated scope:** Medium.
 
 ---
 
-### Phase 7 — 全量回归与提交准备
+## Task 5: 改造 skill list/load
 
-工作：
+**Description:** 更新 skill registry 为真实文档和 description，LangChain 新流程通过 `list_skills()` 查看可用 skill，再用 `load_skill(name)` 精确加载，避免模型猜旧名称。
 
-- 运行全量测试与编译。
-- 检查 diff，只包含 SPEC 对应改动。
-- 按项目规范分阶段 commit；未经确认不 push。
+**Acceptance criteria:**
 
-验收标准：
+- [ ] registry 使用真实文档：`patent_guide`、`mermaid_flowchart`、`mermaid_sequence_diagram`。
+- [ ] registry 每项包含 `description`。
+- [ ] `SkillLoaderTool.run({"action": "list"})` 只返回 `name + description`，不返回正文。
+- [ ] `SkillLoaderTool.run({"action": "load", "name": name})` 只接受 registry 中存在的精确 name。
+- [ ] 未知 name、路径穿越、旧猜测名称安全失败。
+- [ ] `build_react_tool_adapters()` 暴露 `list_skills()`、`load_skill(name: str)`。
+- [ ] 新 drafting allowed tools 使用 `list_skills`、`load_skill`，不再依赖 `skill_loader`。
+- [ ] 可短期保留内部 `skill_loader` 兼容旧 registry/测试，但新流程不引导使用它。
 
-- 全量测试通过。
-- 编译通过。
-- 工作区无无关改动、无临时文件、无密钥。
+**Verification:**
 
-验证：
+- [ ] `conda run -n autoGLM pytest tests/test_skill_loader.py tests/test_new_native_tools.py`
+- [ ] `conda run -n autoGLM pytest tests/test_langchain_agent_runner.py tests/test_drafting_content_nodes.py`
+- [ ] `conda run -n autoGLM python -m compileall app tests scripts`
 
-```bash
-conda run -n autoGLM pytest
-conda run -n autoGLM python -m compileall app tests
-git status
-git diff
-```
+**Dependencies:** Task 4.
 
-## 最终验证汇总
+**Files likely touched:**
 
-```bash
-conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py
-conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_agent.py
-conda run -n autoGLM pytest tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py
-conda run -n autoGLM pytest tests/test_workflow_trace_events.py tests/test_security_compliance.py
-conda run -n autoGLM python -m compileall app tests
-conda run -n autoGLM pytest
-```
+- `app/tools/skill_loader.py`
+- `app/tools/subagents/file_tools.py`
+- `app/tools/subagents/agent_runner.py`
+- `app/orchestrator/tool_registry.py`
+- `app/nodes/drafting_content.py`
+- `app/tools/subagents/__init__.py`
+- `tests/test_skill_loader.py`
+- `tests/test_new_native_tools.py`
+- `tests/test_langchain_agent_runner.py`
+
+**Estimated scope:** Medium.
+
+---
+
+## Checkpoint: Agent tools stability
+
+- [ ] file tools 支持读、写、建目录、列目录且均受 policy 约束。
+- [ ] skill list/load 新流程通过测试。
+- [ ] 旧 `skill_loader` 失败的现有回归已按新 registry 或兼容策略修复。
+- [ ] 相关测试与 compileall 通过。
+
+---
+
+## Task 6: 接入 LangChain todo middleware
+
+**Description:** 修正 todo prompt 的工具名和状态枚举，并在 `LangChainAgentRunner` 中接入 LangChain 官方 todo middleware；导入失败时安全降级。
+
+**Acceptance criteria:**
+
+- [ ] `app/prompts/todo_prompt.py` 不再出现 `write_todos`。
+- [ ] todo 状态统一为 `pending`、`in_progress`、`done`。
+- [ ] 删除“已完成”作为状态枚举的表述。
+- [ ] `LangChainAgentRunner` 增加 `_todo_middleware()` 封装官方 todo middleware。
+- [ ] `create_agent(..., middleware=[trace_middleware, todo_middleware])`。
+- [ ] todo middleware 导入失败时记录 warning/trace，并只保留 trace middleware。
+- [ ] 不自研 todo 判定、拦截或门禁逻辑。
+- [ ] `app/tools/todo.py` 不作为本次 LangChain todo 机制核心依赖。
+
+**Verification:**
+
+- [ ] `conda run -n autoGLM pytest tests/test_todo_tool.py tests/test_langchain_agent_runner.py`
+- [ ] `conda run -n autoGLM python -m compileall app tests scripts`
+
+**Dependencies:** Task 5.
+
+**Files likely touched:**
+
+- `app/prompts/todo_prompt.py`
+- `app/tools/subagents/agent_runner.py`
+- `tests/test_todo_tool.py`
+- `tests/test_langchain_agent_runner.py`
+
+**Estimated scope:** Small.
+
+---
+
+## Task 7: 全量验证与收尾
+
+**Description:** 运行本需求指定的分阶段测试、全量 pytest 和 compileall，修复回归问题，确认 diff 只包含本需求相关改动。
+
+**Acceptance criteria:**
+
+- [ ] 分阶段验证命令全部通过。
+- [ ] `conda run -n autoGLM pytest` 通过。
+- [ ] `conda run -n autoGLM python -m compileall app tests scripts` 通过。
+- [ ] diff 不包含无关改动、临时文件、密钥或调试代码。
+- [ ] 每个完成阶段都有独立 commit。
+
+**Verification:**
+
+- [ ] `conda run -n autoGLM pytest tests/test_case_service.py`
+- [ ] `conda run -n autoGLM pytest tests/test_agent_api.py tests/test_attachment_upload.py tests/test_attachment_inject.py`
+- [ ] `conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py`
+- [ ] `conda run -n autoGLM pytest tests/test_skill_loader.py tests/test_todo_tool.py`
+- [ ] `conda run -n autoGLM pytest`
+- [ ] `conda run -n autoGLM python -m compileall app tests scripts`
+- [ ] `git status --short`
+
+**Dependencies:** Task 6.
+
+**Files likely touched:**
+
+- Test files only if regressions require test alignment.
+- Implementation files only for regression fixes tied to prior tasks.
+
+**Estimated scope:** Small.
+
+---
+
+## Final Checkpoint
+
+- [ ] 创建案件、上传附件、运行 Agent、目录工具、skill list/load、todo middleware 全链路验收标准满足。
+- [ ] 全量测试与编译通过。
+- [ ] 工作区干净或仅包含用户明确保留的计划文件。
+- [ ] 准备交付人工 review。
+
+## Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| 旧测试依赖无 `case_id` 调用 `/agent` | Medium | 按 SPEC 更新测试先创建 case，不放宽生产逻辑。 |
+| `DraftWorkspaceTool` 新 `workspace_name` 破坏旧 `project_id` 行为 | High | 明确保留默认 `<draft_workspace_dir>/temp_{project_id}`，新增测试覆盖兼容。 |
+| 附件跨 case 校验泄露存在性 | High | 不匹配统一返回 `attachment_not_found`。 |
+| 目录枚举递归返回过多内容 | Medium | `list_directory` 只返回直接子项，递归仍用旧 list 或后续专门设计。 |
+| LangChain todo middleware 导出路径不稳定 | Medium | 封装导入失败降级，记录 warning/trace，不阻断 agent。 |
+| skill 旧名称测试与新 registry 冲突 | Medium | 更新测试断言新真实名称；必要时保留内部兼容但不进入新流程。 |
+
+## Parallelization Opportunities
+
+- Task 3（附件绑定）和 Task 4（目录工具）都依赖 Task 2，但彼此大体独立，可在 Task 2 完成后并行探索。
+- Task 5 依赖 Task 4 的 allowed tools 语义，需后置。
+- Task 6 只影响 runner middleware 与 prompt，可在 Task 5 稳定后独立完成。
+
+## Open Questions
+
+- 无。用户已确认：本 SPEC 仅覆盖当前范围；`/agent` 无 `case_id` 必须拒绝；当前规划后不自动实现；允许更新旧测试以匹配新的案件生命周期约束。

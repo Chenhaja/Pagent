@@ -205,6 +205,24 @@ def test_drafting_parse_input_fails_when_parser_does_not_write_artifact(tmp_path
     assert result.errors == ["parsed_info_missing"]
 
 
+def test_drafting_patent_search_default_runner_allows_patent_search(monkeypatch, tmp_path) -> None:
+    """drafting_patent_search 默认 runner 应允许 patent_search。"""
+    captured = {}
+
+    class FakeLangChainAgentRunner:
+        """捕获默认 runner 构造参数。"""
+
+        def __init__(self, **kwargs) -> None:
+            """保存 allowed_tools 便于断言。"""
+            captured.update(kwargs)
+
+    monkeypatch.setattr("app.nodes.drafting_research.LangChainAgentRunner", FakeLangChainAgentRunner)
+
+    DraftingPatentSearchNode(settings=Settings(draft_workspace_dir=str(tmp_path)))
+
+    assert captured["allowed_tools"] == ["read_file", "write_file", "patent_search"]
+
+
 class FakePatentSearchRegistry:
     """测试用专利检索 registry。"""
 

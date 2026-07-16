@@ -220,7 +220,7 @@ class DraftingPatentSearchNode(Node):
                 agent_name="patent_searcher_agent",
                 prompt_name="PATENT_SEARCHER_PROMPT",
                 system_prompt=PATENT_SEARCHER_PROMPT,
-                allowed_tools=["read_file", "write_file"],
+                allowed_tools=["read_file", "write_file", "patent_search"],
                 file_policy=FileToolPolicy(
                     readRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
                     writeRoots=[DRAFTING_PATENT_SEARCH_ARTIFACT_KEY],

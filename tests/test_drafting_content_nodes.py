@@ -25,6 +25,36 @@ def _workspace_with_research(tmp_path) -> DraftWorkspaceTool:
     return workspace
 
 
+def test_content_default_runners_allow_skill_loader(monkeypatch, tmp_path) -> None:
+    """内容节点默认 runner 应允许 skill_loader。"""
+    captured_allowed_tools = []
+
+    class FakeLangChainAgentRunner:
+        """捕获内容节点默认 runner 构造参数。"""
+
+        def __init__(self, *args, **kwargs) -> None:
+            """保存 allowed_tools 便于断言。"""
+            allowed_tools = kwargs.get("allowed_tools") if "allowed_tools" in kwargs else args[5]
+            captured_allowed_tools.append(allowed_tools)
+
+    monkeypatch.setattr("app.nodes.drafting_content.LangChainAgentRunner", FakeLangChainAgentRunner)
+    settings = Settings(draft_workspace_dir=str(tmp_path))
+    workspace = DraftWorkspaceTool(settings)
+
+    DraftingGenerateOutlineNode(settings=settings, workspace=workspace)
+    DraftingClaimsWriterNode(settings=settings, workspace=workspace)
+    DraftingDescriptionWriterNode(settings=settings, workspace=workspace)
+    DraftingMergeDocumentNode(settings=settings, workspace=workspace)
+
+    assert captured_allowed_tools == [
+        ["read_file", "write_file", "skill_loader"],
+        ["read_file", "write_file", "skill_loader"],
+        ["read_file", "write_file", "skill_loader"],
+        ["read_file", "write_file", "skill_loader"],
+        ["read_file", "write_file", "skill_loader"],
+    ]
+
+
 def test_outline_node_no_longer_requires_legacy_drawing_or_style(tmp_path) -> None:
     """outline 节点不应依赖旧 drawing/style guide artifact。"""
     workspace = _workspace_with_research(tmp_path)

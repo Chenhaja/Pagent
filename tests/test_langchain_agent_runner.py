@@ -219,7 +219,7 @@ def test_agent_runner_fallback_writes_output_when_llm_unavailable(tmp_path) -> N
 
 
 def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkeypatch, tmp_path) -> None:
-    """真实 agent 路径应传入白名单工具和 trace middleware。"""
+    """真实 agent 路径应传入白名单工具、trace 和 todo middleware。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
     emitter = MemoryWorkflowTraceEmitter()
@@ -255,14 +255,17 @@ def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkey
         return FakeAgent()
 
     monkeypatch.setattr(runner, "_import_langchain", lambda: (fake_create_agent, lambda **kwargs: object()))
+    monkeypatch.setattr(runner, "_todo_middleware", lambda: "todo-middleware")
 
     result = runner.run({"task": "写入结果"})
 
     assert result.error is None
     assert [tool.name for tool in captured["tools"]] == ["write_file"]
+    assert len(captured["middleware"]) == 2
     assert captured["middleware"][0].node_name == "node"
     assert captured["middleware"][0].stage == "stage"
     assert captured["middleware"][0].agent_name == "agent"
+    assert captured["middleware"][1] == "todo-middleware"
     assert "系统 prompt" == captured["system_prompt"]
     user_content = captured["payload"]["messages"][0]["content"]
     assert "写入结果" in user_content
@@ -272,6 +275,20 @@ def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkey
     assert "# 文件访问策略" in user_content
     assert ".env" in user_content
     assert "**/*.pem" in user_content
+
+
+def test_agent_runner_falls_back_to_trace_middleware_when_todo_import_fails(monkeypatch, tmp_path) -> None:
+    """todo middleware 导入失败时应仅保留 trace middleware。"""
+    runner = _runner_for_allowed_tools(tmp_path, ["write_file"])
+
+    monkeypatch.setattr(runner, "_todo_middleware", lambda: None)
+
+    middlewares = runner._middlewares()
+
+    assert len(middlewares) == 1
+    assert middlewares[0].node_name == "node"
+    assert middlewares[0].stage == "stage"
+    assert middlewares[0].agent_name == "agent"
 
 
 def test_agent_runner_injects_file_policy_into_user_prompt(tmp_path) -> None:

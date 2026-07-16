@@ -1,5 +1,5 @@
 from app.orchestrator.tool_registry import build_default_tool_registry
-from app.prompts.todo_prompt import TODO_PROMPT
+from app.prompts.todo_prompt import TODO_PROMPT, sys_prompt, tool_prompt
 from app.tools.todo import TodoTool, render_todo_context
 
 
@@ -70,7 +70,18 @@ def test_default_tool_registry_registers_todo_not_write_todos() -> None:
 
 
 def test_todo_prompt_uses_todo_tool_name() -> None:
-    """todo_prompt 应使用 todo 工具名而不是旧命名。"""
-    assert "todo" in TODO_PROMPT
-    assert "write_todos" not in TODO_PROMPT
-    assert "todo_middleware" not in TODO_PROMPT
+    """todo prompt 应使用 todo 工具名而不是旧命名。"""
+    for prompt in (TODO_PROMPT, sys_prompt, tool_prompt):
+        assert "todo" in prompt
+        assert "write_todos" not in prompt
+        assert "todo_middleware" not in prompt
+
+
+def test_todo_prompt_uses_official_status_values() -> None:
+    """todo prompt 应统一使用 pending/in_progress/done 状态。"""
+    combined_prompt = "\n".join([TODO_PROMPT, sys_prompt, tool_prompt])
+
+    assert "pending" in combined_prompt
+    assert "in_progress" in combined_prompt
+    assert "done" in combined_prompt
+    assert "已完成：任务已成功完成" not in combined_prompt

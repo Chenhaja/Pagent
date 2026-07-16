@@ -1,7 +1,10 @@
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from app.core.config import Settings, get_settings
+from app.core.logging import log_event
+from app.prompts.todo_prompt import sys_prompt, tool_prompt
 from app.orchestrator.react_loop import ToolObservation
 from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.patent_search import PatentSearchTool
@@ -10,6 +13,9 @@ from app.tools.subagents.file_policy import FileToolPolicy
 from app.tools.subagents.file_tools import build_file_tools, build_react_tool_adapters, select_tools
 from app.tracing.langchain_trace import WorkflowTraceAgentMiddleware
 from app.tracing.sinks import WorkflowTraceEmitter
+from app.tracing.workflow_trace import WorkflowTraceEvent
+
+logger = logging.getLogger(__name__)
 
 
 class LangChainAgentRunner:
@@ -87,7 +93,7 @@ class LangChainAgentRunner:
                 model=model,
                 tools=self._allowed_langchain_tools(),
                 system_prompt=self.system_prompt,
-                middleware=[self._trace_middleware()],
+                middleware=self._middlewares(),
             )
             agent.invoke({"messages": [{"role": "user", "content": self._user_prompt(tool_input or {})}]})
             if not self._output_artifact_exists():
@@ -117,6 +123,51 @@ class LangChainAgentRunner:
             stage=self.stage,
             agent_name=self.agent_name,
         )
+
+    def _todo_middleware(self) -> Any | None:
+        """构造 LangChain 官方 todo middleware,不可用时安全降级。"""
+        try:
+            from langchain.agents.middleware.todo import TodoListMiddleware
+
+            return TodoListMiddleware(system_prompt=sys_prompt, tool_description=tool_prompt)
+        except Exception as exc:
+            self._record_todo_middleware_fallback(exc)
+            return None
+
+    def _middlewares(self) -> list[Any]:
+        """构造 create_agent middleware 列表,缺少 todo middleware 时仅保留 trace。"""
+        middlewares: list[Any] = [self._trace_middleware()]
+        todo_middleware = self._todo_middleware()
+        if todo_middleware is not None:
+            middlewares.append(todo_middleware)
+        return middlewares
+
+    def _record_todo_middleware_fallback(self, exc: Exception) -> None:
+        """记录 todo middleware 导入失败的 warning 和 trace。"""
+        log_event(
+            logger,
+            logging.WARNING,
+            "todo_middleware_unavailable",
+            "LangChain todo middleware 不可用,仅启用 trace middleware",
+            reason=exc.__class__.__name__,
+            node_name=self.node_name,
+            stage=self.stage,
+            agent_name=self.agent_name,
+        )
+        if self.workflow_trace_emitter is not None:
+            self.workflow_trace_emitter.emit(
+                WorkflowTraceEvent(
+                    node_name=self.node_name,
+                    node_type="agent",
+                    event="agent_step_failed",
+                    status="skipped",
+                    stage=self.stage,
+                    agent_name=self.agent_name,
+                    error_type=exc.__class__.__name__,
+                    error_message="todo middleware unavailable",
+                    metadata={"middleware": "todo"},
+                )
+            )
 
     def _can_use_langchain_agent(self) -> bool:
         """判断当前配置是否允许真实 LangChain agent 调用。"""

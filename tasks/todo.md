@@ -38,10 +38,11 @@
   - 验收：file tools 支持读、写、建目录、列目录且均受 policy 约束；skill list/load 新流程通过测试；旧 `skill_loader` 失败的现有回归已按新 registry 或兼容策略修复。
   - 验证：Task 4-5 相关测试和 compileall 通过。
 
-- [ ] [Task 6] 接入 LangChain todo middleware。
+- [x] [Task 6] 接入 LangChain todo middleware。
   - 依赖：Task 5。
   - 验收：`todo_prompt.py` 不再出现 `write_todos`；状态统一为 `pending`、`in_progress`、`done`；删除“已完成”作为状态枚举；`LangChainAgentRunner` 封装 `_todo_middleware()`；`create_agent` middleware 包含 trace + todo；导入失败记录 warning/trace 并只保留 trace middleware；不自研 todo 判定或门禁。
   - 验证：`conda run -n autoGLM pytest tests/test_todo_tool.py tests/test_langchain_agent_runner.py`；`conda run -n autoGLM python -m compileall app tests scripts`。
+  - 状态：已验证通过，待提交。
 
 - [ ] [Task 7] 全量验证与收尾。
   - 依赖：Task 6。

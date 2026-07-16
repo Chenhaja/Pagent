@@ -27,7 +27,7 @@
   - 验收：`DraftingParseInputNode` 默认使用通用 runner；通过参数传入 `INPUT_PARSER_PROMPT`、`allowed_tools`、file policy；只读 `01_input/raw_document.md`、只写 `01_input/parsed_info.json`；fallback 仍写合法 JSON object；代码和测试不再依赖 `LangChainInputParserAgent`。
   - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_research_nodes.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [ ] [Phase 5] 迁移 drafting research/content 路径并删除 `LangChainDraftingAgent`。
+- [x] [Phase 5] 迁移 drafting research/content 路径并删除 `LangChainDraftingAgent`。
   - 依赖：Phase 4。
   - 验收：`DraftingPatentSearchNode`、大纲、权利要求、说明书、附图、摘要、合并节点默认使用通用 runner；各 node 用参数传入 prompt、`allowed_tools`、file policy；只能读取声明输入 artifact、写声明输出 artifact；代码和测试不再依赖 `LangChainDraftingAgent`。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_agent.py tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。

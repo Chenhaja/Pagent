@@ -12,7 +12,8 @@ from app.prompts.subagents.diagram_generator_prompt import DIAGRAM_GENERATOR_PRO
 from app.prompts.subagents.markdown_merger_prompt import MARKDOWN_MERGER_PROMPT
 from app.prompts.subagents.outline_generator_prompt import OUTLINE_GENERATOR_PROMPT
 from app.tools.draft_workspace import DraftWorkspaceTool
-from app.tools.subagents.drafting_agent import LangChainDraftingAgent
+from app.tools.subagents.agent_runner import LangChainAgentRunner
+from app.tools.subagents.file_policy import FileToolPolicy
 from app.tracing.sinks import MemoryWorkflowTraceEmitter, WorkflowTraceEmitter
 
 
@@ -29,6 +30,11 @@ DRAFTING_SECTION_KEYS = [
     DRAFTING_DESCRIPTION_ARTIFACT_KEY,
     DRAFTING_FIGURES_ARTIFACT_KEY,
 ]
+
+
+def _artifact_policy(read_keys: list[str], write_key: str) -> FileToolPolicy:
+    """按 artifact 白名单构造文件工具访问策略。"""
+    return FileToolPolicy(readRoots=read_keys, writeRoots=[write_key])
 
 
 class DraftingContentNodeBase(Node):
@@ -110,13 +116,15 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
         """初始化大纲生成节点。"""
         super().__init__(name=self.name, settings=settings, workspace=workspace)
         self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
-        self.outline_runner = outline_runner or LangChainDraftingAgent(
+        outline_reads = ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json"]
+        self.outline_runner = outline_runner or LangChainAgentRunner(
             node_name=self.name,
             stage="drafting.outline",
             agent_name="outline_generator_agent",
             prompt_name="OUTLINE_GENERATOR_PROMPT",
             system_prompt=OUTLINE_GENERATOR_PROMPT,
-            allowed_read_artifact_keys=["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json"],
+            allowed_tools=["read_file", "write_file"],
+            file_policy=_artifact_policy(outline_reads, DRAFTING_OUTLINE_ARTIFACT_KEY),
             output_artifact_key=DRAFTING_OUTLINE_ARTIFACT_KEY,
             fallback_builder=self._build_outline_fallback,
             settings=self.settings,
@@ -172,7 +180,20 @@ class _SingleArtifactWriterNode(DraftingContentNodeBase):
         self.output_artifact_key = output_artifact_key
         self.output_field = output_field
         self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
-        self.runner = runner or LangChainDraftingAgent(name, stage, agent_name, prompt_name, system_prompt, allowed_read_artifact_keys, output_artifact_key, fallback_builder, self.settings, self.workspace, self.workflow_trace_emitter)
+        self.runner = runner or LangChainAgentRunner(
+            node_name=name,
+            stage=stage,
+            agent_name=agent_name,
+            prompt_name=prompt_name,
+            system_prompt=system_prompt,
+            allowed_tools=["read_file", "write_file"],
+            file_policy=_artifact_policy(allowed_read_artifact_keys, output_artifact_key),
+            output_artifact_key=output_artifact_key,
+            fallback_builder=fallback_builder,
+            settings=self.settings,
+            workspace=self.workspace,
+            workflow_trace_emitter=self.workflow_trace_emitter,
+        )
 
     def run(self, state: WorkflowState) -> NodeResult:
         """执行单 artifact 内容生成。"""
@@ -208,8 +229,34 @@ class DraftingDescriptionWriterNode(DraftingContentNodeBase):
         super().__init__(name=self.name, settings=settings, workspace=workspace)
         self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
         common_reads = ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json", DRAFTING_OUTLINE_ARTIFACT_KEY, DRAFTING_CLAIMS_ARTIFACT_KEY]
-        self.part1_runner = part1_runner or LangChainDraftingAgent(self.name, "drafting.description.part1", "description_writer_part1_agent", "DESCRIPTION_WRITER_PART1_PROMPT", DESCRIPTION_WRITER_PART1_PROMPT, common_reads, "04_content/description_part1.md", self._build_part1_fallback, self.settings, self.workspace, self.workflow_trace_emitter)
-        self.part2_runner = part2_runner or LangChainDraftingAgent(self.name, "drafting.description.part2", "description_writer_part2_agent", "DESCRIPTION_WRITER_PART2_PROMPT", DESCRIPTION_WRITER_PART2_PROMPT, [*common_reads, "04_content/description_part1.md"], "04_content/description_part2.md", self._build_part2_fallback, self.settings, self.workspace, self.workflow_trace_emitter)
+        self.part1_runner = part1_runner or LangChainAgentRunner(
+            self.name,
+            "drafting.description.part1",
+            "description_writer_part1_agent",
+            "DESCRIPTION_WRITER_PART1_PROMPT",
+            DESCRIPTION_WRITER_PART1_PROMPT,
+            ["read_file", "write_file"],
+            _artifact_policy(common_reads, "04_content/description_part1.md"),
+            "04_content/description_part1.md",
+            self._build_part1_fallback,
+            self.settings,
+            self.workspace,
+            self.workflow_trace_emitter,
+        )
+        self.part2_runner = part2_runner or LangChainAgentRunner(
+            self.name,
+            "drafting.description.part2",
+            "description_writer_part2_agent",
+            "DESCRIPTION_WRITER_PART2_PROMPT",
+            DESCRIPTION_WRITER_PART2_PROMPT,
+            ["read_file", "write_file"],
+            _artifact_policy([*common_reads, "04_content/description_part1.md"], "04_content/description_part2.md"),
+            "04_content/description_part2.md",
+            self._build_part2_fallback,
+            self.settings,
+            self.workspace,
+            self.workflow_trace_emitter,
+        )
 
     def run(self, state: WorkflowState) -> NodeResult:
         """生成说明书 Part1、Part2 并合并为完整说明书。"""
@@ -344,13 +391,14 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
         """初始化终稿合并节点。"""
         super().__init__(name=self.name, settings=settings, workspace=workspace)
         self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
-        self.merge_runner = merge_runner or LangChainDraftingAgent(
+        self.merge_runner = merge_runner or LangChainAgentRunner(
             node_name=self.name,
             stage="drafting.merge",
             agent_name="markdown_merger_agent",
             prompt_name="MARKDOWN_MERGER_PROMPT",
             system_prompt=MARKDOWN_MERGER_PROMPT,
-            allowed_read_artifact_keys=list(DRAFTING_SECTION_KEYS),
+            allowed_tools=["read_file", "write_file"],
+            file_policy=_artifact_policy(list(DRAFTING_SECTION_KEYS), DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY),
             output_artifact_key=DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY,
             fallback_builder=self._build_merge_fallback,
             settings=self.settings,

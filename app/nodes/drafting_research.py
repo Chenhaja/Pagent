@@ -9,7 +9,6 @@ from app.prompts.subagents.input_parser_prompt import INPUT_PARSER_PROMPT
 from app.prompts.subagents.patent_searcher_prompt import PATENT_SEARCHER_PROMPT
 from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.subagents.agent_runner import LangChainAgentRunner
-from app.tools.subagents.drafting_agent import LangChainDraftingAgent
 from app.tools.subagents.file_policy import FileToolPolicy
 from app.tracing.sinks import MemoryWorkflowTraceEmitter, WorkflowTraceEmitter
 
@@ -215,13 +214,17 @@ class DraftingPatentSearchNode(Node):
         self.patent_search_runner = patent_search_runner or (
             None
             if tool_registry is not None
-            else LangChainDraftingAgent(
+            else LangChainAgentRunner(
                 node_name=self.name,
                 stage="drafting.patent_search",
                 agent_name="patent_searcher_agent",
                 prompt_name="PATENT_SEARCHER_PROMPT",
                 system_prompt=PATENT_SEARCHER_PROMPT,
-                allowed_read_artifact_keys=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
+                allowed_tools=["read_file", "write_file"],
+                file_policy=FileToolPolicy(
+                    readRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
+                    writeRoots=[DRAFTING_PATENT_SEARCH_ARTIFACT_KEY],
+                ),
                 output_artifact_key=DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
                 fallback_builder=self._build_search_fallback_content,
                 settings=self.settings,

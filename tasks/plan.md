@@ -1,88 +1,71 @@
-# 专利文书 workflow create_agent 拓扑改造计划
+# 通用 LangChain Agent 与 Policy File Tools 实施计划
 
 ## 目标
 
-将 patent drafting workflow 从旧的线性/gate/聚合节点流程，调整为显式业务节点链路：输入解析、检索、大纲、权利要求、说明书、附图、摘要、终稿合并、最终回填。
+基于 `SPEC.md`，把当前 `LangChainDraftingAgent` / `LangChainInputParserAgent` 收敛为一个通用 LangChain Agent runner，并配套通用 file tools 与 file policy。业务差异由 node/agent 参数表达：`node_name`、`agent_name`、prompt、`allowed_tools`、file policy、fallback 等。
 
-## 边界
+## 当前代码观察
 
-- 用线性 workflow 顺序近似 SPEC 的 DAG，不改 orchestrator 内核。
-- 旧节点类可先保留，但不再进入新 `patent_drafting` 主流程。
-- `DraftingPatentSearchNode` 负责补齐 `02_research/prior_art_analysis.json` 兼容 artifact，避免 finalize 缺字段。
-- 不改 QA workflow。
-- 不改变最终 API 输出字段语义。
-- 不新增依赖，除非另行确认。
-- 默认测试必须离线可运行。
-- 不执行 push、reset、force push。
+- 现有业务 Agent 类位于：
+  - `app/tools/subagents/input_parser_agent.py`
+  - `app/tools/subagents/drafting_agent.py`
+- 现有调用点：
+  - `app/nodes/drafting_research.py`：`DraftingParseInputNode`、`DraftingPatentSearchNode`
+  - `app/nodes/drafting_content.py`：大纲、权利要求、说明书、附图、摘要、合并节点
+- 现有工具构建问题：
+  - input parser 通过 `_build_tools(source_key, attachments)` 内联构造 `read_source_artifact`、`write_parsed_info`、`file_extract`、`office_to_md`。
+  - drafting 通过 `_build_tools()` 内联构造 `read_artifact`、`write_output_artifact`。
+  - 权限逻辑散落在工具闭包中，尚未形成统一 policy 层。
+- 可复用基础：
+  - `DraftWorkspaceTool` 已提供 artifact read/write/list/merge 与基础安全 key 校验。
+  - `WorkflowTraceAgentMiddleware` 已承接 create_agent middleware trace。
+  - 现有测试已覆盖 fallback、middleware 传递、受限读写和不手写 wrapper trace。
 
-## 目标拓扑
-
-```text
-normalize_input
-→ drafting_parse_input
-→ drafting_patent_search
-→ drafting_generate_outline
-→ drafting_claims_writer
-→ drafting_description_writer
-→ drafting_diagram_generator
-→ drafting_abstract_writer
-→ drafting_merge_document
-→ drafting_finalize
-```
-
-## Artifact 目标
+## 依赖图
 
 ```text
-DraftingParseInputNode
-  writes: 01_input/raw_document.md, 01_input/parsed_info.json
-
-DraftingPatentSearchNode
-  reads:  01_input/parsed_info.json
-  writes: 02_research/patent_search_results.json
-          02_research/prior_art_analysis.json
-
-DraftingGenerateOutlineNode
-  reads:  01_input/parsed_info.json
-          02_research/patent_search_results.json
-          02_research/prior_art_analysis.json
-  writes: 03_outline/patent_outline.md
-
-DraftingClaimsWriterNode
-  reads:  parsed/search/prior_art/outline
-  writes: 04_content/claims.md
-
-DraftingDescriptionWriterNode
-  reads:  parsed/search/prior_art/outline/claims
-  writes: 04_content/description_part1.md
-          04_content/description_part2.md
-          04_content/description.md
-
-DraftingDiagramGeneratorNode
-  reads:  parsed/outline/description
-  writes: 04_content/figures.md
-
-DraftingAbstractWriterNode
-  reads:  claims/description
-  writes: 04_content/abstract.md
-
-DraftingMergeDocumentNode
-  reads:  abstract/claims/description/figures
-  writes: 05_final/complete_patent.md
-          05_final/review_report.json
-
-DraftingFinalizeNode
-  reads:  DRAFTING_FINALIZE_FIELDS 中的 artifact
-  writes: WorkflowState 兼容 API 字段
+SPEC.md
+  -> file_policy.py
+      -> file_tools.py
+          -> agent_runner.py
+              -> drafting_research.py 调用迁移
+              -> drafting_content.py 调用迁移
+                  -> 删除旧业务 Agent 类与导出
+                      -> 测试迁移与安全回归
 ```
+
+关键依赖：
+
+1. `FileToolPolicy` 必须先存在，否则通用 file tools 无法在执行前校验路径。
+2. 通用 file tools 必须先存在，否则 runner 无法用 `allowed_tools` 统一筛选工具。
+3. 通用 runner 必须先完成，否则 node 无法脱离 `LangChainDraftingAgent` / `LangChainInputParserAgent`。
+4. node 迁移完成后，才能删除旧业务 Agent 类。
+5. 测试需随每个垂直切片同步迁移，避免最后一次性破坏大量调用点。
+
+## 纵向切片原则
+
+每个阶段都产出一条可验证路径，而不是只做一层抽象：
+
+- 先让 policy 独立可测。
+- 再让 file tool 通过 policy 读写 workspace。
+- 再让 runner 把 wrapped tools 传给 `create_agent`。
+- 再迁移一个真实 node 验证调用侧参数化。
+- 最后批量迁移 drafting 内容节点并删除旧类。
 
 ## 阶段计划
 
-### Phase 0 — 执行文档
+### Phase 0 — 文档与基线确认
 
-- 更新 `tasks/plan.md` 和 `tasks/todo.md`。
-- 记录目标拓扑、边界、验收标准、验证命令和阶段检查点。
+工作：
 
-验收：文档存在且内容匹配本次拓扑改造。
+- 用本文件和 `tasks/todo.md` 固化实施顺序。
+- 确认本阶段只做 read-only 规划，不实现代码。
+- 记录最终验证命令和阶段检查点。
+
+验收标准：
+
+- `tasks/plan.md`、`tasks/todo.md` 与 `SPEC.md` 一致。
+- 计划明确删除旧业务 Agent 类，不保留薄封装/命名工厂。
 
 验证：
 
@@ -90,121 +73,222 @@ DraftingFinalizeNode
 git status
 ```
 
-### Phase 1 — 通用 drafting create_agent runner
+检查点：用户审阅 plan/todo 后再进入实现。
 
-- 新增或扩展 `app/tools/subagents/drafting_agent.py`。
-- 复用 input parser runner 模式：网络开关、延迟导入、受控 artifact tools、`WorkflowTraceAgentMiddleware`、fallback、短 observation。
-- 支持节点传入 `node_name`、`stage`、`agent_name`、`prompt_name`、`system_prompt`、允许读取 artifact、输出 artifact、fallback builder。
+---
 
-验收：离线 fallback 可写 artifact；fake create_agent 可验证 middleware；工具读写受 allowlist 限制；不返回长正文。
+### Phase 1 — 建立 FileToolPolicy 垂直切片
+
+工作：
+
+- 新增 `app/tools/subagents/file_policy.py`。
+- 定义 `FileToolPolicy` / 相关结果或异常类型。
+- 支持字段：`readRoots`、`writeRoots`、`allowGlobs`、`denyGlobs`。
+- 路径统一转 POSIX 风格相对路径，拒绝空路径、绝对路径、`..`、逃逸 workspace 的路径。
+- 判定顺序：normalize -> denyGlobs -> operation roots -> allowGlobs -> default deny。
+- 写权限必须显式配置，不能由读权限推导。
+
+验收标准：
+
+- allow read/write 正常通过。
+- 未显式允许读写时默认拒绝。
+- `denyGlobs` 优先。
+- `allowGlobs` 可细粒度收窄/补充。
+- `../`、绝对路径、`.env`、`secrets/`、`*.pem`、`*.key` 被拒绝。
 
 验证：
 
 ```bash
-conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py
+conda run -n autoGLM pytest tests/test_file_tool_policy.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-### Phase 2 — 改造 DraftingPatentSearchNode
+检查点：policy 语义稳定后再接入工具层。
 
-- 默认使用 `PATENT_SEARCHER_PROMPT + create_agent runner`。
-- 支持 fake runner / fake registry 注入。
-- 写 `02_research/patent_search_results.json` 与 `02_research/prior_art_analysis.json`。
-- 检索不足时显式 uncertain，不编造专利号、来源或证据。
-- 汇总 middleware trace 到 `NodeResult.trace_events`。
+---
 
-验收：默认路径使用 runner；离线 fallback 可跑；prior_art artifact 不缺失；trace 不泄露长正文或敏感字段。
+### Phase 2 — 建立通用 file tools 垂直切片
+
+工作：
+
+- 新增 `app/tools/subagents/file_tools.py`。
+- 基于 `DraftWorkspaceTool` 实现通用工具注册/构建能力。
+- 至少实现当前迁移必需工具：
+  - `read_file`：读取 policy 允许的 artifact。
+  - `write_file`：写入 policy 允许的 artifact。
+- 如成本低，可同时提供 `list_files`；`search_files` 可保留设计但不强行实现。
+- 工具执行前调用 policy，而不是依赖 prompt 自律。
+- 工具返回 JSON 字符串，错误受控，不泄露敏感路径细节。
+
+验收标准：
+
+- `read_file` 只能读取 policy 允许路径。
+- `write_file` 只能写入 policy 允许路径。
+- policy 拒绝时不调用 `DraftWorkspaceTool.run()` 访问真实文件系统/工作区。
+- 工具名稳定，可被 runner 用 `allowed_tools` 筛选。
 
 验证：
 
 ```bash
-conda run -n autoGLM pytest tests/test_drafting_research_nodes.py
+conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py
+conda run -n autoGLM python -m compileall app tests
+```
+
+检查点：通用工具层通过后，再替换 runner `_build_tools`。
+
+---
+
+### Phase 3 — 建立通用 LangChainAgentRunner
+
+工作：
+
+- 新增 `app/tools/subagents/agent_runner.py`。
+- 支持参数：
+  - `node_name`
+  - `stage`
+  - `agent_name`
+  - `prompt_name`
+  - `system_prompt`
+  - `allowed_tools`
+  - `file_policy`
+  - `output_artifact_key`
+  - `fallback_builder`
+  - `settings`
+  - `workspace`
+  - `workflow_trace_emitter`
+- 复用现有网络开关、延迟导入 `create_agent` / `ChatOpenAI`、`WorkflowTraceAgentMiddleware`、fallback、短 observation 行为。
+- 根据 `allowed_tools` 从通用工具注册表筛选工具，再传给 `create_agent`。
+- 用户 prompt 中说明必须读取/写入的 artifact，但真实权限仍由 tool policy enforcing。
+
+验收标准：
+
+- LLM 不可用时离线 fallback 写入目标 artifact。
+- fake `create_agent` 可捕获 tools，仅包含 `allowed_tools`。
+- fake `create_agent` 可捕获 middleware，node/agent/stage 正确。
+- policy 拒绝时 wrapped tool 不访问 workspace。
+- observation 不返回长正文。
+
+验证：
+
+```bash
+conda run -n autoGLM pytest tests/test_langchain_agent_runner.py tests/test_workflow_trace_events.py
+conda run -n autoGLM python -m compileall app tests
+```
+
+检查点：runner 单独可用后，开始迁移真实 node。
+
+---
+
+### Phase 4 — 迁移 input parser 路径并删除专用 input parser Agent
+
+工作：
+
+- 将 `DraftingParseInputNode` 默认 runner 改为通用 `LangChainAgentRunner`。
+- 通过 node 参数传入：
+  - `node_name="drafting_parse_input"`
+  - `agent_name="input_parser_agent"`
+  - `prompt_name="INPUT_PARSER_PROMPT"`
+  - `allowed_tools` 至少包含读取 source、写 parsed info 所需的通用 file tools。
+  - file policy：读 `01_input/raw_document.md`，写 `01_input/parsed_info.json`。
+- 保留 input parser 特有的 JSON 校验/fallback 逻辑，可放在 node 或 runner 的可注入验证步骤中，避免为了它保留业务 Agent 类。
+- 处理 `file_extract` / `office_to_md`：若当前真实流程仍需要，作为后续专门受控 attachment tools 处理；本阶段不把任意本地路径纳入通用 file tools。
+- 删除 `LangChainInputParserAgent` 类和直接测试依赖。
+
+验收标准：
+
+- `DraftingParseInputNode` 不再 import / 实例化 `LangChainInputParserAgent`。
+- source artifact key 异常仍被拒绝。
+- fallback 仍写合法 `01_input/parsed_info.json` JSON object。
+- 写权限不能写到 parsed info 以外的 artifact。
+
+验证：
+
+```bash
+conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_research_nodes.py
 conda run -n autoGLM pytest tests/test_workflow_trace_events.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-### Phase 3 — 拆分内容生成节点
+检查点：input parser 真实调用路径完成通用 runner 验证。
 
-- 改造 `DraftingGenerateOutlineNode` 使用 `OUTLINE_GENERATOR_PROMPT + create_agent`。
-- 新增 `DraftingClaimsWriterNode`。
-- 新增 `DraftingDescriptionWriterNode`，内部串行 Part1 / Part2。
-- 新增 `DraftingDiagramGeneratorNode`。
-- 新增 `DraftingAbstractWriterNode`。
-- `DraftingGenerateSectionsNode` 保留类定义，但从新 workflow 移除。
+---
 
-验收：显式内容节点都能离线生成目标 artifact；NodeResult.output 只返回短字段；不依赖旧 drawing/style guide 节点。
+### Phase 5 — 迁移 drafting research/content 路径并删除 drafting Agent
+
+工作：
+
+- 将 `DraftingPatentSearchNode`、`DraftingGenerateOutlineNode`、`_SingleArtifactWriterNode`、`DraftingDescriptionWriterNode`、`DraftingMergeDocumentNode` 默认 runner 改为通用 `LangChainAgentRunner`。
+- 为每个 node 构造明确 file policy：
+  - read roots / allow globs 对应当前 `allowed_read_artifact_keys`。
+  - write roots / allow globs 对应唯一输出 artifact 或 part artifact。
+- 用 `allowed_tools=["read_file", "write_file"]` 替代 `allowed_read_artifact_keys + _build_tools`。
+- 删除 `LangChainDraftingAgent` 类和直接测试依赖。
+
+验收标准：
+
+- `app/nodes/drafting_research.py`、`app/nodes/drafting_content.py` 不再 import / 实例化 `LangChainDraftingAgent`。
+- 所有 drafting create_agent 节点仍能离线 fallback 产出目标 artifact。
+- 每个 node 只能读取声明的输入 artifact、写声明的输出 artifact。
+- trace middleware 行为保持。
 
 验证：
 
 ```bash
-conda run -n autoGLM pytest tests/test_drafting_content_nodes.py tests/test_patent_drafting_workflow.py
+conda run -n autoGLM pytest tests/test_drafting_agent.py tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py
 conda run -n autoGLM pytest tests/test_workflow_trace_events.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-### Phase 4 — 改造 DraftingMergeDocumentNode
+检查点：旧业务 Agent 类删除前，确认所有调用点已迁移。
 
-- 默认使用 `MARKDOWN_MERGER_PROMPT + create_agent`。
-- 读取 abstract / claims / description / figures。
-- 写 `05_final/complete_patent.md` 和可选 `05_final/review_report.json`。
-- 保留确定性拼接 fallback。
+---
 
-验收：merge 默认 create_agent，fallback 离线可拼接完整文书；输出 complete_patent_key 稳定；不改变 finalize API 字段语义。
+### Phase 6 — 清理导出、测试与安全回归
 
-验证：
+工作：
 
-```bash
-conda run -n autoGLM pytest tests/test_drafting_content_nodes.py tests/test_patent_drafting_workflow.py
-conda run -n autoGLM pytest tests/test_workflow_trace_events.py
-conda run -n autoGLM python -m compileall app tests
-```
+- 更新 `app/tools/subagents/__init__.py` 导出。
+- 全仓搜索 `LangChainDraftingAgent` / `LangChainInputParserAgent`，确保只在历史文档或无关文本中出现；代码和测试不得依赖。
+- 调整/新增测试：
+  - `tests/test_file_tool_policy.py`
+  - `tests/test_langchain_agent_runner.py`
+  - 迁移后的 `tests/test_input_parser_agent.py`
+  - 迁移后的 `tests/test_drafting_agent.py` 可重命名或改为 runner 测试。
+- 安全回归确认 trace/log 不含敏感内容。
 
-### Phase 5 — 更新 workflow 拓扑和服务注册
+验收标准：
 
-- 更新 `app/orchestrator/workflow_defs.py` 的 `patent_drafting` 节点顺序。
-- 将 `max_loop_count` 调整为 `0`。
-- 更新 `AgentDispatchService._run_patent_drafting()` 注册新节点。
-- 不改 translation / QA workflow。
-
-验收：workflow registry 返回新节点列表；主流程不包含旧 gate/guidance/sections/review；API 字段兼容。
+- 旧业务 Agent 类不可实例化使用。
+- `allowed_tools` 未声明工具不会传给 `create_agent`。
+- policy 拒绝优先，默认拒绝读写。
+- 安全合规测试通过。
 
 验证：
 
 ```bash
-conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py tests/test_workflow_registry.py
-conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py tests/test_agent_api.py
-conda run -n autoGLM pytest tests/test_orchestrator_engine.py
+conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py
+conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_agent.py
+conda run -n autoGLM pytest tests/test_security_compliance.py tests/test_workflow_trace_events.py
 conda run -n autoGLM python -m compileall app tests
 ```
 
-### Phase 6 — trace、安全、离线回归
+检查点：功能测试和安全测试均通过后再全量回归。
 
-- 为新增 create_agent 节点补 trace 断言。
-- 断言 trace 不包含 prompt 全文、长正文、本地路径、API key、token、secret、password。
-- 断言默认离线 fallback 可运行。
-- 检查 prompt 集中在 `app/prompts/subagents/`。
+---
 
-验收：安全合规测试通过；默认测试不触网；没有新增依赖。
+### Phase 7 — 全量回归与提交准备
 
-验证：
+工作：
 
-```bash
-conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py
-conda run -n autoGLM pytest tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py
-conda run -n autoGLM pytest tests/test_security_compliance.py
-conda run -n autoGLM python -m compileall app tests
-```
+- 运行全量测试与编译。
+- 检查 diff，只包含 SPEC 对应改动。
+- 按项目规范分阶段 commit；未经确认不 push。
 
-### Phase 7 — 全量回归与清理
+验收标准：
 
-- 清理未使用 imports。
-- 确认旧节点类未被新 workflow 或服务注册误用。
-- 确认 finalize 所需 artifact 都由新流程产出。
-- 确认 QA workflow 无改动。
-- 全量 pytest 和 compileall。
-- 按项目规范分阶段提交；未经确认不 push。
-
-验收：全量测试和编译通过；diff 只包含本需求相关改动。
+- 全量测试通过。
+- 编译通过。
+- 工作区无无关改动、无临时文件、无密钥。
 
 验证：
 
@@ -218,11 +302,10 @@ git diff
 ## 最终验证汇总
 
 ```bash
-conda run -n autoGLM pytest tests/test_drafting_research_nodes.py
-conda run -n autoGLM pytest tests/test_drafting_content_nodes.py tests/test_patent_drafting_workflow.py
-conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py tests/test_workflow_registry.py
-conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py
-conda run -n autoGLM pytest tests/test_security_compliance.py tests/test_orchestrator_engine.py
+conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py
+conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_agent.py
+conda run -n autoGLM pytest tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py
+conda run -n autoGLM pytest tests/test_workflow_trace_events.py tests/test_security_compliance.py
 conda run -n autoGLM python -m compileall app tests
 conda run -n autoGLM pytest
 ```

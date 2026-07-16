@@ -83,8 +83,8 @@ def _workspace_with_review(tmp_path) -> DraftWorkspaceTool:
     workspace.run(
         {
             "action": "write",
-            "artifact_key": "05_final/review_report.json",
-            "content": json.dumps({"passed": True, "issues": [], "confidence": "medium"}, ensure_ascii=False),
+            "artifact_key": "05_final/review_report.md",
+            "content": "# 终稿评审报告\n\n- 是否通过：是\n- 置信度：medium",
         }
     )
     return workspace
@@ -359,7 +359,7 @@ def test_review_gate_continue_goes_to_finalize(tmp_path) -> None:
     node = DraftingLeaderGateReviewNode(workspace=_workspace_with_review(tmp_path), tool_registry=registry)
     state = WorkflowState(
         raw_input="请生成专利文书",
-        drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"},
+        drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.md"},
     )
 
     result = node.run(state)
@@ -377,7 +377,7 @@ def test_review_gate_revise_goes_to_generate_sections(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("revise", "drafting_generate_sections")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.md"}))
 
     assert result.status == "success"
     assert result.next_node == "drafting_generate_sections"
@@ -390,7 +390,7 @@ def test_review_gate_retry_goes_to_review_document(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_review_document")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.md"}))
 
     assert result.status == "success"
     assert result.next_node == "drafting_review_document"
@@ -403,7 +403,7 @@ def test_review_gate_escalate_requires_user_input(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("escalate", "drafting_leader_gate_review")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.md"}))
 
     assert result.status == "requires_user_input"
     assert result.errors == ["drafting_gate_escalated"]
@@ -415,7 +415,7 @@ def test_review_gate_fails_when_review_report_missing(tmp_path) -> None:
     workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": "# 完整专利文书"})
     node = DraftingLeaderGateReviewNode(workspace=workspace, tool_registry=FakeDecisionRegistry(_decision("continue", "drafting_finalize")))
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.md"}))
 
     assert result.status == "failed"
     assert result.errors == ["review_report_missing"]
@@ -428,7 +428,7 @@ def test_review_gate_rejects_illegal_target(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_patent_search")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.md"}))
 
     assert result.status == "failed"
     assert result.errors == ["illegal_gate_target:drafting_patent_search"]

@@ -1,8 +1,22 @@
+from urllib.error import HTTPError
+
 import pytest
 
 from app.core.config import Settings
 from app.orchestrator.tool_registry import build_default_tool_registry
 from app.tools.patent_search import PatentSearchTool
+
+
+class FakeErrorBody:
+    """测试用 HTTPError body。"""
+
+    def __init__(self, body: bytes) -> None:
+        """初始化错误响应正文。"""
+        self.body = body
+
+    def read(self, size: int = -1) -> bytes:
+        """返回截断后的错误响应正文。"""
+        return self.body if size < 0 else self.body[:size]
 
 
 class FakeSerpApiProvider:
@@ -109,6 +123,21 @@ def test_patent_search_provider_error_degrades_safely() -> None:
     tool = PatentSearchTool(
         Settings(allow_network=True, serpapi_api_key="secret"),
         provider=FakeSerpApiProvider(error=RuntimeError("boom")),
+    )
+
+    observation = tool.run({"query": "夹爪"})
+
+    assert observation.error == "patent_search_unavailable"
+    assert observation.external is True
+    assert observation.evidence == []
+
+
+def test_patent_search_http_error_degrades_safely() -> None:
+    """SerpAPI HTTPError 时 patent_search 应安全降级。"""
+    error = HTTPError("https://serpapi.example/search", 400, "Bad Request", {}, FakeErrorBody(b'{"error":"bad request"}'))
+    tool = PatentSearchTool(
+        Settings(allow_network=True, serpapi_api_key="secret"),
+        provider=FakeSerpApiProvider(error=error),
     )
 
     observation = tool.run({"query": "夹爪"})

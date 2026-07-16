@@ -12,6 +12,25 @@ from app.nodes.drafting_content import (
 from app.services.agent_dispatch_service import AgentDispatchService
 from app.services.case_service import CaseService
 from app.tools.draft_workspace import DraftWorkspaceTool
+from app.orchestrator.react_loop import ToolObservation
+from app.tools.subagents.agent_runner import LangChainAgentRunner
+
+
+_ORIGINAL_RUNNER_RUN = LangChainAgentRunner.run
+
+
+def _patch_markdown_merger_runner(monkeypatch) -> None:
+    """把 markdown_merger_agent 替换为写入终稿和评审报告的测试 runner。"""
+    def fake_run(self, tool_input: dict | None = None) -> ToolObservation:
+        """仅拦截 merge runner,其他 runner 沿用原离线行为。"""
+        if self.agent_name != "markdown_merger_agent":
+            return _ORIGINAL_RUNNER_RUN(self, tool_input)
+        complete = self.fallback_builder("test", self.workspace)
+        self.workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": complete})
+        self.workspace.run({"action": "write", "artifact_key": "05_final/review_report.md", "content": "# 终稿评审报告\n\nLLM 评审结论"})
+        return ToolObservation(tool_name=self.agent_name, evidence=[{"artifact_key": "05_final/complete_patent.md", "done": True}], sufficient=True)
+
+    monkeypatch.setattr(LangChainAgentRunner, "run", fake_run)
 
 
 def test_patent_drafting_workflow_generates_markdown_artifacts(tmp_path, monkeypatch) -> None:
@@ -20,6 +39,7 @@ def test_patent_drafting_workflow_generates_markdown_artifacts(tmp_path, monkeyp
 
     settings = Settings(draft_workspace_dir=str(tmp_path), react_max_steps=8, react_token_budget=2000, react_timeout_seconds=5)
     case_id = CaseService(settings=settings).create_case()["case_id"]
+    _patch_markdown_merger_runner(monkeypatch)
     monkeypatch.setattr(
         "app.services.agent_dispatch_service.get_settings",
         lambda: settings,
@@ -47,6 +67,7 @@ def test_patent_drafting_reuses_case_workspace_across_sessions(tmp_path, monkeyp
     settings = Settings(draft_workspace_dir=str(tmp_path / "drafts"), react_max_steps=8, react_token_budget=2000, react_timeout_seconds=5)
     case_service = CaseService(settings=settings)
     case = case_service.create_case()
+    _patch_markdown_merger_runner(monkeypatch)
     monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
     service = AgentDispatchService()
 
@@ -74,6 +95,7 @@ def test_patent_drafting_workflow_consumes_uploaded_documents(tmp_path, monkeypa
         react_timeout_seconds=5,
     )
     case_id = CaseService(settings=settings).create_case()["case_id"]
+    _patch_markdown_merger_runner(monkeypatch)
     attachment_id = AttachmentService(settings=settings).save_upload(
         "交底书.txt",
         "text/plain",
@@ -170,13 +192,26 @@ def test_drafting_generate_sections_writes_content_artifacts(tmp_path) -> None:
 
 
 def test_drafting_merge_document_writes_complete_patent(tmp_path) -> None:
-    """drafting_merge_document 应按稳定顺序合并正文 artifact。"""
+    """drafting_merge_document 应校验 runner 写入终稿和评审报告。"""
+    class FakeMergeRunner:
+        """测试用 merge runner,模拟 LLM 生成终稿和评审报告。"""
+
+        def __init__(self, workspace: DraftWorkspaceTool) -> None:
+            """初始化测试 runner。"""
+            self.workspace = workspace
+
+        def run(self, tool_input: dict):
+            """写入终稿和评审报告 artifact。"""
+            self.workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": "# 完整专利文书\n\n# 摘要\n\n# 权利要求书"})
+            self.workspace.run({"action": "write", "artifact_key": "05_final/review_report.md", "content": "# 终稿评审报告\n\nLLM 评审结论"})
+            return type("Observation", (), {"error": None, "evidence": [{"artifact_key": "05_final/complete_patent.md", "done": True}]})()
+
     workspace = _content_workspace(tmp_path)
     workspace.run({"action": "write", "artifact_key": "04_content/abstract.md", "content": "# 摘要\n\n摘要"})
     workspace.run({"action": "write", "artifact_key": "04_content/claims.md", "content": "# 权利要求书\n\n权利要求"})
     workspace.run({"action": "write", "artifact_key": "04_content/description.md", "content": "# 说明书\n\n说明书"})
     workspace.run({"action": "write", "artifact_key": "04_content/figures.md", "content": "# 附图说明\n\n附图"})
-    node = DraftingMergeDocumentNode(workspace=workspace)
+    node = DraftingMergeDocumentNode(workspace=workspace, merge_runner=FakeMergeRunner(workspace))
     state = WorkflowState(raw_input="请生成专利文书", drafting_context={})
 
     result = node.run(state)
@@ -189,22 +224,23 @@ def test_drafting_merge_document_writes_complete_patent(tmp_path) -> None:
     assert state.drafting_context["complete_patent_key"] == "05_final/complete_patent.md"
 
 
-def test_drafting_review_document_writes_review_report(tmp_path) -> None:
-    """drafting_review_document 应读取终稿和指南并写入评审报告。"""
+def test_drafting_review_document_accepts_existing_review_report(tmp_path) -> None:
+    """drafting_review_document 应校验已有 LLM 评审报告。"""
     workspace = _content_workspace(tmp_path)
     workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": "# 完整专利文书\n\n# 摘要\n\n# 权利要求书\n\n# 说明书"})
+    workspace.run({"action": "write", "artifact_key": "05_final/review_report.md", "content": "# 终稿评审报告\n\nLLM 评审结论"})
     node = DraftingReviewDocumentNode(workspace=workspace)
-    state = WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "writing_style_guide_key": "02_research/writing_style_guide.json"})
+    state = WorkflowState(raw_input="请生成专利文书", drafting_context={"complete_patent_key": "05_final/complete_patent.md", "review_report_key": "05_final/review_report.md"})
 
     result = node.run(state)
-    stored = workspace.run({"action": "read", "artifact_key": "05_final/review_report.json"})
-    payload = json.loads(stored.evidence[0]["content"])
+    stored = workspace.run({"action": "read", "artifact_key": "05_final/review_report.md"})
+    report = stored.evidence[0]["content"]
 
     assert result.status == "success"
-    assert payload["passed"] is True
-    assert payload["checked_artifacts"] == ["05_final/complete_patent.md", "02_research/writing_style_guide.json"]
-    assert result.output == {"review_report_key": "05_final/review_report.json"}
-    assert state.drafting_context["review_report_key"] == "05_final/review_report.json"
+    assert "# 终稿评审报告" in report
+    assert "LLM 评审结论" in report
+    assert result.output == {"review_report_key": "05_final/review_report.md"}
+    assert state.drafting_context["review_report_key"] == "05_final/review_report.md"
 
 
 def test_drafting_finalize_backfills_compatible_fields(tmp_path) -> None:
@@ -219,7 +255,7 @@ def test_drafting_finalize_backfills_compatible_fields(tmp_path) -> None:
         "04_content/description.md": "# 说明书\n\n说明书",
         "04_content/figures.md": "# 附图说明\n\n附图",
         "05_final/complete_patent.md": "# 完整专利文书\n\n终稿",
-        "05_final/review_report.json": json.dumps({"passed": True}, ensure_ascii=False),
+        "05_final/review_report.md": "# 终稿评审报告\n\n- 是否通过：是",
     }
     for artifact_key, content in artifacts.items():
         workspace.run({"action": "write", "artifact_key": artifact_key, "content": content})

@@ -1,10 +1,15 @@
 import json
+import logging
 from typing import Any, Protocol
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from app.core.config import Settings, get_settings
 from app.orchestrator.react_loop import ToolObservation
+
+
+logger = logging.getLogger(__name__)
 
 
 class SerpApiPatentProvider(Protocol):
@@ -97,7 +102,31 @@ class PatentSearchTool:
         status = str(tool_input.get("status") or "GRANT").strip().upper()
         try:
             payload = self.provider.search(query=query, top_k=top_k, country=country, status=status, api_key=api_key)
+        except HTTPError as exc:
+            logger.exception(
+                "专利检索调用失败",
+                extra={
+                    "event": "patent_search_failed",
+                    "query_length": len(query),
+                    "top_k": top_k,
+                    "country": country,
+                    "status": status,
+                    "http_status": exc.code,
+                    "response_excerpt": self._http_error_excerpt(exc),
+                },
+            )
+            return ToolObservation(tool_name="patent_search", error="patent_search_unavailable", external=True)
         except Exception:
+            logger.exception(
+                "专利检索调用失败",
+                extra={
+                    "event": "patent_search_failed",
+                    "query_length": len(query),
+                    "top_k": top_k,
+                    "country": country,
+                    "status": status,
+                },
+            )
             return ToolObservation(tool_name="patent_search", error="patent_search_unavailable", external=True)
         evidence = [self._normalize_result(item, country=country, status=status) for item in self._extract_results(payload)[:top_k]]
         return ToolObservation(tool_name="patent_search", evidence=evidence, sufficient=bool(evidence), external=True)
@@ -114,6 +143,13 @@ class PatentSearchTool:
         """从 SerpAPI 响应中提取专利结果列表。"""
         results = payload.get("patents_results") or payload.get("organic_results") or []
         return [item for item in results if isinstance(item, dict)]
+
+    def _http_error_excerpt(self, exc: HTTPError) -> str:
+        """读取 HTTP 错误响应摘要,避免日志包含过长正文。"""
+        try:
+            return exc.read(500).decode("utf-8", errors="replace")
+        except Exception:
+            return ""
 
     def _normalize_result(self, result: dict[str, Any], *, country: str, status: str) -> dict[str, Any]:
         """将 SerpAPI 单条结果规范化为 evidence。"""

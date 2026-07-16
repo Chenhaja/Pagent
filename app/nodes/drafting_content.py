@@ -23,7 +23,7 @@ DRAFTING_CLAIMS_ARTIFACT_KEY = "04_content/claims.md"
 DRAFTING_DESCRIPTION_ARTIFACT_KEY = "04_content/description.md"
 DRAFTING_FIGURES_ARTIFACT_KEY = "04_content/figures.md"
 DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY = "05_final/complete_patent.md"
-DRAFTING_REVIEW_REPORT_ARTIFACT_KEY = "05_final/review_report.json"
+DRAFTING_REVIEW_REPORT_ARTIFACT_KEY = "05_final/review_report.md"
 DRAFTING_SECTION_KEYS = [
     DRAFTING_ABSTRACT_ARTIFACT_KEY,
     DRAFTING_CLAIMS_ARTIFACT_KEY,
@@ -398,7 +398,10 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
             prompt_name="MARKDOWN_MERGER_PROMPT",
             system_prompt=MARKDOWN_MERGER_PROMPT,
             allowed_tools=["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
-            file_policy=_artifact_policy(list(DRAFTING_SECTION_KEYS), DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY),
+            file_policy=FileToolPolicy(
+                readRoots=list(DRAFTING_SECTION_KEYS),
+                writeRoots=[DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY, DRAFTING_REVIEW_REPORT_ARTIFACT_KEY],
+            ),
             output_artifact_key=DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY,
             fallback_builder=self._build_merge_fallback,
             settings=self.settings,
@@ -418,14 +421,16 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
         for artifact_key in DRAFTING_SECTION_KEYS:
             if self._read_text(artifact_key) is None:
                 return NodeResult.failed(errors=[f"artifact_missing:{artifact_key}"])
-        failed = self._run_text_agent(self.merge_runner, DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY, "合并完整专利文书")
+        failed = self._run_text_agent(
+            self.merge_runner,
+            DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY,
+            f"合并完整专利文书并生成终稿评审报告，分别写入 `{DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY}` 和 `{DRAFTING_REVIEW_REPORT_ARTIFACT_KEY}`",
+        )
         if failed is not None:
             return failed
         content = self._read_text(DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY) or ""
-        report = self._build_review_report(content)
-        error = self._write(DRAFTING_REVIEW_REPORT_ARTIFACT_KEY, json.dumps(report, ensure_ascii=False))
-        if error:
-            return NodeResult.failed(errors=[error])
+        if self._read_text(DRAFTING_REVIEW_REPORT_ARTIFACT_KEY) is None:
+            return NodeResult.failed(errors=[f"artifact_missing:{DRAFTING_REVIEW_REPORT_ARTIFACT_KEY}"])
         state.drafting_context["complete_patent_key"] = DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY
         state.drafting_context["review_report_key"] = DRAFTING_REVIEW_REPORT_ARTIFACT_KEY
         return NodeResult.success(
@@ -441,17 +446,6 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
             if content is not None:
                 parts.append(content)
         return "# 完整专利文书\n\n" + "\n\n".join(parts)
-
-    def _build_review_report(self, complete: str) -> dict[str, Any]:
-        """生成终稿内部检查报告。"""
-        required_sections = ["# 摘要", "# 权利要求书", "# 说明书", "# 附图说明"]
-        missing_sections = [section for section in required_sections if section not in complete]
-        return {
-            "passed": not missing_sections,
-            "checked_artifacts": [*DRAFTING_SECTION_KEYS, DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY],
-            "issues": [f"缺少章节: {section}" for section in missing_sections],
-            "confidence": "medium" if not missing_sections else "low",
-        }
 
 
 DRAFTING_FINALIZE_FIELDS = {
@@ -493,29 +487,15 @@ class DraftingReviewDocumentNode(DraftingContentNodeBase):
             成功时返回 review report artifact key。
         """
         complete_key = str(state.drafting_context.get("complete_patent_key") or DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY)
-        guide_key = str(state.drafting_context.get("writing_style_guide_key") or "02_research/writing_style_guide.json")
-        complete = self._read_text(complete_key)
-        guide = self._read_json(guide_key)
-        if complete is None:
+        report_key = str(state.drafting_context.get("review_report_key") or DRAFTING_REVIEW_REPORT_ARTIFACT_KEY)
+        if self._read_text(complete_key) is None:
             return NodeResult.failed(errors=["complete_patent_missing"])
-        if guide is None:
-            return NodeResult.failed(errors=["writing_style_guide_missing"])
-        required_sections = ["# 摘要", "# 权利要求书", "# 说明书"]
-        missing_sections = [section for section in required_sections if section not in complete]
-        payload = {
-            "passed": not missing_sections,
-            "checked_artifacts": [complete_key, guide_key],
-            "issues": [f"缺少章节: {section}" for section in missing_sections],
-            "uncertain_points": list(guide.get("uncertain_points") or []),
-            "confidence": "medium" if not missing_sections else "low",
-        }
-        error = self._write(DRAFTING_REVIEW_REPORT_ARTIFACT_KEY, json.dumps(payload, ensure_ascii=False))
-        if error:
-            return NodeResult.failed(errors=[error])
-        state.drafting_context["review_report_key"] = DRAFTING_REVIEW_REPORT_ARTIFACT_KEY
+        if self._read_text(report_key) is None:
+            return NodeResult.failed(errors=["review_report_missing"])
+        state.drafting_context["review_report_key"] = report_key
         return NodeResult.success(
-            output={"review_report_key": DRAFTING_REVIEW_REPORT_ARTIFACT_KEY},
-            trace_events=[{"event": "drafting_document_reviewed", "data": {"artifact_key": DRAFTING_REVIEW_REPORT_ARTIFACT_KEY, "passed": payload["passed"]}}],
+            output={"review_report_key": report_key},
+            trace_events=[{"event": "drafting_document_reviewed", "data": {"artifact_key": report_key}}],
         )
 
 

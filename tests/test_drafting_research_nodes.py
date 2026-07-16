@@ -221,6 +221,13 @@ def test_drafting_patent_search_default_runner_allows_patent_search(monkeypatch,
     DraftingPatentSearchNode(settings=Settings(draft_workspace_dir=str(tmp_path)))
 
     assert captured["allowed_tools"] == ["read_file", "write_file", "mkdir", "list_directory", "patent_search"]
+    assert captured["file_policy"].writeRoots == [
+        "02_research/patent_search_results.json",
+        "02_research/prior_art_analysis.md",
+        "02_research/abstract_writing_style.md",
+        "02_research/claims_writing_style.md",
+        "02_research/description_writing_style.md",
+    ]
 
 
 class FakePatentSearchRegistry:
@@ -283,10 +290,18 @@ def test_drafting_patent_search_uses_injected_runner_and_writes_prior_art(tmp_pa
 
     result = node.run(state)
     prior = workspace.run({"action": "read", "artifact_key": "02_research/prior_art_analysis.json"})
+    prior_md = workspace.run({"action": "read", "artifact_key": "02_research/prior_art_analysis.md"})
+    abstract_style = workspace.run({"action": "read", "artifact_key": "02_research/abstract_writing_style.md"})
+    claims_style = workspace.run({"action": "read", "artifact_key": "02_research/claims_writing_style.md"})
+    description_style = workspace.run({"action": "read", "artifact_key": "02_research/description_writing_style.md"})
 
     assert result.status == "success"
     assert runner.calls == [{"parsed_info_key": "01_input/parsed_info.json", "query": "夹爪控制"}]
     assert json.loads(prior.evidence[0]["content"])["confidence"] == "low"
+    assert "# 现有技术分析" in prior_md.evidence[0]["content"]
+    assert "# 摘要写作风格指南" in abstract_style.evidence[0]["content"]
+    assert "# 权利要求书写作风格指南" in claims_style.evidence[0]["content"]
+    assert "# 说明书写作风格指南" in description_style.evidence[0]["content"]
     assert state.drafting_context["patent_search_key"] == "02_research/patent_search_results.json"
     assert state.drafting_context["prior_art_analysis_key"] == "02_research/prior_art_analysis.json"
 
@@ -322,7 +337,16 @@ def test_drafting_patent_search_writes_results_artifact(tmp_path) -> None:
     assert payload["results"] == evidence
     assert payload["sufficient"] is True
     assert payload["skipped"] is False
+    prior_md = workspace.run({"action": "read", "artifact_key": "02_research/prior_art_analysis.md"})
+    abstract_style = workspace.run({"action": "read", "artifact_key": "02_research/abstract_writing_style.md"})
+    claims_style = workspace.run({"action": "read", "artifact_key": "02_research/claims_writing_style.md"})
+    description_style = workspace.run({"action": "read", "artifact_key": "02_research/description_writing_style.md"})
+
     assert prior_payload["closest_prior_art"][0]["publication_number"] == "CN123456B"
+    assert "CN123456B" in prior_md.evidence[0]["content"]
+    assert "# 摘要写作风格指南" in abstract_style.evidence[0]["content"]
+    assert "# 权利要求书写作风格指南" in claims_style.evidence[0]["content"]
+    assert "# 说明书写作风格指南" in description_style.evidence[0]["content"]
     assert state.drafting_context["patent_search_key"] == "02_research/patent_search_results.json"
     assert state.drafting_context["prior_art_analysis_key"] == "02_research/prior_art_analysis.json"
 

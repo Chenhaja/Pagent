@@ -125,8 +125,23 @@ def test_content_node_aggregates_agent_trace_without_long_text(tmp_path) -> None
     assert "04_content/claims.md" in str(result.output)
 
 
-def test_merge_document_node_writes_complete_patent_and_review_report(tmp_path) -> None:
-    """merge 节点应离线合并完整文书并写入内部评审报告。"""
+def test_merge_document_node_requires_runner_review_report(tmp_path) -> None:
+    """merge 节点应校验 runner 写入完整文书和评审报告。"""
+    class FakeMergeRunner:
+        """测试用 merge runner,模拟 LLM 写入终稿和评审报告。"""
+
+        def __init__(self, workspace: DraftWorkspaceTool) -> None:
+            """初始化测试 runner。"""
+            self.workspace = workspace
+            self.calls = []
+
+        def run(self, tool_input: dict) -> ToolObservation:
+            """写入终稿和 LLM 评审报告。"""
+            self.calls.append(dict(tool_input))
+            self.workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": "# 完整专利文书\n\n# 摘要\n\n# 权利要求书\n\n# 说明书\n\n# 附图说明"})
+            self.workspace.run({"action": "write", "artifact_key": "05_final/review_report.md", "content": "# 终稿评审报告\n\nLLM 评审结论"})
+            return ToolObservation(tool_name="markdown_merger_agent", evidence=[{"artifact_key": "05_final/complete_patent.md", "done": True}], sufficient=True)
+
     workspace = _workspace_with_research(tmp_path)
     state = WorkflowState(raw_input="", drafting_context={"parsed_info_key": "01_input/parsed_info.json"})
     DraftingGenerateOutlineNode(settings=workspace.settings, workspace=workspace).run(state)
@@ -135,9 +150,10 @@ def test_merge_document_node_writes_complete_patent_and_review_report(tmp_path) 
     DraftingDiagramGeneratorNode(settings=workspace.settings, workspace=workspace).run(state)
     DraftingAbstractWriterNode(settings=workspace.settings, workspace=workspace).run(state)
 
-    result = DraftingMergeDocumentNode(settings=workspace.settings, workspace=workspace).run(state)
+    runner = FakeMergeRunner(workspace)
+    result = DraftingMergeDocumentNode(settings=workspace.settings, workspace=workspace, merge_runner=runner).run(state)
     complete = workspace.run({"action": "read", "artifact_key": "05_final/complete_patent.md"})
-    report = workspace.run({"action": "read", "artifact_key": "05_final/review_report.json"})
+    report = workspace.run({"action": "read", "artifact_key": "05_final/review_report.md"})
 
     assert result.status == "success"
     assert result.output == {"complete_patent_key": "05_final/complete_patent.md"}
@@ -145,4 +161,6 @@ def test_merge_document_node_writes_complete_patent_and_review_report(tmp_path) 
     assert "# 权利要求书" in complete.evidence[0]["content"]
     assert "# 说明书" in complete.evidence[0]["content"]
     assert "# 附图说明" in complete.evidence[0]["content"]
-    assert json.loads(report.evidence[0]["content"])["passed"] is True
+    assert "# 终稿评审报告" in report.evidence[0]["content"]
+    assert "LLM 评审结论" in report.evidence[0]["content"]
+    assert runner.calls and "05_final/review_report.md" in runner.calls[0]["task"]

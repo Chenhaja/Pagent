@@ -32,7 +32,7 @@
   - 验收：`DraftingPatentSearchNode`、大纲、权利要求、说明书、附图、摘要、合并节点默认使用通用 runner；各 node 用参数传入 prompt、`allowed_tools`、file policy；只能读取声明输入 artifact、写声明输出 artifact；代码和测试不再依赖 `LangChainDraftingAgent`。
   - 验证：`conda run -n autoGLM pytest tests/test_drafting_agent.py tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [ ] [Phase 6] 清理导出、旧引用与安全回归。
+- [x] [Phase 6] 清理导出、旧引用与安全回归。
   - 依赖：Phase 5。
   - 验收：`app/tools/subagents/__init__.py` 导出更新；全仓代码无 `LangChainDraftingAgent` / `LangChainInputParserAgent` 可用引用；`allowed_tools` 未声明工具不会传给 `create_agent`；policy 默认拒绝和 deny 优先测试通过；trace/log 不含 prompt 全文、长正文、完整工具输入输出、本地敏感路径、API key、token、secret、password。
   - 验证：`conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py tests/test_input_parser_agent.py tests/test_drafting_agent.py tests/test_security_compliance.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。

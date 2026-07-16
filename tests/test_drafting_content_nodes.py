@@ -54,8 +54,8 @@ def test_explicit_content_nodes_write_expected_artifacts(tmp_path) -> None:
     assert workspace.run({"action": "read", "artifact_key": "04_content/description_part1.md"}).error is None
     assert workspace.run({"action": "read", "artifact_key": "04_content/description_part2.md"}).error is None
     assert "# 权利要求书" in workspace.run({"action": "read", "artifact_key": "04_content/claims.md"}).evidence[0]["content"]
-    assert "# 专利说明书" in workspace.run({"action": "read", "artifact_key": "04_content/description.md"}).evidence[0]["content"]
-    assert "# 说明书附图" in workspace.run({"action": "read", "artifact_key": "04_content/figures.md"}).evidence[0]["content"]
+    assert "# 说明书" in workspace.run({"action": "read", "artifact_key": "04_content/description.md"}).evidence[0]["content"]
+    assert "# 附图说明" in workspace.run({"action": "read", "artifact_key": "04_content/figures.md"}).evidence[0]["content"]
     assert "# 摘要" in workspace.run({"action": "read", "artifact_key": "04_content/abstract.md"}).evidence[0]["content"]
 
 
@@ -77,6 +77,6 @@ def test_merge_document_node_writes_complete_patent_and_review_report(tmp_path) 
     assert result.output == {"complete_patent_key": "05_final/complete_patent.md"}
     assert "# 摘要" in complete.evidence[0]["content"]
     assert "# 权利要求书" in complete.evidence[0]["content"]
-    assert "# 专利说明书" in complete.evidence[0]["content"]
-    assert "# 说明书附图" in complete.evidence[0]["content"]
+    assert "# 说明书" in complete.evidence[0]["content"]
+    assert "# 附图说明" in complete.evidence[0]["content"]
     assert json.loads(report.evidence[0]["content"])["passed"] is True

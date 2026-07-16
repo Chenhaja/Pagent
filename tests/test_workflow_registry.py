@@ -5,16 +5,12 @@ EXPECTED_PATENT_DRAFTING_NODES = [
     "normalize_input",
     "drafting_parse_input",
     "drafting_patent_search",
-    "drafting_prior_art_analysis",
-    "drafting_leader_gate_prior_art",
-    "drafting_drawing_analysis",
-    "drafting_writing_style_guide",
-    "drafting_leader_gate_guidance",
     "drafting_generate_outline",
-    "drafting_generate_sections",
+    "drafting_claims_writer",
+    "drafting_description_writer",
+    "drafting_diagram_generator",
+    "drafting_abstract_writer",
     "drafting_merge_document",
-    "drafting_review_document",
-    "drafting_leader_gate_review",
     "drafting_finalize",
 ]
 
@@ -74,5 +70,5 @@ def test_workflow_registry_registers_patent_drafting_workflow() -> None:
 
     assert workflow_def.intent == "patent_drafting"
     assert workflow_def.start_node == "normalize_input"
-    assert workflow_def.max_loop_count == 3
+    assert workflow_def.max_loop_count == 0
     assert workflow_def.nodes == EXPECTED_PATENT_DRAFTING_NODES

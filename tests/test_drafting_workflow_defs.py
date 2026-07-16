@@ -9,16 +9,12 @@ EXPECTED_DRAFTING_NODES = [
     "normalize_input",
     "drafting_parse_input",
     "drafting_patent_search",
-    "drafting_prior_art_analysis",
-    "drafting_leader_gate_prior_art",
-    "drafting_drawing_analysis",
-    "drafting_writing_style_guide",
-    "drafting_leader_gate_guidance",
     "drafting_generate_outline",
-    "drafting_generate_sections",
+    "drafting_claims_writer",
+    "drafting_description_writer",
+    "drafting_diagram_generator",
+    "drafting_abstract_writer",
     "drafting_merge_document",
-    "drafting_review_document",
-    "drafting_leader_gate_review",
     "drafting_finalize",
 ]
 
@@ -29,24 +25,28 @@ def test_patent_drafting_workflow_expands_to_top_level_nodes() -> None:
 
     assert workflow_def.intent == "patent_drafting"
     assert workflow_def.start_node == "normalize_input"
-    assert workflow_def.max_loop_count == 3
+    assert workflow_def.max_loop_count == 0
     assert workflow_def.nodes == EXPECTED_DRAFTING_NODES
-    assert workflow_def.nodes.count("drafting_leader") == 0
+    assert not any("leader_gate" in node for node in workflow_def.nodes)
+    assert "drafting_generate_sections" not in workflow_def.nodes
+    assert "drafting_review_document" not in workflow_def.nodes
 
 
 @pytest.mark.parametrize(
-    "gate_node",
+    "removed_node",
     [
         "drafting_leader_gate_prior_art",
         "drafting_leader_gate_guidance",
         "drafting_leader_gate_review",
+        "drafting_drawing_analysis",
+        "drafting_writing_style_guide",
     ],
 )
-def test_patent_drafting_workflow_contains_limited_leader_gates(gate_node: str) -> None:
-    """Leader 应只作为少量 gate 节点出现在顶层 workflow 中。"""
+def test_patent_drafting_workflow_removes_legacy_nodes(removed_node: str) -> None:
+    """新 drafting 主流程不应包含旧 gate/guidance 节点。"""
     workflow_def = WorkflowRegistry().get_workflow_def("patent_drafting")
 
-    assert gate_node in workflow_def.nodes
+    assert removed_node not in workflow_def.nodes
 
 
 def test_drafting_gate_decision_accepts_structured_decision() -> None:

@@ -4,15 +4,15 @@ from app.core.config import get_settings
 from app.memory.session_store import SessionMemoryStore, build_session_store
 from app.models.schemas import WorkflowState
 from app.nodes.drafting_content import (
+    DraftingAbstractWriterNode,
+    DraftingClaimsWriterNode,
+    DraftingDescriptionWriterNode,
+    DraftingDiagramGeneratorNode,
     DraftingFinalizeNode,
     DraftingGenerateOutlineNode,
-    DraftingGenerateSectionsNode,
     DraftingMergeDocumentNode,
-    DraftingReviewDocumentNode,
 )
-from app.nodes.drafting_gates import DraftingLeaderGateGuidanceNode, DraftingLeaderGatePriorArtNode, DraftingLeaderGateReviewNode
-from app.nodes.drafting_guidance import DraftingDrawingAnalysisNode, DraftingWritingStyleGuideNode
-from app.nodes.drafting_research import DraftingParseInputNode, DraftingPatentSearchNode, DraftingPriorArtAnalysisNode
+from app.nodes.drafting_research import DraftingParseInputNode, DraftingPatentSearchNode
 from app.nodes.intent_router import IntentRouterNode
 from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.qa import QANode
@@ -285,24 +285,19 @@ class AgentDispatchService:
             drafting 成功输出或结构化失败结果。
         """
         settings = get_settings()
-        gate_registry = DraftingDefaultGateRegistry()
         nodes = {
             "drafting_parse_input": DraftingParseInputNode(settings=settings),
             "drafting_patent_search": DraftingPatentSearchNode(settings=settings),
-            "drafting_prior_art_analysis": DraftingPriorArtAnalysisNode(settings=settings),
-            "drafting_leader_gate_prior_art": DraftingLeaderGatePriorArtNode(settings=settings, tool_registry=gate_registry),
-            "drafting_drawing_analysis": DraftingDrawingAnalysisNode(settings=settings),
-            "drafting_writing_style_guide": DraftingWritingStyleGuideNode(settings=settings),
-            "drafting_leader_gate_guidance": DraftingLeaderGateGuidanceNode(settings=settings, tool_registry=gate_registry),
             "drafting_generate_outline": DraftingGenerateOutlineNode(settings=settings),
-            "drafting_generate_sections": DraftingGenerateSectionsNode(settings=settings),
+            "drafting_claims_writer": DraftingClaimsWriterNode(settings=settings),
+            "drafting_description_writer": DraftingDescriptionWriterNode(settings=settings),
+            "drafting_diagram_generator": DraftingDiagramGeneratorNode(settings=settings),
+            "drafting_abstract_writer": DraftingAbstractWriterNode(settings=settings),
             "drafting_merge_document": DraftingMergeDocumentNode(settings=settings),
-            "drafting_review_document": DraftingReviewDocumentNode(settings=settings),
-            "drafting_leader_gate_review": DraftingLeaderGateReviewNode(settings=settings, tool_registry=gate_registry),
             "drafting_finalize": DraftingFinalizeNode(settings=settings),
         }
         runnable_workflow = [node_name for node_name in workflow_def if node_name != "normalize_input"]
-        result = Orchestrator(nodes=nodes).run(state, runnable_workflow, max_loop_count=3)
+        result = Orchestrator(nodes=nodes).run(state, runnable_workflow, max_loop_count=0)
         if result.status != "success":
             return {"status": result.status, "errors": result.errors, "message": "专利文书生成暂时不可用,请稍后重试。", "trace": state.trace}
         return {"status": "success", **result.output, "trace": state.trace}

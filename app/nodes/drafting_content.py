@@ -230,7 +230,7 @@ class DraftingDescriptionWriterNode(DraftingContentNodeBase):
     def _build_part1_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
         """生成说明书第一部分 fallback 正文。"""
         topic = self._topic(WorkflowState(raw_input=""))
-        return f"# 专利说明书\n\n## 技术领域\n\n本申请涉及{topic}。\n\n## 背景技术\n\n现有技术仍需改进。\n\n## 发明内容\n\n本申请提供一种{topic},以提升技术效果。\n\n## 附图说明\n\n图1为本申请实施例的流程示意图。"
+        return f"# 说明书\n\n## 技术领域\n\n本申请涉及{topic}。\n\n## 背景技术\n\n现有技术仍需改进。\n\n## 发明内容\n\n本申请提供一种{topic},以提升技术效果。\n\n## 附图说明\n\n图1为本申请实施例的流程示意图。"
 
     def _build_part2_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
         """生成说明书第二部分 fallback 正文。"""
@@ -248,7 +248,7 @@ class DraftingDiagramGeneratorNode(_SingleArtifactWriterNode):
 
     def _build_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
         """生成附图 fallback 正文。"""
-        return "# 说明书附图\n\n```mermaid\nflowchart TB\n    A[101：获取输入] --> B[102：执行处理]\n```\n\n图1"
+        return "# 附图说明\n\n```mermaid\nflowchart TB\n    A[101：获取输入] --> B[102：执行处理]\n```\n\n图1"
 
 
 class DraftingAbstractWriterNode(_SingleArtifactWriterNode):
@@ -263,7 +263,7 @@ class DraftingAbstractWriterNode(_SingleArtifactWriterNode):
     def _build_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
         """生成摘要 fallback 正文。"""
         topic = self._topic(WorkflowState(raw_input=""))
-        return f"# 发明名称\n\n{topic}\n\n# 摘要\n\n本申请公开了一种{topic},能够基于输入材料限定的技术特征解决相关技术问题。"
+        return f"# 摘要\n\n本申请公开了一种{topic},能够基于输入材料限定的技术特征解决相关技术问题。\n\n# 发明名称\n\n{topic}"
 
 
 class DraftingGenerateSectionsNode(DraftingContentNodeBase):
@@ -396,7 +396,7 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
 
     def _build_review_report(self, complete: str) -> dict[str, Any]:
         """生成终稿内部检查报告。"""
-        required_sections = ["# 摘要", "# 权利要求书", "# 专利说明书", "# 说明书附图"]
+        required_sections = ["# 摘要", "# 权利要求书", "# 说明书", "# 附图说明"]
         missing_sections = [section for section in required_sections if section not in complete]
         return {
             "passed": not missing_sections,

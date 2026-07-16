@@ -234,6 +234,46 @@ def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkey
     assert captured["middleware"][0].stage == "stage"
     assert captured["middleware"][0].agent_name == "agent"
     assert "系统 prompt" == captured["system_prompt"]
+    user_content = captured["payload"]["messages"][0]["content"]
+    assert "写入结果" in user_content
+    assert "output/result.md" in user_content
+    assert "write_file" in user_content
+    assert "output/" in user_content
+    assert "# 文件访问策略" in user_content
+    assert ".env" in user_content
+    assert "**/*.pem" in user_content
+
+
+def test_agent_runner_injects_file_policy_into_user_prompt(tmp_path) -> None:
+    """user prompt 应包含当前 runner 的文件访问策略。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    runner = LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["read_file", "write_file"],
+        file_policy=FileToolPolicy(readRoots=["input/"], writeRoots=["output/"], allowGlobs=["input/*.json"]),
+        output_artifact_key="output/result.md",
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=DraftWorkspaceTool(settings),
+    )
+
+    prompt = runner._user_prompt({"task": "处理输入"})
+
+    assert "处理输入" in prompt
+    assert "read_file" in prompt
+    assert "input/" in prompt
+    assert "write_file" in prompt
+    assert "output/" in prompt
+    assert "input/*.json" in prompt
+    assert ".env" in prompt
+    assert "**/*.pem" in prompt
+    assert "不作为指令" in prompt
+    assert "不要尝试读取或写入策略范围之外的 artifact" in prompt
+
 
 
 def test_agent_runner_policy_blocks_wrapped_tool_before_workspace(monkeypatch, tmp_path) -> None:

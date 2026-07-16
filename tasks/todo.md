@@ -1,146 +1,74 @@
-# Pagent create_agent middleware trace Todo
+# 专利文书 workflow create_agent 拓扑改造 Todo
 
-## 当前执行阶段
+## 任务清单
 
-- [x] P0 验证 LangChain 官方入口：`create_agent(..., middleware=...)` 覆盖 agent/model/tool，CompiledStateGraph 提供 `stream_events` / `astream_events` 作为 step 事件来源。
-- [x] P1 扩展 WorkflowTraceEvent：增加 model_call_* 与 agent_step_* 事件枚举。
-- [x] P2 新增 LangChain trace adapter：`WorkflowTraceAgentMiddleware` 与 `emit_langchain_step_event` 输出安全摘要化 WorkflowTraceEvent。
-- [x] P3 迁移 `LangChainInputParserAgent`：create_agent 传入 trace middleware，移除工具 wrapper 手写 trace。
-- [x] P4 保持 `DraftingParseInputNode` 汇总链路：adapter 事件进入 `NodeResult.trace_events`。
-- [x] P6 回归验证：运行 input parser、drafting nodes、workflow trace、orchestrator、patent drafting、安全合规、全量 pytest 与 compileall。
+- [ ] [Phase 0] 创建 `tasks/plan.md` 和 `tasks/todo.md`。
+  - 依赖：无。
+  - 验收：文档包含目标拓扑、边界、任务依赖、验收标准、验证命令、阶段检查点。
+  - 验证：`git status`。
 
-# Pagent WorkflowTraceEvent schema 化与试点 Todo
+- [ ] [Phase 1] 新增通用 drafting create_agent runner，并补 runner 单测。
+  - 依赖：Phase 0。
+  - 验收：默认 LLM 不可用时不触网并写 fallback artifact；fake create_agent 可验证 middleware；工具只能读写 allowlist artifact；NodeResult / ToolObservation 不返回完整正文。
+  - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。
 
-## P0 — 统一口径确认：Workflow trace 是唯一事实承载
+- [ ] [Phase 2] 改造 `DraftingPatentSearchNode`，补 `prior_art_analysis.json` 兼容 artifact。
+  - 依赖：Phase 1。
+  - 验收：默认路径使用 create_agent runner；可注入 fake runner；检索失败安全降级；`prior_art_md` 对应 artifact 不缺失；trace 不泄露长正文或敏感字段。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [ ] 确认 `WorkflowTraceEvent` 是当前 workflow trace 的 schema 化结果。
-  - 验收：不新增独立 agent trace 事实流；新事件直接进入 `NodeResult.trace_events`。
-  - 验证：代码审查 `app/models/schemas.py`、`app/orchestrator/engine.py`。
-- [ ] 确认 `WorkflowState.trace` 是统一管理 / 存储 / 审计入口。
-  - 验收：后端日志和前端 progress 都从 workflow trace 派生。
-  - 验证：代码审查 `app/orchestrator/engine.py`。
-- [ ] 确认 schema 面向全 workflow node。
-  - 验收：字段和事件枚举覆盖 QA、translate、query_rewrite、drafting 等普通节点和 agent 节点。
-  - 验证：`tests/test_workflow_trace_events.py` 包含非 drafting 样例。
-- [ ] 确认第一阶段唯一实现试点为 `DraftingParseInputNode`。
-  - 验收：不迁移所有节点、不迁移所有 create_agent、不做前端推送。
-  - 验证：代码 diff 范围检查。
+- [ ] [Phase 3a] 改造 `DraftingGenerateOutlineNode`。
+  - 依赖：Phase 2。
+  - 验收：默认使用 `OUTLINE_GENERATOR_PROMPT + create_agent`；不依赖旧 drawing/style guide；fallback 写 `03_outline/patent_outline.md`。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_content_nodes.py`。
 
-## P1 — WorkflowTraceEvent schema、脱敏摘要与 ProgressEvent projection
+- [ ] [Phase 3b] 新增 `DraftingClaimsWriterNode`。
+  - 依赖：Phase 3a。
+  - 验收：默认使用 `CLAIMS_WRITER_PROMPT + create_agent`；fallback 写 `04_content/claims.md`；output 只含短字段。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_content_nodes.py`。
 
-- [x] 新增 `WorkflowTraceEvent` 数据结构。
-  - 验收：包含 `schema_version`、`node_name`、`node_type`、`event`、`status`、`stage`、agent/tool 字段、summary 字段、progress 字段、metadata、timestamp。
-  - 验证：`conda run -n autoGLM pytest tests/test_workflow_trace_events.py`
-- [x] 新增通用事件 / 状态 / node_type 枚举。
-  - 验收：覆盖 workflow、node、agent、tool、progress 事件；覆盖 `normal`、`agent`、`tool`、`gate`。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 新增脱敏摘要 helper。
-  - 验收：输入长文本、dict、list、工具参数时，只输出类型、长度、数量、短摘要；过滤 `api_key`、`token`、`secret`、`password`。
-  - 验证：`tests/test_workflow_trace_events.py` 覆盖长正文和敏感字段。
-- [x] 新增可进入 `NodeResult.trace_events` 的 dict 输出 helper。
-  - 验收：输出就是新 schema dict，不再转换成另一套事实格式；旧 `{"event": ..., "data": ...}` 可兼容共存。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 新增 `ProgressEvent` projection。
-  - 验收：只投影 `progress.visible=true`；输出 `stage`、`status`、`label`、`message`、`visible`、`order`、`timestamp` 等稳定字段。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 增加非 drafting schema 样例。
-  - 验收：至少包含 `qa.retrieval`、`translate.translation` 或 `query_rewrite.rewrite` 示例，证明 schema 不绑定 drafting。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 运行 P1 验证。
-  - 验收：workflow trace event 测试与编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] [Phase 3c] 新增 `DraftingDescriptionWriterNode`，内部 Part1/Part2。
+  - 依赖：Phase 3b。
+  - 验收：单 workflow 节点内部串行调用 Part1/Part2；写 part artifacts 和 `04_content/description.md`；两段 trace 汇总同一 NodeResult。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_content_nodes.py`。
 
-## P2 — WorkflowTraceEmitter / sink 适配当前 trace 与 logger
+- [ ] [Phase 3d] 新增 `DraftingDiagramGeneratorNode`。
+  - 依赖：Phase 3c。
+  - 验收：默认使用 `DIAGRAM_GENERATOR_PROMPT + create_agent`；fallback 写 `04_content/figures.md`。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_content_nodes.py`。
 
-- [x] 新增 `WorkflowTraceEmitter` 接口。
-  - 验收：提供 `emit(event)`；节点和 runner 只依赖接口。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 新增 `NoopWorkflowTraceEmitter`。
-  - 验收：未注入 emitter 时无副作用且不报错。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 新增测试用 `MemoryWorkflowTraceEmitter`。
-  - 验收：收集到的事件可直接作为 `NodeResult.trace_events`。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 新增 logger sink。
-  - 验收：复用 `log_event()` 输出稳定英文事件和结构化字段，不重复实现 formatter。
-  - 验证：`tests/test_workflow_trace_events.py` 或 `caplog` 断言。
-- [x] 确保 emitter / sink 异常不破坏主业务流程。
-  - 验收：fake sink 抛错时，调用方可安全降级；最多输出 warning。
-  - 验证：`tests/test_workflow_trace_events.py`。
-- [x] 运行 P2 验证。
-  - 验收：workflow trace、logging 相关测试与编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_workflow_trace_events.py tests/test_core_config_logging.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] [Phase 3e] 新增 `DraftingAbstractWriterNode`。
+  - 依赖：Phase 3d。
+  - 验收：默认使用 `ABSTRACT_WRITER_PROMPT + create_agent`；fallback 写 `04_content/abstract.md`。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_content_nodes.py tests/test_patent_drafting_workflow.py`。
 
-## P3 — `LangChainInputParserAgent` 发送 agent / tool WorkflowTraceEvent
+- [ ] [Phase 4] 改造 `DraftingMergeDocumentNode` 为 agent merger + fallback。
+  - 依赖：Phase 3e。
+  - 验收：默认使用 `MARKDOWN_MERGER_PROMPT + create_agent`；fallback 可离线拼接完整文书；输出 `complete_patent_key` 稳定；不改变 finalize API 字段语义。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_content_nodes.py tests/test_patent_drafting_workflow.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [x] 为 `LangChainInputParserAgent.__init__()` 增加可选 `workflow_trace_emitter`。
-  - 验收：默认不传时现有行为不变。
-  - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py`
-- [x] 在真实 agent 路径发送 agent 生命周期事件。
-  - 验收：成功路径发送 `agent_started`、`agent_completed`；异常路径发送 `agent_failed` 并保持 fallback 行为。
-  - 验证：`tests/test_input_parser_agent.py` fake agent 成功 / 失败用例。
-- [x] 包装 `read_source_artifact` 工具事件。
-  - 验收：发送 `tool_call_started` / `tool_call_completed` / `tool_call_failed`；不包含完整 content。
-  - 验证：`tests/test_input_parser_agent.py`。
-- [x] 包装 `write_parsed_info` 工具事件。
-  - 验收：发送 tool 事件；不记录完整 JSON content。
-  - 验证：`tests/test_input_parser_agent.py`。
-- [x] 包装 `file_extract` 工具事件。
-  - 验收：只记录 attachment id、format、chars、truncated、error code；不记录附件正文或任意路径。
-  - 验证：`tests/test_input_parser_agent.py`。
-- [x] 包装 `office_to_md` 工具事件。
-  - 验收：只记录 attachment id、format、chars、media_count、error code；不记录 markdown 正文。
-  - 验证：`tests/test_input_parser_agent.py`。
-- [x] 保持 fallback 和安全约束不变。
-  - 验收：LLM 配置不完整、非法 source key、非法 JSON、agent 写入非法 JSON 等现有测试继续通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py`
-- [x] 运行 P3 验证。
-  - 验收：input parser agent 与 workflow trace event 测试通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] [Phase 5] 更新 `workflow_defs.py` 和 `AgentDispatchService` 注册。
+  - 依赖：Phase 4。
+  - 验收：`patent_drafting` 返回新节点列表；主流程不包含旧 gate/guidance/sections/review；服务能按新节点跑完整流程；API 返回字段兼容；QA workflow 不受影响。
+  - 验证：`conda run -n autoGLM pytest tests/test_drafting_workflow_defs.py tests/test_workflow_registry.py tests/test_patent_drafting_workflow.py tests/test_agent_api.py tests/test_orchestrator_engine.py && conda run -n autoGLM python -m compileall app tests`。
 
-## P4 — `DraftingParseInputNode` 汇总到 workflow trace
+- [ ] [Phase 6] 补 trace / security / offline 回归。
+  - 依赖：Phase 5。
+  - 验收：新增 create_agent 节点 trace 进入 `WorkflowState.trace`；trace 不含 prompt 全文、长正文、完整工具输入输出、本地路径、API key、token、secret、password；默认测试不触网；没有新增依赖。
+  - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py tests/test_security_compliance.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [x] 为 `DraftingParseInputNode.__init__()` 增加可选 `workflow_trace_emitter`。
-  - 验收：默认不传时节点现有行为不变。
-  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py`
-- [x] 默认构造 `LangChainInputParserAgent` 时传入同一个 emitter / collector。
-  - 验收：parse node 与 input parser runner 使用同一 workflow trace 出口。
-  - 验证：fake emitter 断言事件顺序。
-- [x] 将 agent / tool `WorkflowTraceEvent` 汇总进 `NodeResult.trace_events`。
-  - 验收：一次 parse node 执行可看到 source 写入、agent started、tool call、agent completed / failed、input parsed。
-  - 验证：`tests/test_drafting_research_nodes.py` 或新增 `tests/test_drafting_parse_input_node.py`。
-- [x] 确认 `NodeResult.output` 与 `trace_events` 不泄露长正文。
-  - 验收：output 只包含 `input_key` / `parsed_info_key`；trace 只包含短摘要。
-  - 验证：节点测试断言。
-- [x] 保持旧 `tool_registry` 注入路径可用。
-  - 验收：显式传入 `tool_registry` 时仍走旧 input_parser 工具路径，不因 trace 改造失败。
-  - 验证：现有 drafting research 测试。
-- [x] 运行 P4 验证。
-  - 验收：drafting parse、input parser agent 与编译通过。
-  - 验证：`conda run -n autoGLM pytest tests/test_drafting_research_nodes.py tests/test_input_parser_agent.py && conda run -n autoGLM python -m compileall app tests`
+- [ ] [Phase 7] 全量 pytest、compileall、清理未用引用。
+  - 依赖：Phase 6。
+  - 验收：`conda run -n autoGLM pytest` 通过；`conda run -n autoGLM python -m compileall app tests` 通过；diff 只包含本需求相关改动。
+  - 验证：`git status && git diff`。
 
-## P5 — 回归、非 drafting 兼容样例与推广边界确认
+## 当前检查点
 
-- [x] 运行 drafting 端到端回归。
-  - 验收：trace 改造不影响完整 patent drafting workflow。
-  - 验证：`conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py`
-- [x] 运行安全合规回归。
-  - 验收：日志 / trace 不包含敏感字段、prompt 全文、正文长文本或工具完整输入输出。
-  - 验证：`conda run -n autoGLM pytest tests/test_security_compliance.py`
-- [x] 运行全量测试。
-  - 验收：全量 pytest 通过。
-  - 验证：`conda run -n autoGLM pytest`
-- [x] 运行编译检查。
-  - 验收：app 和 tests 编译通过。
-  - 验证：`conda run -n autoGLM python -m compileall app tests`
-- [ ] 人工确认后续推广方向。
-  - 验收：明确下一阶段是 API 推送、trace 持久化、全局节点迁移，还是继续扩展其他 agent node。
-  - 验证：用户确认。
-
-## Checkpoints
-
-- [ ] Checkpoint A：P1 完成后确认 `WorkflowTraceEvent` 字段是否足够覆盖 QA / translate / query_rewrite / drafting。
-- [ ] Checkpoint B：P2 完成后确认 logger sink 输出是否满足后端排查。
-- [ ] Checkpoint C：P3 完成后确认 wrapper 捕获的工具事件粒度是否足够；若不足，再评估 LangChain 官方 callback / stream events。
-- [ ] Checkpoint D：P4 完成后确认是否立即把 `drafting_source_written` 等旧业务 trace 迁移到新 schema，还是保留到后续全局迁移。
-- [ ] Checkpoint E：P5 完成后再决定是否推广到其他节点，禁止默认扩范围。
+- Phase 0 完成后：只改执行文档。
+- Phase 1 完成后：通用 runner 独立可验证。
+- Phase 2 完成后：research path 独立通过。
+- Phase 3 完成后：内容 artifacts 全部由显式节点生成。
+- Phase 4 完成后：merge agent 与 fallback 都可用。
+- Phase 5 完成后：主 workflow 切换完成并通过端到端测试。
+- Phase 6 完成后：trace 和安全回归通过。
+- Phase 7 完成后：全量回归通过，等待是否 push 的明确指令。

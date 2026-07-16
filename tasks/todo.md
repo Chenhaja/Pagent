@@ -12,7 +12,7 @@
   - 验收：支持 `readRoots`、`writeRoots`、`allowGlobs`、`denyGlobs`；默认拒绝未显式允许的读写；写权限不能由读权限推导；deny 优先；拒绝 `../`、绝对路径、`.env`、`secrets/`、`*.pem`、`*.key`。
   - 验证：`conda run -n autoGLM pytest tests/test_file_tool_policy.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [ ] [Phase 2] 实现通用 file tools 并接入 policy。
+- [x] [Phase 2] 实现通用 file tools 并接入 policy。
   - 依赖：Phase 1。
   - 验收：提供稳定工具名 `read_file`、`write_file`；工具执行前调用 policy；policy 拒绝时不访问 workspace；返回受控 JSON 错误且不泄露敏感路径细节。
   - 验证：`conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py && conda run -n autoGLM python -m compileall app tests`。

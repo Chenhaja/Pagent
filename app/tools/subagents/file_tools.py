@@ -49,7 +49,33 @@ def build_file_tools(workspace: DraftWorkspaceTool, policy: FileToolPolicy) -> d
         evidence = observation.evidence[0] if observation.evidence else {}
         return json.dumps({"artifact_key": artifact_key, "done": True, "chars": int(evidence.get("chars") or 0)}, ensure_ascii=False)
 
-    return {"read_file": read_file, "write_file": write_file}
+    @tool
+    def mkdir(path: str) -> str:
+        """创建 policy 允许写入的 artifact 目录。"""
+        directory = policy.check("write", path)
+        if directory is None:
+            return _json_error("file_access_denied")
+        observation = workspace.run({"action": "mkdir", "path": directory})
+        if observation.error:
+            return _json_error(observation.error)
+        return json.dumps({"path": directory, "done": True}, ensure_ascii=False)
+
+    @tool
+    def list_directory(path: str = "") -> str:
+        """列出 policy 允许读取目录的直接子项。"""
+        directory = policy.check("read", path)
+        if directory is None:
+            return _json_error("file_access_denied")
+        observation = workspace.run({"action": "list_directory", "path": directory})
+        if observation.error or not observation.evidence:
+            return _json_error(observation.error or "directory_not_found")
+        evidence = observation.evidence[0]
+        return json.dumps(
+            {"path": directory, "files": evidence.get("files", []), "directories": evidence.get("directories", [])},
+            ensure_ascii=False,
+        )
+
+    return {"read_file": read_file, "write_file": write_file, "mkdir": mkdir, "list_directory": list_directory}
 
 
 def build_react_tool_adapters(tools: dict[str, ReActTool]) -> dict[str, ToolCallable]:

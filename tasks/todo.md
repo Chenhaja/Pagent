@@ -23,7 +23,7 @@
   - 验收：`/agent/cases` -> `/agent/attachments` -> `/agent` 的同案流程可运行；同一 case 的附件正文和 agent artifacts 落在同一 workspace；不存在无 `case_id` 的生产入口兼容逻辑。
   - 验证：Task 2-3 相关测试和 compileall 通过。
 
-- [ ] [Task 4] 扩展目录工具与 file policy。
+- [x] [Task 4] 扩展目录工具与 file policy。
   - 依赖：Task 2。
   - 验收：`DraftWorkspaceTool` 支持 `mkdir`、`list_directory`；`list_directory` 只列直接子项；内存模式可推导目录；LangChain file tools 暴露 `mkdir`、`list_directory`；读类工具走 read policy，写类工具走 write policy；runner file policy prompt 说明当前 case workspace 相对路径；需要目录能力的 drafting agent 显式加入 allowed tools。
   - 验证：`conda run -n autoGLM pytest tests/test_draft_workspace.py tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py`；`conda run -n autoGLM python -m compileall app tests scripts`。

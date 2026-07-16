@@ -14,6 +14,7 @@ class DraftWorkspaceTool:
     """专利文书草稿 artifact 工作区工具。"""
 
     _memory_stores: dict[str, dict[str, str]] = {}
+    _memory_dirs: dict[str, set[str]] = {}
 
     def __init__(self, settings: Settings | None = None, project_id: str | None = None, workspace_name: str | None = None) -> None:
         """初始化草稿工作区工具。
@@ -33,6 +34,7 @@ class DraftWorkspaceTool:
         self.workspace_dir = self._build_workspace_dir()
         store_key = self.workspace_name or self.project_id
         self._store = self._memory_stores.setdefault(store_key, {})
+        self._dirs = self._memory_dirs.setdefault(store_key, set(_WORKSPACE_DIRS))
 
     def run(self, tool_input: dict) -> ToolObservation:
         """执行 artifact 工作区操作。
@@ -59,6 +61,16 @@ class DraftWorkspaceTool:
             if prefix and not self._is_safe_prefix(prefix):
                 return ToolObservation(tool_name="draft_workspace", error="invalid_artifact_key")
             return self._list(prefix)
+        if action == "mkdir":
+            path = str(tool_input.get("path") or "").strip()
+            if not self._is_safe_key(path):
+                return ToolObservation(tool_name="draft_workspace", error="invalid_artifact_key")
+            return self._mkdir(path)
+        if action == "list_directory":
+            path = str(tool_input.get("path") or "").strip()
+            if path and not self._is_safe_prefix(path):
+                return ToolObservation(tool_name="draft_workspace", error="invalid_artifact_key")
+            return self._list_directory(path)
         if action == "merge":
             source_keys = tool_input.get("source_artifact_keys") or []
             output_key = str(tool_input.get("output_artifact_key") or "").strip()
@@ -131,6 +143,28 @@ class DraftWorkspaceTool:
             sufficient=True,
         )
 
+    def _mkdir(self, path: str) -> ToolObservation:
+        """创建 workspace 内目录。"""
+        normalized_path = self._normalize_prefix(path)
+        if self.storage_mode == "memory":
+            self._dirs.add(normalized_path)
+        else:
+            self._path_for(normalized_path).mkdir(parents=True, exist_ok=True)
+        return ToolObservation(tool_name="draft_workspace", evidence=[{"path": normalized_path, "done": True}], sufficient=True)
+
+    def _list_directory(self, path: str = "") -> ToolObservation:
+        """列出 workspace 内目录的直接子项。"""
+        normalized_path = self._normalize_prefix(path)
+        if self.storage_mode == "memory":
+            files, directories = self._memory_directory_children(normalized_path)
+        else:
+            directory = self._path_for(normalized_path) if normalized_path else self.workspace_dir
+            if not directory.exists() or not directory.is_dir():
+                return ToolObservation(tool_name="draft_workspace", error="directory_not_found")
+            files = sorted(child.name for child in directory.iterdir() if child.is_file())
+            directories = sorted(child.name for child in directory.iterdir() if child.is_dir())
+        return ToolObservation(tool_name="draft_workspace", evidence=[{"path": normalized_path, "files": files, "directories": directories}], sufficient=True)
+
     def _merge(self, source_keys: list[str], output_key: str) -> ToolObservation:
         """按顺序合并多个 artifact。"""
         contents = []
@@ -168,6 +202,29 @@ class DraftWorkspaceTool:
         if self.workspace_dir not in path.parents and path != self.workspace_dir:
             raise ValueError("artifact path escaped workspace")
         return path
+
+    def _memory_directory_children(self, directory: str) -> tuple[list[str], list[str]]:
+        """从内存 artifact 和目录集合推导直接子项。"""
+        prefix = f"{directory}/" if directory else ""
+        files: set[str] = set()
+        directories: set[str] = set()
+        for key in self._store:
+            if not key.startswith(prefix):
+                continue
+            rest = key[len(prefix) :]
+            first, _, remainder = rest.partition("/")
+            if remainder:
+                directories.add(first)
+            elif first:
+                files.add(first)
+        for item in self._dirs:
+            if not item.startswith(prefix) or item == directory:
+                continue
+            rest = item[len(prefix) :]
+            first = rest.split("/", 1)[0]
+            if first:
+                directories.add(first)
+        return sorted(files), sorted(directories)
 
     def _normalize_key(self, artifact_key: str) -> str:
         """规范化 artifact key,兼容旧 simple key。"""

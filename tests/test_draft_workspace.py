@@ -40,6 +40,49 @@ def test_draft_workspace_supports_case_workspace_name(tmp_path) -> None:
     assert not (tmp_path / "temp_default").exists()
 
 
+def test_draft_workspace_mkdir_and_list_directory(tmp_path) -> None:
+    """mkdir 和 list_directory 应只返回指定目录的直接子项。"""
+    tool = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    made = tool.run({"action": "mkdir", "path": "04_content/sections"})
+    tool.run({"action": "write", "artifact_key": "04_content/abstract.md", "content": "摘要"})
+    tool.run({"action": "write", "artifact_key": "04_content/sections/claim1.md", "content": "权利要求"})
+
+    listed = tool.run({"action": "list_directory", "path": "04_content"})
+
+    assert made.error is None
+    assert listed.error is None
+    assert listed.evidence[0]["path"] == "04_content"
+    assert listed.evidence[0]["files"] == ["abstract.md"]
+    assert listed.evidence[0]["directories"] == ["sections"]
+
+
+
+def test_draft_workspace_memory_list_directory_infers_directories() -> None:
+    """内存模式 list_directory 应从 artifact key 推导直接子项。"""
+    tool = DraftWorkspaceTool(Settings(draft_workspace_dir=""), workspace_name="tmp_memory_case")
+    tool.run({"action": "write", "artifact_key": "04_content/sections/claim1.md", "content": "权利要求"})
+    tool.run({"action": "write", "artifact_key": "04_content/abstract.md", "content": "摘要"})
+
+    listed = tool.run({"action": "list_directory", "path": "04_content"})
+
+    assert listed.error is None
+    assert listed.evidence[0]["files"] == ["abstract.md"]
+    assert listed.evidence[0]["directories"] == ["sections"]
+
+
+
+def test_draft_workspace_rejects_unsafe_directory_paths(tmp_path) -> None:
+    """目录操作必须拒绝不安全路径。"""
+    tool = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+
+    made = tool.run({"action": "mkdir", "path": "../secret"})
+    listed = tool.run({"action": "list_directory", "path": "/04_content"})
+
+    assert made.error == "invalid_artifact_key"
+    assert listed.error == "invalid_artifact_key"
+
+
+
 def test_draft_workspace_lists_artifacts_by_prefix(tmp_path) -> None:
     """list 动作应枚举指定目录下的 artifact。"""
     tool = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
@@ -102,6 +145,7 @@ def test_default_tool_registry_registers_r12_draft_workspace_schema(tmp_path) ->
     registry = build_default_tool_registry(Settings(draft_workspace_dir=str(tmp_path)))
     spec = registry.tool_specs()["draft_workspace"]
 
-    assert spec.input_schema["properties"]["action"]["enum"] == ["write", "read", "list", "merge"]
+    assert spec.input_schema["properties"]["action"]["enum"] == ["write", "read", "list", "merge", "mkdir", "list_directory"]
+    assert "path" in spec.input_schema["properties"]
     assert "source_artifact_keys" in spec.input_schema["properties"]
     assert "output_artifact_key" in spec.input_schema["properties"]

@@ -26,6 +26,38 @@ def test_file_tools_read_and_write_with_policy(tmp_path) -> None:
     assert stored.evidence[0]["content"] == "结果"
 
 
+def test_file_tools_mkdir_and_list_directory_with_policy(tmp_path) -> None:
+    """通用文件工具应按 policy 建目录和列目录。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    policy = FileToolPolicy(readRoots=["outputs/"], writeRoots=["outputs/"])
+    tools = build_file_tools(workspace, policy)
+
+    mkdir_result = json.loads(tools["mkdir"].invoke({"path": "outputs/sections"}))
+    workspace.run({"action": "write", "artifact_key": "outputs/sections/a.md", "content": "A"})
+    workspace.run({"action": "write", "artifact_key": "outputs/summary.md", "content": "S"})
+    listed = json.loads(tools["list_directory"].invoke({"path": "outputs"}))
+
+    assert mkdir_result == {"path": "outputs/sections", "done": True}
+    assert listed["path"] == "outputs"
+    assert listed["files"] == ["summary.md"]
+    assert listed["directories"] == ["sections"]
+
+
+
+def test_file_tools_directory_policy_operations(monkeypatch, tmp_path) -> None:
+    """list_directory 走 read policy,mkdir 走 write policy。"""
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    policy = FileToolPolicy(readRoots=["readable/"], writeRoots=["writable/"])
+    tools = build_file_tools(workspace, policy)
+
+    denied_list = json.loads(tools["list_directory"].invoke({"path": "writable"}))
+    denied_mkdir = json.loads(tools["mkdir"].invoke({"path": "readable/new"}))
+
+    assert denied_list == {"error": "file_access_denied"}
+    assert denied_mkdir == {"error": "file_access_denied"}
+
+
+
 def test_file_tools_denied_access_does_not_touch_workspace(monkeypatch, tmp_path) -> None:
     """policy 拒绝时工具不应访问 workspace。"""
     workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
@@ -47,11 +79,11 @@ def test_file_tools_denied_access_does_not_touch_workspace(monkeypatch, tmp_path
 
 def test_select_tools_uses_allowed_tools_order() -> None:
     """allowed_tools 应控制传入 create_agent 的工具集合和顺序。"""
-    tools = {"read_file": object(), "write_file": object()}
+    tools = {"read_file": object(), "write_file": object(), "mkdir": object(), "list_directory": object()}
 
-    selected = select_tools(tools, ["write_file", "missing"])
+    selected = select_tools(tools, ["mkdir", "write_file", "missing"])
 
-    assert selected == [tools["write_file"]]
+    assert selected == [tools["mkdir"], tools["write_file"]]
 
 
 def test_agent_runner_exposes_skill_loader_adapter(monkeypatch, tmp_path) -> None:
@@ -253,7 +285,7 @@ def test_agent_runner_injects_file_policy_into_user_prompt(tmp_path) -> None:
         agent_name="agent",
         prompt_name="PROMPT",
         system_prompt="系统 prompt",
-        allowed_tools=["read_file", "write_file"],
+        allowed_tools=["read_file", "write_file", "mkdir", "list_directory"],
         file_policy=FileToolPolicy(readRoots=["input/"], writeRoots=["output/"], allowGlobs=["input/*.json"]),
         output_artifact_key="output/result.md",
         fallback_builder=_fallback_content,
@@ -267,6 +299,9 @@ def test_agent_runner_injects_file_policy_into_user_prompt(tmp_path) -> None:
     assert "read_file" in prompt
     assert "input/" in prompt
     assert "write_file" in prompt
+    assert "mkdir" in prompt
+    assert "list_directory" in prompt
+    assert "当前 case workspace 内的相对路径" in prompt
     assert "output/" in prompt
     assert "input/*.json" in prompt
     assert ".env" in prompt

@@ -242,14 +242,15 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="draft_workspace",
             runner=DraftWorkspaceTool(current_settings),
-            description="维护专利文书项目工作区 artifact,支持 read/write/list/merge,长正文只通过 workspace key 流转。",
+            description="维护专利文书项目工作区 artifact,支持 read/write/list/merge/mkdir/list_directory,长正文只通过 workspace key 流转。",
             input_schema={
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["write", "read", "list", "merge"]},
+                    "action": {"type": "string", "enum": ["write", "read", "list", "merge", "mkdir", "list_directory"]},
                     "artifact_key": {"type": "string"},
                     "content": {"type": "string"},
                     "prefix": {"type": "string"},
+                    "path": {"type": "string"},
                     "source_artifact_keys": {"type": "array", "items": {"type": "string"}},
                     "output_artifact_key": {"type": "string"},
                 },

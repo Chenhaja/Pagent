@@ -9,6 +9,7 @@ from app.prompts.subagents.claims_writer_prompt import CLAIMS_WRITER_PROMPT
 from app.prompts.subagents.description_writer_part1_prompt import DESCRIPTION_WRITER_PART1_PROMPT
 from app.prompts.subagents.description_writer_part2_prompt import DESCRIPTION_WRITER_PART2_PROMPT
 from app.prompts.subagents.diagram_generator_prompt import DIAGRAM_GENERATOR_PROMPT
+from app.prompts.subagents.markdown_merger_prompt import MARKDOWN_MERGER_PROMPT
 from app.prompts.subagents.outline_generator_prompt import OUTLINE_GENERATOR_PROMPT
 from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.subagents.drafting_agent import LangChainDraftingAgent
@@ -333,9 +334,29 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
 
     name = "drafting_merge_document"
 
-    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        workspace: DraftWorkspaceTool | None = None,
+        merge_runner: Any | None = None,
+        workflow_trace_emitter: WorkflowTraceEmitter | None = None,
+    ) -> None:
         """初始化终稿合并节点。"""
         super().__init__(name=self.name, settings=settings, workspace=workspace)
+        self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
+        self.merge_runner = merge_runner or LangChainDraftingAgent(
+            node_name=self.name,
+            stage="drafting.merge",
+            agent_name="markdown_merger_agent",
+            prompt_name="MARKDOWN_MERGER_PROMPT",
+            system_prompt=MARKDOWN_MERGER_PROMPT,
+            allowed_read_artifact_keys=list(DRAFTING_SECTION_KEYS),
+            output_artifact_key=DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY,
+            fallback_builder=self._build_merge_fallback,
+            settings=self.settings,
+            workspace=self.workspace,
+            workflow_trace_emitter=self.workflow_trace_emitter,
+        )
 
     def run(self, state: WorkflowState) -> NodeResult:
         """合并摘要、权利要求、说明书和附图说明 artifact。
@@ -346,21 +367,43 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
         Returns:
             成功时返回完整文书 artifact key。
         """
-        parts: list[str] = []
         for artifact_key in DRAFTING_SECTION_KEYS:
-            content = self._read_text(artifact_key)
-            if content is None:
+            if self._read_text(artifact_key) is None:
                 return NodeResult.failed(errors=[f"artifact_missing:{artifact_key}"])
-            parts.append(content)
-        content = "# 完整专利文书\n\n" + "\n\n".join(parts)
-        error = self._write(DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY, content)
+        failed = self._run_text_agent(self.merge_runner, DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY, "合并完整专利文书")
+        if failed is not None:
+            return failed
+        content = self._read_text(DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY) or ""
+        report = self._build_review_report(content)
+        error = self._write(DRAFTING_REVIEW_REPORT_ARTIFACT_KEY, json.dumps(report, ensure_ascii=False))
         if error:
             return NodeResult.failed(errors=[error])
         state.drafting_context["complete_patent_key"] = DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY
+        state.drafting_context["review_report_key"] = DRAFTING_REVIEW_REPORT_ARTIFACT_KEY
         return NodeResult.success(
             output={"complete_patent_key": DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY},
-            trace_events=[{"event": "drafting_document_merged", "data": {"artifact_key": DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY, "chars": len(content)}}],
+            trace_events=[*self._trace_events_from(self.workflow_trace_emitter), {"event": "drafting_document_merged", "data": {"artifact_key": DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY, "chars": len(content)}}],
         )
+
+    def _build_merge_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成终稿合并 fallback 正文。"""
+        parts = []
+        for artifact_key in DRAFTING_SECTION_KEYS:
+            content = self._read_text(artifact_key)
+            if content is not None:
+                parts.append(content)
+        return "# 完整专利文书\n\n" + "\n\n".join(parts)
+
+    def _build_review_report(self, complete: str) -> dict[str, Any]:
+        """生成终稿内部检查报告。"""
+        required_sections = ["# 摘要", "# 权利要求书", "# 专利说明书", "# 说明书附图"]
+        missing_sections = [section for section in required_sections if section not in complete]
+        return {
+            "passed": not missing_sections,
+            "checked_artifacts": [*DRAFTING_SECTION_KEYS, DRAFTING_COMPLETE_PATENT_ARTIFACT_KEY],
+            "issues": [f"缺少章节: {section}" for section in missing_sections],
+            "confidence": "medium" if not missing_sections else "low",
+        }
 
 
 DRAFTING_FINALIZE_FIELDS = {

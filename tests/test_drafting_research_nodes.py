@@ -224,8 +224,57 @@ class FakePatentSearchRegistry:
         )()
 
 
+def test_drafting_patent_search_uses_injected_runner_and_writes_prior_art(tmp_path) -> None:
+    """drafting_patent_search 应支持注入 runner 并补齐 prior_art artifact。"""
+    class FakeRunner:
+        """测试用 patent search runner。"""
+
+        def __init__(self, workspace: DraftWorkspaceTool) -> None:
+            """初始化测试 runner。"""
+            self.workspace = workspace
+            self.calls = []
+
+        def run(self, tool_input: dict) -> ToolObservation:
+            """写入检索和现有技术分析 artifact。"""
+            self.calls.append(dict(tool_input))
+            self.workspace.run(
+                {
+                    "action": "write",
+                    "artifact_key": "02_research/patent_search_results.json",
+                    "content": json.dumps({"queries": ["夹爪控制"], "results": [], "sufficient": False, "skipped": True, "reason": "fake"}, ensure_ascii=False),
+                }
+            )
+            self.workspace.run(
+                {
+                    "action": "write",
+                    "artifact_key": "02_research/prior_art_analysis.json",
+                    "content": json.dumps({"technical_topic": "夹爪控制", "closest_prior_art": [], "uncertain_points": ["fake"], "confidence": "low"}, ensure_ascii=False),
+                }
+            )
+            return ToolObservation(
+                tool_name="patent_searcher_agent",
+                evidence=[{"artifact_key": "02_research/patent_search_results.json", "done": True}],
+                sufficient=True,
+            )
+
+    workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
+    workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": '{"technical_topic":"夹爪控制"}'})
+    runner = FakeRunner(workspace)
+    node = DraftingPatentSearchNode(workspace=workspace, patent_search_runner=runner)
+    state = WorkflowState(raw_input="请生成专利文书", drafting_context={"parsed_info_key": "01_input/parsed_info.json"})
+
+    result = node.run(state)
+    prior = workspace.run({"action": "read", "artifact_key": "02_research/prior_art_analysis.json"})
+
+    assert result.status == "success"
+    assert runner.calls == [{"parsed_info_key": "01_input/parsed_info.json", "query": "夹爪控制"}]
+    assert json.loads(prior.evidence[0]["content"])["confidence"] == "low"
+    assert state.drafting_context["patent_search_key"] == "02_research/patent_search_results.json"
+    assert state.drafting_context["prior_art_analysis_key"] == "02_research/prior_art_analysis.json"
+
+
 def test_drafting_patent_search_writes_results_artifact(tmp_path) -> None:
-    """drafting_patent_search 应调用 patent_search 并写入检索结果 artifact。"""
+    """drafting_patent_search 应调用 patent_search 并写入检索和现有技术 artifact。"""
     workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))
     workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": '{"technical_topic":"夹爪控制"}'})
     evidence = [
@@ -245,7 +294,9 @@ def test_drafting_patent_search_writes_results_artifact(tmp_path) -> None:
 
     result = node.run(state)
     stored = workspace.run({"action": "read", "artifact_key": "02_research/patent_search_results.json"})
+    prior = workspace.run({"action": "read", "artifact_key": "02_research/prior_art_analysis.json"})
     payload = json.loads(stored.evidence[0]["content"])
+    prior_payload = json.loads(prior.evidence[0]["content"])
 
     assert result.status == "success"
     assert registry.calls[0]["name"] == "patent_search"
@@ -253,7 +304,9 @@ def test_drafting_patent_search_writes_results_artifact(tmp_path) -> None:
     assert payload["results"] == evidence
     assert payload["sufficient"] is True
     assert payload["skipped"] is False
+    assert prior_payload["closest_prior_art"][0]["publication_number"] == "CN123456B"
     assert state.drafting_context["patent_search_key"] == "02_research/patent_search_results.json"
+    assert state.drafting_context["prior_art_analysis_key"] == "02_research/prior_art_analysis.json"
 
 
 def test_drafting_patent_search_degrades_without_fabricating_results(tmp_path) -> None:
@@ -265,13 +318,18 @@ def test_drafting_patent_search_degrades_without_fabricating_results(tmp_path) -
 
     result = node.run(state)
     stored = workspace.run({"action": "read", "artifact_key": "02_research/patent_search_results.json"})
+    prior = workspace.run({"action": "read", "artifact_key": "02_research/prior_art_analysis.json"})
     payload = json.loads(stored.evidence[0]["content"])
+    prior_payload = json.loads(prior.evidence[0]["content"])
 
     assert result.status == "success"
     assert payload["results"] == []
     assert payload["sufficient"] is False
     assert payload["skipped"] is True
     assert payload["reason"] == "network_disabled"
+    assert prior_payload["closest_prior_art"] == []
+    assert prior_payload["confidence"] == "low"
+    assert "CN" not in json.dumps(prior_payload, ensure_ascii=False)
 
 
 def test_drafting_prior_art_analysis_writes_structured_analysis(tmp_path) -> None:

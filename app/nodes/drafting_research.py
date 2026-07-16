@@ -5,7 +5,9 @@ from app.core.config import Settings, get_settings
 from app.models.schemas import NodeResult, WorkflowState
 from app.orchestrator.node_base import Node
 from app.orchestrator.tool_registry import ToolRegistry, build_default_tool_registry
+from app.prompts.subagents.patent_searcher_prompt import PATENT_SEARCHER_PROMPT
 from app.tools.draft_workspace import DraftWorkspaceTool
+from app.tools.subagents.drafting_agent import LangChainDraftingAgent
 from app.tools.subagents.input_parser_agent import LangChainInputParserAgent
 from app.tracing.sinks import MemoryWorkflowTraceEmitter, WorkflowTraceEmitter
 
@@ -156,12 +158,32 @@ class DraftingPatentSearchNode(Node):
         settings: Settings | None = None,
         workspace: DraftWorkspaceTool | None = None,
         tool_registry: ToolRegistry | Any | None = None,
+        patent_search_runner: Any | None = None,
+        workflow_trace_emitter: WorkflowTraceEmitter | None = None,
     ) -> None:
         """初始化专利检索节点。"""
         super().__init__(name=self.name)
         self.settings = settings or get_settings()
         self.workspace = workspace or DraftWorkspaceTool(self.settings)
-        self.tool_registry = tool_registry or build_default_tool_registry(self.settings)
+        self.tool_registry = tool_registry
+        self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
+        self.patent_search_runner = patent_search_runner or (
+            None
+            if tool_registry is not None
+            else LangChainDraftingAgent(
+                node_name=self.name,
+                stage="drafting.patent_search",
+                agent_name="patent_searcher_agent",
+                prompt_name="PATENT_SEARCHER_PROMPT",
+                system_prompt=PATENT_SEARCHER_PROMPT,
+                allowed_read_artifact_keys=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
+                output_artifact_key=DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
+                fallback_builder=self._build_search_fallback_content,
+                settings=self.settings,
+                workspace=self.workspace,
+                workflow_trace_emitter=self.workflow_trace_emitter,
+            )
+        )
 
     def run(self, state: WorkflowState) -> NodeResult:
         """读取 parsed info 并写入专利检索结果 artifact。
@@ -177,35 +199,78 @@ class DraftingPatentSearchNode(Node):
         if parsed is None:
             return NodeResult.failed(errors=["parsed_info_missing"])
         query = self._query_from_parsed(parsed)
-        observation = self.tool_registry.run("patent_search", {"query": query})
+        if self.patent_search_runner is not None:
+            observation = self.patent_search_runner.run({"parsed_info_key": parsed_key, "query": query})
+            if getattr(observation, "error", None):
+                return NodeResult.failed(errors=[str(observation.error)])
+            search_results = self._read_json(DRAFTING_PATENT_SEARCH_ARTIFACT_KEY)
+            if search_results is None:
+                return NodeResult.failed(errors=["patent_search_results_missing"])
+        else:
+            search_results = self._run_registry_search(query)
+            written = self._write_json(DRAFTING_PATENT_SEARCH_ARTIFACT_KEY, search_results)
+            if written.error:
+                return NodeResult.failed(errors=[written.error])
+        prior_art = self._read_json(DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY)
+        if prior_art is None:
+            prior_art = self._build_prior_art_analysis(parsed, search_results)
+            written = self._write_json(DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY, prior_art)
+            if written.error:
+                return NodeResult.failed(errors=[written.error])
+        state.drafting_context["patent_search_key"] = DRAFTING_PATENT_SEARCH_ARTIFACT_KEY
+        state.drafting_context["prior_art_analysis_key"] = DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY
+        results = list(search_results.get("results") or [])
+        skipped = bool(search_results.get("skipped"))
+        trace_events = [*self._workflow_trace_events()]
+        trace_events.append(
+            {
+                "event": "drafting_patent_search_completed",
+                "data": {"artifact_key": DRAFTING_PATENT_SEARCH_ARTIFACT_KEY, "result_count": len(results), "skipped": skipped},
+            }
+        )
+        return NodeResult.success(
+            output={
+                "patent_search_key": DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
+                "prior_art_analysis_key": DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY,
+                "skipped": skipped,
+            },
+            trace_events=trace_events,
+        )
+
+    def _run_registry_search(self, query: str) -> dict[str, Any]:
+        """调用旧 patent_search 工具并转换为检索 artifact payload。"""
+        registry = self.tool_registry or build_default_tool_registry(self.settings)
+        observation = registry.run("patent_search", {"query": query})
         error = getattr(observation, "error", None)
         evidence = list(getattr(observation, "evidence", []) or []) if not error else []
-        payload = {
+        return {
             "queries": [query] if query else [],
             "results": evidence,
             "sufficient": bool(getattr(observation, "sufficient", bool(evidence))) and not error,
             "skipped": bool(error),
             "reason": str(error or ""),
         }
-        written = self.workspace.run(
-            {
-                "action": "write",
-                "artifact_key": DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
-                "content": json.dumps(payload, ensure_ascii=False),
-            }
+
+    def _build_search_fallback_content(self, reason: str, workspace: DraftWorkspaceTool) -> str:
+        """生成专利检索安全降级 JSON。"""
+        parsed = self._read_json(DRAFTING_PARSED_INFO_ARTIFACT_KEY) or {}
+        query = self._query_from_parsed(parsed)
+        return json.dumps(
+            {"queries": [query] if query else [], "results": [], "sufficient": False, "skipped": True, "reason": reason},
+            ensure_ascii=False,
         )
-        if written.error:
-            return NodeResult.failed(errors=[written.error])
-        state.drafting_context["patent_search_key"] = DRAFTING_PATENT_SEARCH_ARTIFACT_KEY
-        return NodeResult.success(
-            output={"patent_search_key": DRAFTING_PATENT_SEARCH_ARTIFACT_KEY, "skipped": bool(error)},
-            trace_events=[
-                {
-                    "event": "drafting_patent_search_completed",
-                    "data": {"artifact_key": DRAFTING_PATENT_SEARCH_ARTIFACT_KEY, "result_count": len(evidence), "skipped": bool(error)},
-                }
-            ],
-        )
+
+    def _build_prior_art_analysis(self, parsed: dict[str, Any], search_results: dict[str, Any]) -> dict[str, Any]:
+        """根据检索结果构造兼容现有技术分析 artifact。"""
+        return DraftingPriorArtAnalysisNode(settings=self.settings, workspace=self.workspace)._build_analysis(parsed, search_results)
+
+    def _write_json(self, artifact_key: str, payload: dict[str, Any]) -> Any:
+        """写入 JSON artifact。"""
+        return self.workspace.run({"action": "write", "artifact_key": artifact_key, "content": json.dumps(payload, ensure_ascii=False)})
+
+    def _workflow_trace_events(self) -> list[dict[str, Any]]:
+        """读取可进入 NodeResult 的 workflow trace 事件。"""
+        return list(getattr(self.workflow_trace_emitter, "trace_events", []) or [])
 
     def _read_json(self, artifact_key: str) -> dict[str, Any] | None:
         """读取 JSON artifact,失败时返回 None。"""

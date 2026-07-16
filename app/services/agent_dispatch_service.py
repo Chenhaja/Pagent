@@ -22,6 +22,7 @@ from app.services.case_service import CaseService
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 from app.services.translate_service import TranslateService
+from app.tools.draft_workspace import DraftWorkspaceTool
 
 
 class DraftingDefaultGateRegistry:
@@ -301,6 +302,20 @@ class AgentDispatchService:
                 return str(qa_result.get("answer", ""))
         return ""
 
+    def _workspace_for_case(self, state: WorkflowState, settings: Any) -> DraftWorkspaceTool:
+        """根据 workflow state 构造当前案件 workspace。
+
+        Args:
+            state: 当前 workflow 状态,包含 case_id 和 workspace_id。
+            settings: 当前运行配置。
+
+        Returns:
+            绑定案件 workspace 的草稿工作区工具;缺少 workspace_id 时回退旧默认工作区。
+        """
+        workspace_id = state.workspace_id or ""
+        workspace_name = f"tmp_{workspace_id}" if workspace_id else None
+        return DraftWorkspaceTool(settings=settings, workspace_name=workspace_name)
+
     def _run_patent_drafting(self, state: WorkflowState, workflow_def: list[str]) -> dict[str, Any]:
         """执行 patent_drafting workflow 并转换为服务响应。
 
@@ -312,16 +327,17 @@ class AgentDispatchService:
             drafting 成功输出或结构化失败结果。
         """
         settings = get_settings()
+        workspace = self._workspace_for_case(state, settings)
         nodes = {
-            "drafting_parse_input": DraftingParseInputNode(settings=settings),
-            "drafting_patent_search": DraftingPatentSearchNode(settings=settings),
-            "drafting_generate_outline": DraftingGenerateOutlineNode(settings=settings),
-            "drafting_claims_writer": DraftingClaimsWriterNode(settings=settings),
-            "drafting_description_writer": DraftingDescriptionWriterNode(settings=settings),
-            "drafting_diagram_generator": DraftingDiagramGeneratorNode(settings=settings),
-            "drafting_abstract_writer": DraftingAbstractWriterNode(settings=settings),
-            "drafting_merge_document": DraftingMergeDocumentNode(settings=settings),
-            "drafting_finalize": DraftingFinalizeNode(settings=settings),
+            "drafting_parse_input": DraftingParseInputNode(settings=settings, workspace=workspace),
+            "drafting_patent_search": DraftingPatentSearchNode(settings=settings, workspace=workspace),
+            "drafting_generate_outline": DraftingGenerateOutlineNode(settings=settings, workspace=workspace),
+            "drafting_claims_writer": DraftingClaimsWriterNode(settings=settings, workspace=workspace),
+            "drafting_description_writer": DraftingDescriptionWriterNode(settings=settings, workspace=workspace),
+            "drafting_diagram_generator": DraftingDiagramGeneratorNode(settings=settings, workspace=workspace),
+            "drafting_abstract_writer": DraftingAbstractWriterNode(settings=settings, workspace=workspace),
+            "drafting_merge_document": DraftingMergeDocumentNode(settings=settings, workspace=workspace),
+            "drafting_finalize": DraftingFinalizeNode(settings=settings, workspace=workspace),
         }
         runnable_workflow = [node_name for node_name in workflow_def if node_name != "normalize_input"]
         result = Orchestrator(nodes=nodes).run(state, runnable_workflow, max_loop_count=0)

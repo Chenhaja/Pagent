@@ -42,6 +42,25 @@ def test_patent_drafting_workflow_generates_markdown_artifacts(tmp_path, monkeyp
     assert "drafting_finalized" in events
 
 
+def test_patent_drafting_reuses_case_workspace_across_sessions(tmp_path, monkeypatch) -> None:
+    """同一 case 下不同 session 应复用同一个案件 workspace。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path / "drafts"), react_max_steps=8, react_token_budget=2000, react_timeout_seconds=5)
+    case_service = CaseService(settings=settings)
+    case = case_service.create_case()
+    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
+    service = AgentDispatchService()
+
+    first = service.dispatch("请根据一种夹爪控制方法生成专利文书", case_id=case["case_id"], session_id="s1")
+    second = service.dispatch("请根据一种夹爪控制方法生成专利文书", case_id=case["case_id"], session_id="s2")
+
+    workspace_dir = tmp_path / "drafts" / f"tmp_{case['workspace_id']}"
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert first["workspace_id"] == second["workspace_id"] == case["workspace_id"]
+    assert (workspace_dir / "05_final" / "complete_patent.md").exists()
+    assert not (tmp_path / "drafts" / "temp_default").exists()
+
+
 def test_patent_drafting_workflow_consumes_uploaded_documents(tmp_path, monkeypatch) -> None:
     """patent_drafting 应复用 R10 附件 documents 作为输入数据。"""
     from app.core.config import Settings

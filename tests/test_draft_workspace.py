@@ -29,6 +29,17 @@ def test_draft_workspace_supports_disk_project_workspace(tmp_path) -> None:
     assert (tmp_path / "temp_default" / "04_content" / "claims.md").read_text(encoding="utf-8") == "权利要求"
 
 
+def test_draft_workspace_supports_case_workspace_name(tmp_path) -> None:
+    """传入 workspace_name 时应直接使用指定案件 workspace 目录。"""
+    tool = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)), workspace_name="tmp_case123")
+
+    written = tool.run({"action": "write", "artifact_key": "04_content/claims.md", "content": "权利要求"})
+
+    assert written.error is None
+    assert (tmp_path / "tmp_case123" / "04_content" / "claims.md").read_text(encoding="utf-8") == "权利要求"
+    assert not (tmp_path / "temp_default").exists()
+
+
 def test_draft_workspace_lists_artifacts_by_prefix(tmp_path) -> None:
     """list 动作应枚举指定目录下的 artifact。"""
     tool = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path)))

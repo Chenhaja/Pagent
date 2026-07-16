@@ -15,21 +15,24 @@ class DraftWorkspaceTool:
 
     _memory_stores: dict[str, dict[str, str]] = {}
 
-    def __init__(self, settings: Settings | None = None, project_id: str | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, project_id: str | None = None, workspace_name: str | None = None) -> None:
         """初始化草稿工作区工具。
 
         Args:
             settings: 应用配置,未传入时读取全局配置。
             project_id: 项目 ID,用于隔离同一进程内不同专利项目的 artifact。
+            workspace_name: 可选案件 workspace 目录名,传入时优先于旧 project_id 目录规则。
 
         Returns:
             无返回值。
         """
         self.settings = settings or get_settings()
         self.project_id = self._safe_project_id(project_id or _DEFAULT_PROJECT_ID)
+        self.workspace_name = self._safe_workspace_name(workspace_name) if workspace_name else None
         self.storage_mode = "disk" if self.settings.draft_workspace_dir else "memory"
         self.workspace_dir = self._build_workspace_dir()
-        self._store = self._memory_stores.setdefault(self.project_id, {})
+        store_key = self.workspace_name or self.project_id
+        self._store = self._memory_stores.setdefault(store_key, {})
 
     def run(self, tool_input: dict) -> ToolObservation:
         """执行 artifact 工作区操作。
@@ -147,7 +150,10 @@ class DraftWorkspaceTool:
     def _build_workspace_dir(self) -> Path:
         """生成磁盘项目工作区目录。"""
         base_dir = Path(self.settings.draft_workspace_dir).resolve() if self.settings.draft_workspace_dir else Path()
-        return (base_dir / f"temp_{self.project_id}").resolve() if self.settings.draft_workspace_dir else base_dir
+        if not self.settings.draft_workspace_dir:
+            return base_dir
+        directory_name = self.workspace_name or f"temp_{self.project_id}"
+        return (base_dir / directory_name).resolve()
 
     def _ensure_project_dirs(self) -> None:
         """确保磁盘项目工作区目录结构存在。"""
@@ -190,3 +196,8 @@ class DraftWorkspaceTool:
         """校验并规范化项目 ID。"""
         safe = re.sub(r"[^a-zA-Z0-9_-]", "_", project_id.strip())
         return safe or _DEFAULT_PROJECT_ID
+
+    def _safe_workspace_name(self, workspace_name: str) -> str:
+        """校验并规范化案件 workspace 目录名。"""
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", workspace_name.strip())
+        return safe or f"temp_{self.project_id}"

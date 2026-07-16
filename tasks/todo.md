@@ -8,7 +8,7 @@
   - 验证：`conda run -n autoGLM pytest tests/test_case_service.py tests/test_agent_api.py`；相关 dispatch/API/input/attachment/workflow 回归；`conda run -n autoGLM python -m compileall app tests scripts`。
   - 状态：已提交 `5e2a91f feat(agent): 新增案件生命周期 API`。
 
-- [ ] [Task 2] 复用案件 workspace。
+- [x] [Task 2] 复用案件 workspace。
   - 依赖：Task 1。
   - 验收：`DraftWorkspaceTool` 新增可选 `workspace_name` 且保留旧 `project_id` 行为；`AgentDispatchService` 通过 `CaseService.get_workspace(case_id)` 构造同案 workspace；patent drafting 节点复用同一 workspace；不同 `session_id` 仍只影响 session memory。
   - 验证：`conda run -n autoGLM pytest tests/test_case_service.py tests/test_agent_dispatch_service.py tests/test_patent_drafting_workflow.py`；`conda run -n autoGLM pytest tests/test_draft_workspace.py`；`conda run -n autoGLM python -m compileall app tests scripts`。

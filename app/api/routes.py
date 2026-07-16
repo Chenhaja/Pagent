@@ -61,11 +61,12 @@ def create_agent_case() -> dict[str, Any]:
 
 
 @router.post("/agent/attachments", response_model=AttachmentUploadBatchResponse)
-async def upload_agent_attachments(files: list[UploadFile] = File(...), doc_type: str = Form("other")) -> dict[str, Any]:
+async def upload_agent_attachments(files: list[UploadFile] = File(...), case_id: str = Form(...), doc_type: str = Form("other")) -> dict[str, Any]:
     """上传并解析 Agent 附件。
 
     Args:
         files: multipart 上传文件列表。
+        case_id: 已创建案件 ID,用于绑定附件归属。
         doc_type: 文档类型,默认 other。
 
     Returns:
@@ -80,7 +81,7 @@ async def upload_agent_attachments(files: list[UploadFile] = File(...), doc_type
         attachments = []
         for file in files:
             content = await file.read()
-            attachments.append(service.save_upload(file.filename or "attachment", file.content_type, content, doc_type))
+            attachments.append(service.save_upload(file.filename or "attachment", file.content_type, content, doc_type, case_id=case_id))
         log_event(
             logger,
             logging.INFO,

@@ -53,6 +53,8 @@ class AttachmentUploadResponse(BaseModel):
         doc_type: 文档类型。
         format: 抽取正文格式。
         media: 媒体元数据列表。
+        case_id: 归属案件 ID。
+        workspace_artifact_key: 导入案件 workspace 的正文 artifact key。
 
     Returns:
         单个附件上传结果。
@@ -67,6 +69,8 @@ class AttachmentUploadResponse(BaseModel):
     doc_type: str
     format: Literal["markdown", "text"]
     media: list[dict[str, Any]] = Field(default_factory=list)
+    case_id: str
+    workspace_artifact_key: str
 
 
 class AttachmentUploadBatchResponse(BaseModel):

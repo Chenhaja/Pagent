@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings, get_settings
+from app.services.case_service import CaseService
+from app.tools.draft_workspace import DraftWorkspaceTool
 from app.tools.file_extract import AttachmentExtractionError, extract_document
 
 ALLOWED_DOC_TYPES = {"invention_disclosure", "specification", "claims", "office_action", "prior_art", "other"}
@@ -56,7 +58,7 @@ class AttachmentService:
         if count > self.settings.attachment_max_count:
             raise AttachmentServiceError("attachment_count_exceeded", "附件数量超过上限。")
 
-    def save_upload(self, filename: str, content_type: str | None, content: bytes, doc_type: str = "other") -> dict[str, Any]:
+    def save_upload(self, filename: str, content_type: str | None, content: bytes, doc_type: str = "other", case_id: str | None = None) -> dict[str, Any]:
         """保存并解析上传附件。
 
         Args:
@@ -64,6 +66,7 @@ class AttachmentService:
             content_type: 上传内容类型。
             content: 文件二进制内容。
             doc_type: 文档类型枚举。
+            case_id: 已创建案件 ID,用于绑定附件归属。
 
         Returns:
             附件元数据字典。
@@ -71,6 +74,9 @@ class AttachmentService:
         Raises:
             AttachmentServiceError: 当校验或抽取失败时抛出。
         """
+        case = CaseService(settings=self.settings).get_case(case_id or "")
+        if case is None:
+            raise AttachmentServiceError("case_not_found", "请先创建案件并携带有效 case_id。")
         self._validate_doc_type(doc_type)
         suffix = Path(filename).suffix.lower()
         self._validate_suffix(suffix)
@@ -92,6 +98,11 @@ class AttachmentService:
 
         extracted_name = "extracted.md" if extracted.format == "markdown" else "extracted.txt"
         (attachment_dir / extracted_name).write_text(extracted.text, encoding="utf-8")
+        workspace_artifact_key = f"01_input/attachments/{attachment_id}/{extracted_name}"
+        workspace = DraftWorkspaceTool(settings=self.settings, workspace_name=f"tmp_{case['workspace_id']}")
+        observation = workspace.run({"action": "write", "artifact_key": workspace_artifact_key, "content": extracted.text})
+        if observation.error:
+            raise AttachmentServiceError("attachment_workspace_write_failed", "附件正文写入案件 workspace 失败。")
         metadata = {
             "attachment_id": attachment_id,
             "filename": filename,
@@ -102,27 +113,32 @@ class AttachmentService:
             "doc_type": doc_type,
             "format": extracted.format,
             "media": extracted.media,
+            "case_id": case["case_id"],
+            "workspace_artifact_key": workspace_artifact_key,
         }
         (attachment_dir / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         return metadata
 
-    def load_document(self, attachment_id: str) -> dict[str, Any]:
+    def load_document(self, attachment_id: str, case_id: str | None = None) -> dict[str, Any]:
         """读取已上传附件并组织为 workflow document。
 
         Args:
             attachment_id: 附件 ID。
+            case_id: 当前请求案件 ID,用于校验附件归属。
 
         Returns:
             包含正文与元数据的 workflow document。
 
         Raises:
-            AttachmentServiceError: 当附件不存在或不可读取时抛出。
+            AttachmentServiceError: 当附件不存在、不可读取或不属于当前案件时抛出。
         """
         attachment_dir = self._safe_attachment_dir(attachment_id)
         metadata_path = attachment_dir / "metadata.json"
         if not metadata_path.exists():
             raise AttachmentServiceError("attachment_not_found", "附件不存在或已不可读取。")
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("case_id") != case_id:
+            raise AttachmentServiceError("attachment_not_found", "附件不存在或已不可读取。")
         extracted_name = "extracted.md" if metadata.get("format") == "markdown" else "extracted.txt"
         text_path = attachment_dir / extracted_name
         if not text_path.exists():
@@ -135,6 +151,8 @@ class AttachmentService:
             "text": text_path.read_text(encoding="utf-8"),
             "media": metadata.get("media", []),
             "truncated": metadata["truncated"],
+            "case_id": metadata["case_id"],
+            "workspace_artifact_key": metadata.get("workspace_artifact_key"),
         }
 
     def _validate_doc_type(self, doc_type: str) -> None:

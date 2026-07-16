@@ -21,10 +21,10 @@ class InspectingNormalizeNode:
         return NodeResult.need_user_input(output={"message": "stop"}, errors=["stop"])
 
 
-def _make_attachment(tmp_path, text: str = "附件正文") -> str:
+def _make_attachment(settings: Settings, case_id: str, text: str = "附件正文") -> str:
     """创建测试附件并返回 ID。"""
-    service = AttachmentService(settings=Settings(attachment_storage_dir=str(tmp_path)))
-    metadata = service.save_upload("交底书.txt", "text/plain", text.encode("utf-8"), "invention_disclosure")
+    service = AttachmentService(settings=settings)
+    metadata = service.save_upload("交底书.txt", "text/plain", text.encode("utf-8"), "invention_disclosure", case_id=case_id)
     return metadata["attachment_id"]
 
 
@@ -40,9 +40,9 @@ def test_workflow_state_documents_defaults_to_empty_list() -> None:
 
 def test_agent_dispatch_loads_attachments_into_documents(monkeypatch, tmp_path) -> None:
     """dispatch 应按 attachment_ids 加载附件并写入 documents。"""
-    attachment_id = _make_attachment(tmp_path)
     settings = Settings(attachment_storage_dir=str(tmp_path), draft_workspace_dir=str(tmp_path / "drafts"), attachment_max_count=5)
     case_id = CaseService(settings=settings).create_case()["case_id"]
+    attachment_id = _make_attachment(settings, case_id)
     monkeypatch.setattr(
         "app.services.agent_dispatch_service.get_settings",
         lambda: settings,
@@ -62,6 +62,24 @@ def test_agent_dispatch_loads_attachments_into_documents(monkeypatch, tmp_path) 
     injected = next(event for event in normalize_node.seen_state.trace if event["event"] == "attachment_injected")
     assert injected["data"] == {"doc_count": 1, "total_chars": 4}
     assert "附件正文" not in str(injected)
+
+
+def test_agent_dispatch_rejects_cross_case_attachment(monkeypatch, tmp_path) -> None:
+    """dispatch 不应加载其他 case 下的附件。"""
+    settings = Settings(attachment_storage_dir=str(tmp_path), draft_workspace_dir=str(tmp_path / "drafts"), attachment_max_count=5)
+    case_service = CaseService(settings=settings)
+    owner_case_id = case_service.create_case()["case_id"]
+    other_case_id = case_service.create_case()["case_id"]
+    attachment_id = _make_attachment(settings, owner_case_id)
+    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
+    service = AgentDispatchService()
+
+    result = service.dispatch("请生成权利要求", case_id=other_case_id, attachment_ids=[attachment_id])
+
+    assert result["status"] == "requires_user_input"
+    assert result["errors"] == ["attachment_not_found"]
+    assert result["trace"][0]["event"] == "attachment_rejected"
+
 
 
 def test_agent_dispatch_rejects_invalid_attachment_id(monkeypatch, tmp_path) -> None:

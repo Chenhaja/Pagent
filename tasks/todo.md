@@ -13,7 +13,7 @@
   - 验收：`DraftWorkspaceTool` 新增可选 `workspace_name` 且保留旧 `project_id` 行为；`AgentDispatchService` 通过 `CaseService.get_workspace(case_id)` 构造同案 workspace；patent drafting 节点复用同一 workspace；不同 `session_id` 仍只影响 session memory。
   - 验证：`conda run -n autoGLM pytest tests/test_case_service.py tests/test_agent_dispatch_service.py tests/test_patent_drafting_workflow.py`；`conda run -n autoGLM pytest tests/test_draft_workspace.py`；`conda run -n autoGLM python -m compileall app tests scripts`。
 
-- [ ] [Task 3] 绑定附件到案件并导入 workspace。
+- [x] [Task 3] 绑定附件到案件并导入 workspace。
   - 依赖：Task 2。
   - 验收：`/agent/attachments` 必填 `case_id`；`AttachmentService.save_upload(..., case_id=case_id)` 校验 case；metadata 记录 `case_id`、`workspace_artifact_key`；抽取正文写入案件 workspace；`load_document(..., case_id=case_id)` 校验归属；跨 case 读取返回 `attachment_not_found`；dispatch 注入附件使用当前 `case_id`。
   - 验证：`conda run -n autoGLM pytest tests/test_attachment_upload.py tests/test_attachment_inject.py`；`conda run -n autoGLM pytest tests/test_agent_api.py tests/test_patent_drafting_workflow.py`；`conda run -n autoGLM python -m compileall app tests scripts`。

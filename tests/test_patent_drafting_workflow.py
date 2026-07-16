@@ -73,13 +73,14 @@ def test_patent_drafting_workflow_consumes_uploaded_documents(tmp_path, monkeypa
         react_token_budget=2000,
         react_timeout_seconds=5,
     )
+    case_id = CaseService(settings=settings).create_case()["case_id"]
     attachment_id = AttachmentService(settings=settings).save_upload(
         "交底书.txt",
         "text/plain",
         "附件技术交底".encode("utf-8"),
         "invention_disclosure",
+        case_id=case_id,
     )["attachment_id"]
-    case_id = CaseService(settings=settings).create_case()["case_id"]
     monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
 
     result = AgentDispatchService().dispatch("请生成专利文书", case_id=case_id, attachment_ids=[attachment_id])

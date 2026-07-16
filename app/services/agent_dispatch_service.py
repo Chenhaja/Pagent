@@ -197,7 +197,7 @@ class AgentDispatchService:
         service = AttachmentService(settings=settings)
         try:
             service.validate_count(len(attachment_ids))
-            state.documents = [service.load_document(attachment_id) for attachment_id in attachment_ids]
+            state.documents = [service.load_document(attachment_id, case_id=state.case_id) for attachment_id in attachment_ids]
         except AttachmentServiceError as exc:
             state.add_trace_event(event="attachment_rejected", data={"reason": exc.code, "count": len(attachment_ids)})
             return {"status": "requires_user_input", "errors": [exc.code], "message": exc.message, "trace": state.trace}

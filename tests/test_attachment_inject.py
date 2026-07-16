@@ -5,6 +5,7 @@ from app.core.config import Settings
 from app.models.schemas import NodeResult, WorkflowState
 from app.services.agent_dispatch_service import AgentDispatchService
 from app.services.attachment_service import AttachmentService
+from app.services.case_service import CaseService
 from app.main import app
 
 
@@ -40,15 +41,17 @@ def test_workflow_state_documents_defaults_to_empty_list() -> None:
 def test_agent_dispatch_loads_attachments_into_documents(monkeypatch, tmp_path) -> None:
     """dispatch 应按 attachment_ids 加载附件并写入 documents。"""
     attachment_id = _make_attachment(tmp_path)
+    settings = Settings(attachment_storage_dir=str(tmp_path), draft_workspace_dir=str(tmp_path / "drafts"), attachment_max_count=5)
+    case_id = CaseService(settings=settings).create_case()["case_id"]
     monkeypatch.setattr(
         "app.services.agent_dispatch_service.get_settings",
-        lambda: Settings(attachment_storage_dir=str(tmp_path), attachment_max_count=5),
+        lambda: settings,
     )
     normalize_node = InspectingNormalizeNode()
     service = AgentDispatchService()
     service.normalize_node = normalize_node
 
-    result = service.dispatch("请生成权利要求", attachment_ids=[attachment_id])
+    result = service.dispatch("请生成权利要求", case_id=case_id, attachment_ids=[attachment_id])
 
     assert result["status"] == "requires_user_input"
     assert normalize_node.seen_state is not None
@@ -63,10 +66,12 @@ def test_agent_dispatch_loads_attachments_into_documents(monkeypatch, tmp_path) 
 
 def test_agent_dispatch_rejects_invalid_attachment_id(monkeypatch, tmp_path) -> None:
     """dispatch 遇到无效附件 ID 时应返回可读错误。"""
-    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: Settings(attachment_storage_dir=str(tmp_path)))
+    settings = Settings(attachment_storage_dir=str(tmp_path), draft_workspace_dir=str(tmp_path / "drafts"))
+    case_id = CaseService(settings=settings).create_case()["case_id"]
+    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
     service = AgentDispatchService()
 
-    result = service.dispatch("请生成权利要求", attachment_ids=["missing"])
+    result = service.dispatch("请生成权利要求", case_id=case_id, attachment_ids=["missing"])
 
     assert result["status"] == "requires_user_input"
     assert result["errors"] == ["attachment_not_found"]
@@ -75,10 +80,12 @@ def test_agent_dispatch_rejects_invalid_attachment_id(monkeypatch, tmp_path) -> 
 
 def test_agent_dispatch_rejects_too_many_attachment_ids(monkeypatch) -> None:
     """dispatch 应校验单次请求附件数量上限。"""
-    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: Settings(attachment_max_count=1))
+    settings = Settings(attachment_max_count=1)
+    case_id = CaseService(settings=settings).create_case()["case_id"]
+    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
     service = AgentDispatchService()
 
-    result = service.dispatch("请生成权利要求", attachment_ids=["a", "b"])
+    result = service.dispatch("请生成权利要求", case_id=case_id, attachment_ids=["a", "b"])
 
     assert result["status"] == "requires_user_input"
     assert result["errors"] == ["attachment_count_exceeded"]
@@ -91,7 +98,7 @@ def test_agent_api_forwards_attachment_ids(monkeypatch) -> None:
     class StubAgentDispatchService:
         """测试用 dispatch 服务。"""
 
-        def dispatch(self, raw_input, claims_draft=None, session_id=None, attachment_ids=None):
+        def dispatch(self, raw_input, claims_draft=None, case_id=None, session_id=None, attachment_ids=None):
             """记录请求参数并返回成功。"""
             captured["attachment_ids"] = attachment_ids
             return {"status": "success", "intent": "claim_generation", "workflow": "claim_generation", "trace": []}
@@ -99,7 +106,7 @@ def test_agent_api_forwards_attachment_ids(monkeypatch) -> None:
     monkeypatch.setattr(routes, "AgentDispatchService", StubAgentDispatchService)
     client = TestClient(app)
 
-    response = client.post("/agent", json={"raw_input": "继续", "attachment_ids": ["att-1"]})
+    response = client.post("/agent", json={"raw_input": "继续", "case_id": "case_1", "attachment_ids": ["att-1"]})
 
     assert response.status_code == 200
     assert captured["attachment_ids"] == ["att-1"]

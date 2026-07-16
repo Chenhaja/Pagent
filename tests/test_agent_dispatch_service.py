@@ -1,9 +1,16 @@
 from typing import Any
 
+from app.core.config import Settings
 from app.models.schemas import NodeResult, WorkflowState
 from app.nodes.intent_router import IntentRouterNode
 from app.services.agent_dispatch_service import AgentDispatchService
+from app.services.case_service import CaseService
 from app.tools.llm import FakeLLMClient
+
+
+def _create_case_id(settings: Settings | None = None) -> str:
+    """为 dispatch 测试创建已登记案件。"""
+    return CaseService(settings=settings).create_case()["case_id"]
 
 
 DRAFTING_RESULT = {
@@ -114,7 +121,7 @@ def test_agent_dispatch_routes_translation_workflow() -> None:
     """统一 Agent 入口应路由到翻译 workflow。"""
     service = AgentDispatchService()
 
-    result = service.dispatch("请翻译一种控制方法")
+    result = service.dispatch("请翻译一种控制方法", case_id=_create_case_id())
 
     assert result["status"] == "success"
     assert result["intent"] == "translation"
@@ -127,7 +134,7 @@ def test_agent_dispatch_routes_qa_workflow() -> None:
     service = AgentDispatchService()
     service._run_qa = lambda state, workflow_def: {"status": "failed", "errors": ["qa_failed"], "message": "问答失败"}
 
-    result = service.dispatch("请说明创造性的判断思路？")
+    result = service.dispatch("请说明创造性的判断思路？", case_id=_create_case_id())
 
     assert result["status"] == "failed"
     assert result["intent"] == "qa"
@@ -140,7 +147,7 @@ def test_agent_dispatch_uses_rewritten_input_for_intent_router() -> None:
     service = AgentDispatchService()
     service.query_rewrite_node = FixedRewriteNode()
 
-    result = service.dispatch("处理它")
+    result = service.dispatch("处理它", case_id=_create_case_id())
 
     assert result["status"] == "success"
     assert result["intent"] == "translation"
@@ -157,7 +164,7 @@ def test_agent_dispatch_continues_after_query_rewrite_fallback() -> None:
     service = AgentDispatchService()
     service.query_rewrite_node = FallbackRewriteNode()
 
-    result = service.dispatch("请翻译一种控制方法")
+    result = service.dispatch("请翻译一种控制方法", case_id=_create_case_id())
 
     assert result["status"] == "success"
     assert result["intent"] == "translation"
@@ -174,7 +181,7 @@ def test_agent_dispatch_routes_patent_drafting_workflow() -> None:
     service = AgentDispatchService()
     service._run_patent_drafting = lambda state, workflow_def: DRAFTING_RESULT
 
-    result = service.dispatch("请根据技术方案生成权利要求")
+    result = service.dispatch("请根据技术方案生成权利要求", case_id=_create_case_id())
 
     assert result["status"] == "success"
     assert result["intent"] == "patent_drafting"
@@ -188,7 +195,7 @@ def test_agent_dispatch_does_not_persist_unreviewed_complete_patent() -> None:
     service = AgentDispatchService(session_store=store)
     service._run_patent_drafting = lambda state, workflow_def: DRAFTING_RESULT
 
-    result = service.dispatch("请生成专利文书", session_id="s1")
+    result = service.dispatch("请生成专利文书", case_id=_create_case_id(), session_id="s1")
 
     assert result["status"] == "success"
     assert store.appended == [("s1", "user", "请生成专利文书")]
@@ -199,7 +206,7 @@ def test_agent_dispatch_returns_user_input_request_for_unknown_intent() -> None:
     service = AgentDispatchService()
     service.intent_router_node = IntentRouterNode(llm_client=FakeLLMClient(response={"intent": "unknown", "confidence": 0.1}))
 
-    result = service.dispatch("你好")
+    result = service.dispatch("你好", case_id=_create_case_id())
 
     assert result["status"] == "requires_user_input"
     assert result["errors"] == ["unknown_intent"]
@@ -219,7 +226,7 @@ def test_agent_dispatch_injects_session_history_before_query_rewrite() -> None:
     service = AgentDispatchService(session_store=store)
     service.query_rewrite_node = rewrite_node
 
-    result = service.dispatch("翻译它", session_id="s1")
+    result = service.dispatch("翻译它", case_id=_create_case_id(), session_id="s1")
 
     assert result["status"] == "success"
     assert rewrite_node.seen_history == [{"role": "user", "content": "我有一个夹爪方案"}]
@@ -233,7 +240,7 @@ def test_agent_dispatch_without_session_id_keeps_old_no_history_behavior() -> No
     service = AgentDispatchService(session_store=RecordingSessionStore())
     service.query_rewrite_node = rewrite_node
 
-    result = service.dispatch("请翻译一种控制方法")
+    result = service.dispatch("请翻译一种控制方法", case_id=_create_case_id())
 
     events = [event["event"] for event in result["workflow_trace"]]
     assert "session_memory_skipped" in events
@@ -246,7 +253,7 @@ def test_agent_dispatch_appends_user_and_assistant_turns_after_success() -> None
     store = RecordingSessionStore()
     service = AgentDispatchService(session_store=store)
 
-    result = service.dispatch("请翻译一种控制方法", session_id="s1")
+    result = service.dispatch("请翻译一种控制方法", case_id=_create_case_id(), session_id="s1")
 
     assert result["status"] == "success"
     assert store.appended[0] == ("s1", "user", "请翻译一种控制方法")
@@ -259,7 +266,7 @@ def test_agent_dispatch_continues_when_session_store_load_fails() -> None:
     store = RecordingSessionStore(should_fail_load=True)
     service = AgentDispatchService(session_store=store)
 
-    result = service.dispatch("请翻译一种控制方法", session_id="s1")
+    result = service.dispatch("请翻译一种控制方法", case_id=_create_case_id(), session_id="s1")
 
     assert result["status"] == "success"
     events = [event["event"] for event in result["workflow_trace"]]

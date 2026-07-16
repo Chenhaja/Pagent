@@ -1,6 +1,7 @@
 from app.core.config import Settings, get_settings
 from app.models.schemas import NodeResult, WorkflowState
 from app.services.agent_dispatch_service import AgentDispatchService
+from app.services.case_service import CaseService
 
 
 class FailingNormalizeNode:
@@ -13,10 +14,12 @@ class FailingNormalizeNode:
 
 def test_input_limit_allows_exact_limit(monkeypatch) -> None:
     """raw_input 去除首尾空白后等于上限时应放行。"""
-    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: Settings(input_max_chars=4))
+    settings = Settings(input_max_chars=4)
+    case_id = CaseService(settings=settings).create_case()["case_id"]
+    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
     service = AgentDispatchService()
 
-    result = service.dispatch("  翻译文本  ")
+    result = service.dispatch("  翻译文本  ", case_id=case_id)
 
     assert result["status"] == "success"
     assert result["intent"] == "translation"
@@ -24,11 +27,13 @@ def test_input_limit_allows_exact_limit(monkeypatch) -> None:
 
 def test_input_limit_rejects_before_downstream_nodes(monkeypatch) -> None:
     """raw_input 超限时应在 normalize / rewrite / router 前拒绝。"""
-    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: Settings(input_max_chars=3))
+    settings = Settings(input_max_chars=3)
+    case_id = CaseService(settings=settings).create_case()["case_id"]
+    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
     service = AgentDispatchService()
     service.normalize_node = FailingNormalizeNode()
 
-    result = service.dispatch("生成权利")
+    result = service.dispatch("生成权利", case_id=case_id)
 
     assert result["status"] == "requires_user_input"
     assert result["errors"] == ["raw_input_too_long"]

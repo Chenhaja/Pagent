@@ -9,11 +9,13 @@ from app.core.logging import log_event
 from app.api.schemas import (
     AgentRequest,
     AttachmentUploadBatchResponse,
+    CaseCreateResponse,
     TranslateRequest,
     TranslateResponse,
 )
 from app.services.agent_dispatch_service import AgentDispatchService
 from app.services.attachment_service import AttachmentService, AttachmentServiceError
+from app.services.case_service import CaseService
 from app.services.translate_service import TranslateService
 
 DISCLAIMER = "辅助初稿，不等同于专利代理师法律意见。"
@@ -46,6 +48,16 @@ def health_check() -> dict[str, str]:
         固定健康状态,用于确认 API 服务已启动。
     """
     return {"status": "ok"}
+
+
+@router.post("/agent/cases", response_model=CaseCreateResponse)
+def create_agent_case() -> dict[str, Any]:
+    """创建案件并绑定案件 workspace。
+
+    Returns:
+        包含案件 ID、workspace ID 和相对 workspace 路径的响应。
+    """
+    return CaseService().create_case()
 
 
 @router.post("/agent/attachments", response_model=AttachmentUploadBatchResponse)
@@ -107,6 +119,7 @@ def dispatch_agent(request: AgentRequest) -> dict[str, Any]:
         result = AgentDispatchService().dispatch(
             request.raw_input,
             claims_draft=request.claims_draft,
+            case_id=request.case_id,
             session_id=request.session_id,
             attachment_ids=request.attachment_ids,
         )

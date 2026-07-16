@@ -10,6 +10,7 @@ from app.nodes.drafting_content import (
     DraftingReviewDocumentNode,
 )
 from app.services.agent_dispatch_service import AgentDispatchService
+from app.services.case_service import CaseService
 from app.tools.draft_workspace import DraftWorkspaceTool
 
 
@@ -17,13 +18,15 @@ def test_patent_drafting_workflow_generates_markdown_artifacts(tmp_path, monkeyp
     """patent_drafting 应从请求生成完整 Markdown 产物。"""
     from app.core.config import Settings
 
+    settings = Settings(draft_workspace_dir=str(tmp_path), react_max_steps=8, react_token_budget=2000, react_timeout_seconds=5)
+    case_id = CaseService(settings=settings).create_case()["case_id"]
     monkeypatch.setattr(
         "app.services.agent_dispatch_service.get_settings",
-        lambda: Settings(draft_workspace_dir=str(tmp_path), react_max_steps=8, react_token_budget=2000, react_timeout_seconds=5),
+        lambda: settings,
     )
     service = AgentDispatchService()
 
-    result = service.dispatch("请根据一种夹爪控制方法生成专利文书")
+    result = service.dispatch("请根据一种夹爪控制方法生成专利文书", case_id=case_id)
 
     assert result["status"] == "success"
     assert result["intent"] == "patent_drafting"
@@ -57,9 +60,10 @@ def test_patent_drafting_workflow_consumes_uploaded_documents(tmp_path, monkeypa
         "附件技术交底".encode("utf-8"),
         "invention_disclosure",
     )["attachment_id"]
+    case_id = CaseService(settings=settings).create_case()["case_id"]
     monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
 
-    result = AgentDispatchService().dispatch("请生成专利文书", attachment_ids=[attachment_id])
+    result = AgentDispatchService().dispatch("请生成专利文书", case_id=case_id, attachment_ids=[attachment_id])
 
     assert result["status"] == "success"
     assert "附件技术交底" in result["input_points_md"]

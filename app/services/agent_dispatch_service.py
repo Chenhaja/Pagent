@@ -18,6 +18,7 @@ from app.nodes.normalize_input import NormalizeInputNode
 from app.nodes.qa import QANode
 from app.nodes.query_rewrite import QueryRewriteNode
 from app.services.attachment_service import AttachmentService, AttachmentServiceError
+from app.services.case_service import CaseService
 from app.orchestrator.engine import Orchestrator
 from app.orchestrator.workflow_defs import WorkflowDef, WorkflowRegistry
 from app.services.translate_service import TranslateService
@@ -74,6 +75,7 @@ class AgentDispatchService:
         self,
         raw_input: str,
         claims_draft: list[dict[str, Any]] | None = None,
+        case_id: str | None = None,
         session_id: str | None = None,
         attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -82,6 +84,7 @@ class AgentDispatchService:
         Args:
             raw_input: 用户原始输入。
             claims_draft: 修改权利要求时传入的当前权利要求草稿。
+            case_id: 已创建案件 ID,用于绑定案件 workspace。
             session_id: 可选会话标识,用于读取和写入会话记忆。
             attachment_ids: 可选已上传附件 ID 列表。
 
@@ -89,9 +92,24 @@ class AgentDispatchService:
             具体 workflow 的结构化结果,或需要用户补充输入的错误结果。
         """
         settings = get_settings()
+        case = CaseService(settings=settings).get_case(case_id or "")
+        if case is None:
+            state = WorkflowState(raw_input=raw_input, claims_draft=claims_draft or [], case_id=case_id)
+            state.add_trace_event(event="case_rejected", data={"reason": "case_not_found"})
+            return {
+                "status": "requires_user_input",
+                "errors": ["case_not_found"],
+                "message": "请先创建案件并携带有效 case_id。",
+                "trace": state.trace,
+            }
         input_len = len(raw_input.strip())
         if input_len > settings.input_max_chars:
-            state = WorkflowState(raw_input=raw_input, claims_draft=claims_draft or [])
+            state = WorkflowState(
+                raw_input=raw_input,
+                claims_draft=claims_draft or [],
+                case_id=str(case["case_id"]),
+                workspace_id=str(case["workspace_id"]),
+            )
             state.add_trace_event(event="input_length_rejected", data={"input_len": input_len, "limit": settings.input_max_chars})
             return {
                 "status": "requires_user_input",
@@ -99,7 +117,12 @@ class AgentDispatchService:
                 "message": "输入内容过长,请将技术交底书等长文以文件上传,文字框仅填写简短指令。",
                 "trace": state.trace,
             }
-        state = WorkflowState(raw_input=raw_input, claims_draft=claims_draft or [])
+        state = WorkflowState(
+            raw_input=raw_input,
+            claims_draft=claims_draft or [],
+            case_id=str(case["case_id"]),
+            workspace_id=str(case["workspace_id"]),
+        )
         attachment_error = self._inject_attachments(state, attachment_ids or [], settings)
         if attachment_error is not None:
             return attachment_error
@@ -218,6 +241,10 @@ class AgentDispatchService:
         Returns:
             带最新 trace 的服务结果。
         """
+        if state.case_id:
+            result["case_id"] = state.case_id
+        if state.workspace_id:
+            result["workspace_id"] = state.workspace_id
         if not session_id:
             return result
         turn_count = 0

@@ -290,6 +290,8 @@ class WorkflowState(BaseModel):
 
     Args:
         raw_input: 用户原始输入,必须保留用于审计和回退。
+        case_id: 案件 ID,用于 trace 和工作流内传递。
+        workspace_id: 案件 workspace ID,不保存绝对路径。
         normalized_input: 轻量归一化后的输入。
         intent: 意图识别结果。
         dialog_context: 会话上下文快照。
@@ -319,6 +321,8 @@ class WorkflowState(BaseModel):
     """
 
     raw_input: str
+    case_id: str | None = None
+    workspace_id: str | None = None
     normalized_input: str | None = None
     intent: str | None = None
     dialog_context: dict[str, Any] = Field(default_factory=dict)

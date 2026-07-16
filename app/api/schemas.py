@@ -82,11 +82,29 @@ class AttachmentUploadBatchResponse(BaseModel):
     attachments: list[AttachmentUploadResponse]
 
 
+class CaseCreateResponse(BaseModel):
+    """案件创建响应。
+
+    Args:
+        case_id: 案件 ID。
+        workspace_id: 案件 workspace ID。
+        workspace_path: 面向调用方展示的相对 workspace 路径。
+
+    Returns:
+        案件创建 API 响应体。
+    """
+
+    case_id: str
+    workspace_id: str
+    workspace_path: str
+
+
 class AgentRequest(BaseModel):
     """统一 Agent 请求。
 
     Args:
         raw_input: 用户原始输入。
+        case_id: 已创建案件 ID,用于绑定案件 workspace。
         claims_draft: 可选的当前权利要求草稿,用于修改路径。
         session_id: 可选会话标识,用于跨请求会话记忆。
         attachment_ids: 可选附件 ID 列表。
@@ -96,6 +114,7 @@ class AgentRequest(BaseModel):
     """
 
     raw_input: str
+    case_id: str
     claims_draft: list[dict[str, Any]] = Field(default_factory=list)
     session_id: str | None = None
     attachment_ids: list[str] = Field(default_factory=list)

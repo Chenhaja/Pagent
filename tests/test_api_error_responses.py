@@ -1,15 +1,20 @@
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from app.main import app
+from app.services.case_service import CaseService
 
 DISCLAIMER = "辅助初稿，不等同于专利代理师法律意见。"
 
 
-def test_agent_error_response_uses_common_shape_for_unknown_intent() -> None:
+def test_agent_error_response_uses_common_shape_for_unknown_intent(monkeypatch, tmp_path) -> None:
     """统一 Agent 错误响应应使用统一结构。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path / "drafts"))
+    case_id = CaseService(settings=settings).create_case()["case_id"]
+    monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
     client = TestClient(app)
 
-    response = client.post("/agent", json={"raw_input": "你好"})
+    response = client.post("/agent", json={"raw_input": "你好", "case_id": case_id})
 
     assert response.status_code == 400
     assert response.json()["detail"] == {

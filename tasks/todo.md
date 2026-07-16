@@ -37,7 +37,7 @@
   - 验收：`app/tools/subagents/__init__.py` 导出更新；全仓代码无 `LangChainDraftingAgent` / `LangChainInputParserAgent` 可用引用；`allowed_tools` 未声明工具不会传给 `create_agent`；policy 默认拒绝和 deny 优先测试通过；trace/log 不含 prompt 全文、长正文、完整工具输入输出、本地敏感路径、API key、token、secret、password。
   - 验证：`conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py tests/test_input_parser_agent.py tests/test_drafting_agent.py tests/test_security_compliance.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [ ] [Phase 7] 全量回归与提交准备。
+- [x] [Phase 7] 全量回归与提交准备。
   - 依赖：Phase 6。
   - 验收：`conda run -n autoGLM pytest` 通过；`conda run -n autoGLM python -m compileall app tests` 通过；diff 只包含本需求相关改动；无临时文件、密钥或无关改动。
   - 验证：`conda run -n autoGLM pytest && conda run -n autoGLM python -m compileall app tests && git status && git diff`。

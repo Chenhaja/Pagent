@@ -17,7 +17,7 @@
   - 验收：提供稳定工具名 `read_file`、`write_file`；工具执行前调用 policy；policy 拒绝时不访问 workspace；返回受控 JSON 错误且不泄露敏感路径细节。
   - 验证：`conda run -n autoGLM pytest tests/test_file_tool_policy.py tests/test_langchain_agent_runner.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [ ] [Phase 3] 实现通用 `LangChainAgentRunner`。
+- [x] [Phase 3] 实现通用 `LangChainAgentRunner`。
   - 依赖：Phase 2。
   - 验收：支持 node/agent/stage/prompt/allowed_tools/file_policy/output/fallback/settings/workspace/trace 参数；只把 `allowed_tools` 白名单工具传给 `create_agent`；middleware 上下文正确；LLM 不可用时 fallback 写目标 artifact；observation 不返回长正文。
   - 验证：`conda run -n autoGLM pytest tests/test_langchain_agent_runner.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。

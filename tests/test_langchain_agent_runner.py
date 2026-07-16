@@ -2,8 +2,10 @@ import json
 
 from app.core.config import Settings
 from app.tools.draft_workspace import DraftWorkspaceTool
+from app.tools.subagents.agent_runner import LangChainAgentRunner
 from app.tools.subagents.file_policy import FileToolPolicy
 from app.tools.subagents.file_tools import build_file_tools, select_tools
+from app.tracing.sinks import MemoryWorkflowTraceEmitter
 
 
 def test_file_tools_read_and_write_with_policy(tmp_path) -> None:
@@ -49,3 +51,112 @@ def test_select_tools_uses_allowed_tools_order() -> None:
     selected = select_tools(tools, ["write_file", "missing"])
 
     assert selected == [tools["write_file"]]
+
+
+def _fallback_content(reason: str, workspace: DraftWorkspaceTool) -> str:
+    """生成测试用 fallback 正文。"""
+    return f"fallback:{reason}"
+
+
+def test_agent_runner_fallback_writes_output_when_llm_unavailable(tmp_path) -> None:
+    """LLM 不可用时通用 runner 应写入目标 artifact。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=False, llm_base_url=None, llm_model="", llm_api_key=None)
+    workspace = DraftWorkspaceTool(settings)
+    runner = LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["read_file", "write_file"],
+        file_policy=FileToolPolicy(readRoots=["input/"], writeRoots=["output/"]),
+        output_artifact_key="output/result.md",
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=workspace,
+    )
+
+    result = runner.run({"task": "测试"})
+    stored = workspace.run({"action": "read", "artifact_key": "output/result.md"})
+
+    assert result.error is None
+    assert result.evidence == [{"artifact_key": "output/result.md", "done": True}]
+    assert stored.evidence[0]["content"] == "fallback:llm_unavailable"
+
+
+def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkeypatch, tmp_path) -> None:
+    """真实 agent 路径应传入白名单工具和 trace middleware。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    workspace = DraftWorkspaceTool(settings)
+    emitter = MemoryWorkflowTraceEmitter()
+    runner = LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["write_file"],
+        file_policy=FileToolPolicy(writeRoots=["output/"]),
+        output_artifact_key="output/result.md",
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=workspace,
+        workflow_trace_emitter=emitter,
+    )
+    captured = {}
+
+    class FakeAgent:
+        """测试用 LangChain agent。"""
+
+        def invoke(self, payload: dict) -> dict:
+            """模拟 agent 通过工具写入目标 artifact。"""
+            captured["payload"] = payload
+            tool = captured["tools"][0]
+            tool.invoke({"path": "output/result.md", "content": "ok"})
+            return {}
+
+    def fake_create_agent(**kwargs):
+        """捕获 create_agent 参数。"""
+        captured.update(kwargs)
+        return FakeAgent()
+
+    monkeypatch.setattr(runner, "_import_langchain", lambda: (fake_create_agent, lambda **kwargs: object()))
+
+    result = runner.run({"task": "写入结果"})
+
+    assert result.error is None
+    assert [tool.name for tool in captured["tools"]] == ["write_file"]
+    assert captured["middleware"][0].node_name == "node"
+    assert captured["middleware"][0].stage == "stage"
+    assert captured["middleware"][0].agent_name == "agent"
+    assert "系统 prompt" == captured["system_prompt"]
+
+
+def test_agent_runner_policy_blocks_wrapped_tool_before_workspace(monkeypatch, tmp_path) -> None:
+    """runner 传入 create_agent 的工具应在 workspace 前执行 policy。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    workspace = DraftWorkspaceTool(settings)
+    runner = LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["write_file"],
+        file_policy=FileToolPolicy(writeRoots=["output/"]),
+        output_artifact_key="output/result.md",
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=workspace,
+    )
+
+    def fail_run(tool_input: dict):
+        """越权工具调用不能触达 workspace。"""
+        raise AssertionError("workspace should not be touched")
+
+    monkeypatch.setattr(workspace, "run", fail_run)
+    tool = runner._allowed_langchain_tools()[0]
+
+    result = json.loads(tool.invoke({"path": "secrets/result.md", "content": "x"}))
+
+    assert result == {"error": "file_access_denied"}

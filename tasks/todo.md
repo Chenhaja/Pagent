@@ -22,7 +22,7 @@
   - 验收：支持 node/agent/stage/prompt/allowed_tools/file_policy/output/fallback/settings/workspace/trace 参数；只把 `allowed_tools` 白名单工具传给 `create_agent`；middleware 上下文正确；LLM 不可用时 fallback 写目标 artifact；observation 不返回长正文。
   - 验证：`conda run -n autoGLM pytest tests/test_langchain_agent_runner.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。
 
-- [ ] [Phase 4] 迁移 input parser 路径并删除 `LangChainInputParserAgent`。
+- [x] [Phase 4] 迁移 input parser 路径并删除 `LangChainInputParserAgent`。
   - 依赖：Phase 3。
   - 验收：`DraftingParseInputNode` 默认使用通用 runner；通过参数传入 `INPUT_PARSER_PROMPT`、`allowed_tools`、file policy；只读 `01_input/raw_document.md`、只写 `01_input/parsed_info.json`；fallback 仍写合法 JSON object；代码和测试不再依赖 `LangChainInputParserAgent`。
   - 验证：`conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_research_nodes.py tests/test_workflow_trace_events.py && conda run -n autoGLM python -m compileall app tests`。

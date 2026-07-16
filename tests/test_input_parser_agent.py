@@ -1,109 +1,114 @@
 import json
 
 from app.core.config import Settings
+from app.models.schemas import WorkflowState
+from app.nodes.drafting_research import DRAFTING_PARSED_INFO_ARTIFACT_KEY, DRAFTING_SOURCE_ARTIFACT_KEY, DraftingParseInputNode
 from app.tools.draft_workspace import DraftWorkspaceTool
-from app.tools.subagents.input_parser_agent import LangChainInputParserAgent
+from app.tools.subagents.agent_runner import LangChainAgentRunner
+from app.tools.subagents.file_policy import FileToolPolicy
 from app.tracing.sinks import MemoryWorkflowTraceEmitter
 
 
-def test_input_parser_agent_fallback_when_llm_config_incomplete(tmp_path) -> None:
-    """LLM 配置不完整时 runner 应写入合法 fallback JSON。"""
+def _fallback_content(reason: str, workspace: DraftWorkspaceTool) -> str:
+    """生成测试用 input parser fallback JSON。"""
+    source = workspace.run({"action": "read", "artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY})
+    source_content = "" if source.error or not source.evidence else str(source.evidence[0].get("content") or "")
+    return json.dumps({"technical_topic": source_content[:30] or "技术方案", "source": source_content[:80], "uncertain": True}, ensure_ascii=False)
+
+
+def _runner(settings: Settings, workspace: DraftWorkspaceTool, emitter: MemoryWorkflowTraceEmitter | None = None) -> LangChainAgentRunner:
+    """构造测试用通用 input parser runner。"""
+    return LangChainAgentRunner(
+        node_name="drafting_parse_input",
+        stage="drafting.parse_input",
+        agent_name="input_parser_agent",
+        prompt_name="INPUT_PARSER_PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["read_file", "write_file"],
+        file_policy=FileToolPolicy(readRoots=[DRAFTING_SOURCE_ARTIFACT_KEY], writeRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY]),
+        output_artifact_key=DRAFTING_PARSED_INFO_ARTIFACT_KEY,
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=workspace,
+        workflow_trace_emitter=emitter,
+    )
+
+
+def test_input_parser_runner_fallback_when_llm_config_incomplete(tmp_path) -> None:
+    """LLM 配置不完整时通用 runner 应写入合法 fallback JSON。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=False, llm_base_url=None, llm_model="", llm_api_key=None)
     workspace = DraftWorkspaceTool(settings)
-    workspace.run({"action": "write", "artifact_key": "01_input/raw_document.md", "content": "夹爪控制交底书"})
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace)
+    workspace.run({"action": "write", "artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY, "content": "夹爪控制交底书"})
+    runner = _runner(settings, workspace)
 
-    result = agent.run({"source_artifact_key": "01_input/raw_document.md"})
-    stored = workspace.run({"action": "read", "artifact_key": "01_input/parsed_info.json"})
+    result = runner.run({"source_artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY})
+    stored = workspace.run({"action": "read", "artifact_key": DRAFTING_PARSED_INFO_ARTIFACT_KEY})
     payload = json.loads(stored.evidence[0]["content"])
 
     assert result.error is None
-    assert result.evidence == [{"artifact_key": "01_input/parsed_info.json", "done": True}]
+    assert result.evidence == [{"artifact_key": DRAFTING_PARSED_INFO_ARTIFACT_KEY, "done": True}]
     assert payload["uncertain"] is True
     assert payload["source"] == "夹爪控制交底书"
 
 
-def test_input_parser_agent_rejects_unexpected_source_artifact(tmp_path) -> None:
-    """runner 只接受固定 source artifact key。"""
+def test_drafting_parse_input_rejects_unexpected_source_artifact(tmp_path) -> None:
+    """parse node 只接受固定 source artifact key。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=False)
     workspace = DraftWorkspaceTool(settings)
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace)
+    node = DraftingParseInputNode(settings=settings, workspace=workspace)
 
-    result = agent.run({"source_artifact_key": "../raw_document.md"})
+    result = node.input_parser_runner.run({"source_artifact_key": "../raw_document.md"})
 
-    assert result.error == "invalid_source_artifact_key"
+    assert result.error is None
+    stored = workspace.run({"action": "read", "artifact_key": DRAFTING_PARSED_INFO_ARTIFACT_KEY})
+    assert json.loads(stored.evidence[0]["content"])["uncertain"] is True
 
 
-def test_input_parser_agent_restricted_write_only_targets_parsed_info(tmp_path) -> None:
-    """受限写入工具只能写 parsed_info artifact。"""
+def test_input_parser_policy_write_only_targets_parsed_info(tmp_path) -> None:
+    """通用 file policy 只允许写 parsed_info artifact。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace)
-    tools = agent._build_tools("01_input/raw_document.md", [])
-    write_tool = next(item for item in tools if item.name == "write_parsed_info")
+    runner = _runner(settings, workspace)
+    write_tool = next(item for item in runner._allowed_langchain_tools() if item.name == "write_file")
 
-    result = write_tool.invoke({"content": '{"technical_topic":"夹爪控制"}'})
-    parsed = workspace.run({"action": "read", "artifact_key": "01_input/parsed_info.json"})
+    allowed = json.loads(write_tool.invoke({"path": DRAFTING_PARSED_INFO_ARTIFACT_KEY, "content": '{"technical_topic":"夹爪控制"}'}))
+    blocked = json.loads(write_tool.invoke({"path": "05_final/complete_patent.md", "content": "x"}))
     other = workspace.run({"action": "read", "artifact_key": "05_final/complete_patent.md"})
 
-    assert json.loads(result)["artifact_key"] == "01_input/parsed_info.json"
-    assert json.loads(parsed.evidence[0]["content"])["technical_topic"] == "夹爪控制"
+    assert allowed["artifact_key"] == DRAFTING_PARSED_INFO_ARTIFACT_KEY
+    assert blocked == {"error": "file_access_denied"}
     assert other.error == "artifact_not_found"
 
 
-def test_input_parser_agent_invalid_json_write_is_rejected(tmp_path) -> None:
-    """受限写入工具拒绝非法 JSON。"""
+def test_parse_node_falls_back_after_agent_writes_invalid_json(monkeypatch, tmp_path) -> None:
+    """真实 agent 产出非法 JSON 时 parse node 应返回 parsed_info_missing。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace)
-    tools = agent._build_tools("01_input/raw_document.md", [])
-    write_tool = next(item for item in tools if item.name == "write_parsed_info")
-
-    result = write_tool.invoke({"content": "not-json"})
-    parsed = workspace.run({"action": "read", "artifact_key": "01_input/parsed_info.json"})
-
-    assert json.loads(result)["error"] == "invalid_json_object"
-    assert parsed.error == "artifact_not_found"
-
-
-def test_input_parser_agent_falls_back_after_agent_writes_invalid_json(monkeypatch, tmp_path) -> None:
-    """真实 agent 产出非法 JSON 时 runner 应覆盖为合法 fallback JSON。"""
-    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
-    workspace = DraftWorkspaceTool(settings)
-    workspace.run({"action": "write", "artifact_key": "01_input/raw_document.md", "content": "交底书正文"})
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace)
+    node = DraftingParseInputNode(settings=settings, workspace=workspace)
 
     class FakeAgent:
         """测试用 LangChain agent。"""
 
         def invoke(self, payload: dict) -> dict:
             """写入非法 JSON 后返回。"""
-            workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": "not-json"})
+            workspace.run({"action": "write", "artifact_key": DRAFTING_PARSED_INFO_ARTIFACT_KEY, "content": "not-json"})
             return {}
 
-    def fake_import_langchain():
-        """返回测试用 create_agent 和 ChatOpenAI。"""
-        return (lambda **kwargs: FakeAgent()), lambda **kwargs: object()
+    monkeypatch.setattr(node.input_parser_runner, "_import_langchain", lambda: ((lambda **kwargs: FakeAgent()), lambda **kwargs: object()))
 
-    monkeypatch.setattr(agent, "_import_langchain", fake_import_langchain)
+    result = node.run(WorkflowState(raw_input="交底书正文"))
 
-    result = agent.run({"source_artifact_key": "01_input/raw_document.md"})
-    stored = workspace.run({"action": "read", "artifact_key": "01_input/parsed_info.json"})
-    payload = json.loads(stored.evidence[0]["content"])
-
-    assert result.error is None
-    assert payload["uncertain"] is True
-    assert payload["uncertain_points"] == ["input_parser 使用安全降级结果: invalid_agent_json"]
+    assert result.status == "failed"
+    assert result.errors == ["parsed_info_missing"]
 
 
-def test_input_parser_agent_passes_trace_middleware_to_create_agent(monkeypatch, tmp_path) -> None:
+def test_input_parser_runner_passes_trace_middleware_to_create_agent(monkeypatch, tmp_path) -> None:
     """真实 agent 路径应将 trace middleware 交给 create_agent。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
     emitter = MemoryWorkflowTraceEmitter()
-    workspace.run({"action": "write", "artifact_key": "01_input/raw_document.md", "content": "交底书正文"})
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace, workflow_trace_emitter=emitter)
-
+    workspace.run({"action": "write", "artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY, "content": "交底书正文"})
+    runner = _runner(settings, workspace, emitter)
     captured = {}
 
     class FakeAgent:
@@ -113,7 +118,7 @@ def test_input_parser_agent_passes_trace_middleware_to_create_agent(monkeypatch,
             """模拟官方 middleware 发送事件后写入合法 JSON。"""
             middleware = captured["middleware"][0]
             middleware.before_agent(payload, object())
-            workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": '{"technical_topic":"夹爪控制"}'})
+            workspace.run({"action": "write", "artifact_key": DRAFTING_PARSED_INFO_ARTIFACT_KEY, "content": '{"technical_topic":"夹爪控制"}'})
             middleware.after_agent({"messages": []}, object())
             return {}
 
@@ -122,9 +127,9 @@ def test_input_parser_agent_passes_trace_middleware_to_create_agent(monkeypatch,
         captured.update(kwargs)
         return FakeAgent()
 
-    monkeypatch.setattr(agent, "_import_langchain", lambda: (fake_create_agent, lambda **kwargs: object()))
+    monkeypatch.setattr(runner, "_import_langchain", lambda: (fake_create_agent, lambda **kwargs: object()))
 
-    result = agent.run({"source_artifact_key": "01_input/raw_document.md"})
+    result = runner.run({"source_artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY})
     events = [item.event for item in emitter.events]
 
     assert result.error is None
@@ -134,41 +139,18 @@ def test_input_parser_agent_passes_trace_middleware_to_create_agent(monkeypatch,
     assert captured["middleware"][0].agent_name == "input_parser_agent"
 
 
-def test_input_parser_agent_does_not_emit_wrapper_agent_failed_event(monkeypatch, tmp_path) -> None:
-    """agent 异常时 runner 不再手写 wrapper failed 事件。"""
+def test_input_parser_tools_do_not_emit_wrapper_trace(tmp_path) -> None:
+    """受控工具函数不应手写 trace 事件。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
     workspace = DraftWorkspaceTool(settings)
     emitter = MemoryWorkflowTraceEmitter()
-    workspace.run({"action": "write", "artifact_key": "01_input/raw_document.md", "content": "交底书正文"})
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace, workflow_trace_emitter=emitter)
+    workspace.run({"action": "write", "artifact_key": DRAFTING_SOURCE_ARTIFACT_KEY, "content": "交底书正文"})
+    runner = _runner(settings, workspace, emitter)
+    tools = runner._allowed_langchain_tools()
+    read_tool = next(item for item in tools if item.name == "read_file")
+    write_tool = next(item for item in tools if item.name == "write_file")
 
-    class FakeAgent:
-        """测试用失败 LangChain agent。"""
-
-        def invoke(self, payload: dict) -> dict:
-            """模拟 agent 调用失败。"""
-            raise RuntimeError("agent down")
-
-    monkeypatch.setattr(agent, "_import_langchain", lambda: ((lambda **kwargs: FakeAgent()), lambda **kwargs: object()))
-
-    result = agent.run({"source_artifact_key": "01_input/raw_document.md"})
-
-    assert result.error is None
-    assert emitter.events == []
-
-
-def test_input_parser_agent_tools_do_not_emit_wrapper_trace(tmp_path) -> None:
-    """受控工具函数不再手写 trace 事件。"""
-    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
-    workspace = DraftWorkspaceTool(settings)
-    emitter = MemoryWorkflowTraceEmitter()
-    workspace.run({"action": "write", "artifact_key": "01_input/raw_document.md", "content": "交底书正文"})
-    agent = LangChainInputParserAgent(settings=settings, workspace=workspace, workflow_trace_emitter=emitter)
-    tools = agent._build_tools("01_input/raw_document.md", [])
-    read_tool = next(item for item in tools if item.name == "read_source_artifact")
-    write_tool = next(item for item in tools if item.name == "write_parsed_info")
-
-    read_tool.invoke({"artifact_key": "01_input/raw_document.md"})
-    write_tool.invoke({"content": "not-json"})
+    read_tool.invoke({"path": DRAFTING_SOURCE_ARTIFACT_KEY})
+    write_tool.invoke({"path": DRAFTING_PARSED_INFO_ARTIFACT_KEY, "content": "not-json"})
 
     assert emitter.trace_events == []

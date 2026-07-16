@@ -1,57 +1,82 @@
-# Pagent create_agent Middleware Trace 规格
+# Pagent 专利文书 Workflow create_agent 拓扑规格
 
 ## 1. Objective
 
 ### 1.1 背景
 
-当前项目已经完成 `WorkflowTraceEvent` schema、`WorkflowTraceEmitter`、logger sink、progress projection，以及 `DraftingParseInputNode` 到 `WorkflowState.trace` 的汇总链路。现有试点能把 `LangChainInputParserAgent` 的 agent / tool 活动写入 workflow trace，但实现方式是在 `LangChainInputParserAgent` 的工具 wrapper 中手写 `_emit_agent_event()` / `_emit_tool_event()`。
+当前 `DraftingParseInputNode` 已基本验证 `create_agent + middleware trace` 模式，能够通过对应 prompt 驱动 node 内 agent 自主完成任务，并把 agent / tool 活动接入现有 workflow trace。下一阶段目标不是只把该模式复制到单个节点，而是调整专利文书 drafting workflow 的显式拓扑，使 workflow 本身更贴近专利撰写业务流程。
 
-这类手写 wrapper trace 适合验证 schema 和汇总链路，但不适合继续推广：
+目标参考流程为：输入解析后进入检索和大纲阶段，再按“权利要求 → 说明书 → 附图/摘要 → 合并终稿”的依赖关系组织。每个核心业务节点应有明确的 `app/prompts/subagents` prompt 对应，并在节点内部使用 `create_agent` 执行任务和采集 middleware trace。
 
-- 每个 create_agent runner 都要重复写 started / completed / failed 打点。
-- 每个工具函数混入 trace 采集逻辑，业务工具和可观测性耦合。
-- 每个 node 单独注入、收集 tool trace，推广到多个 agent node 后会产生大量模板代码。
-- 手写 wrapper 只能覆盖我们显式包裹的 tool call，不能系统性表达 create_agent 内部的 model call、agent step / reasoning step 等活动。
+### 1.2 目标用户
 
-本阶段目标是：**用 LangChain 官方 create_agent middleware / callback / stream events 能力完全替代当前 `LangChainInputParserAgent` 中的手写 wrapper trace 事件**，并继续输出项目统一的 `WorkflowTraceEvent`，由现有 `NodeResult.trace_events` / `WorkflowState.trace` 管理。
+- Pagent drafting workflow 维护者：需要清楚看到每个专利文书业务步骤的 node 边界、prompt 对应关系和 trace 行为。
+- 后续 agent node 开发者：新增或调整专利文书节点时，按同一 `create_agent` runner 模式接入。
+- 调试和观测使用者：通过 workflow trace 理解每个节点内部 agent、model、tool 调用过程。
 
-### 1.2 目标
+### 1.3 目标
 
-- create_agent 内部 trace 采集来源改为 LangChain 官方 middleware / callback / stream events。
-- 移除或停止使用 `LangChainInputParserAgent` 中手写的 `_emit_agent_event()` / `_emit_tool_event()` wrapper 事件。
-- middleware 捕获 create_agent 内部调用事件，并通过 adapter 转换为 `WorkflowTraceEvent`。
-- 覆盖不止 tool call，还要覆盖：
-  - agent started / completed / failed；
-  - model call started / completed / failed；
-  - tool call started / completed / failed；
-  - agent step / reasoning step。
-- 工具函数继续只负责业务安全边界，例如 artifact key 白名单、附件路径限制、受控读写；middleware 只负责捕获调用事件。
-- trace 内容必须经过脱敏 / 摘要转换，禁止把 LangChain 原始输入输出直接写入 workflow trace。
-- 默认测试不触网、不调用真实外部 LLM。
+- 将专利文书 workflow 拓扑调整为显式 DAG，而不是粗粒度线性节点。
+- 每个核心 prompt 都有明确 node 对应，并在 node 内使用 `create_agent`：
+  - `INPUT_PARSER_PROMPT` → `DraftingParseInputNode`
+  - `PATENT_SEARCHER_PROMPT` → `DraftingPatentSearchNode`
+  - `OUTLINE_GENERATOR_PROMPT` → `DraftingGenerateOutlineNode`
+  - `CLAIMS_WRITER_PROMPT` → `DraftingClaimsWriterNode`
+  - `DESCRIPTION_WRITER_PART1_PROMPT` / `DESCRIPTION_WRITER_PART2_PROMPT` → 说明书节点
+  - `DIAGRAM_GENERATOR_PROMPT` → `DraftingDiagramGeneratorNode`
+  - `ABSTRACT_WRITER_PROMPT` → `DraftingAbstractWriterNode`
+  - `MARKDOWN_MERGER_PROMPT` → `DraftingMergeDocumentNode`
+- 拆除当前 `DraftingGenerateSectionsNode` 的多职责聚合，把权利要求、说明书、附图、摘要拆成显式 workflow 步骤。
+- 说明书输出采用“单 workflow 节点 + 内部分段续写”策略：workflow 层暴露一个说明书节点，节点内部可使用 Part1 / Part2 prompt 控制长输出和截断风险。
+- `DraftingMergeDocumentNode` 不再只是纯代码拼接，还应通过 `MARKDOWN_MERGER_PROMPT + create_agent` 完成终稿整合、章节一致性检查、附图是否正确生成等任务。
+- 每个 create_agent 节点都接入官方 middleware trace，并通过现有 `WorkflowTraceEvent` / `NodeResult.trace_events` / `WorkflowState.trace` 汇总。
+- 最终 API 输出字段语义保持兼容。
 
-完成标准：
+### 1.4 新 workflow 拓扑
 
-- `LangChainInputParserAgent` 不再在每个工具 wrapper 内手写 `tool_call_started` / `tool_call_completed` / `tool_call_failed`。
-- `LangChainInputParserAgent` 不再依赖手写 `_emit_agent_event()` 表达 create_agent 生命周期。
-- create_agent 执行路径能从官方 middleware / callback / stream events 采集 agent、model、tool、step 事件。
-- 采集事件统一转换为 `WorkflowTraceEvent`，并进入 `NodeResult.trace_events` / `WorkflowState.trace`。
-- `DraftingParseInputNode` 仍能看到 input parsed 前后的 workflow trace，且不泄露交底书正文、prompt 全文、完整工具参数、完整工具返回、附件本地路径、API key、token、secret、password。
-- 旧 `tool_registry` 注入路径继续可用，不因 create_agent middleware trace 改造失败。
+目标拓扑：
 
-### 1.3 目标用户
+```text
+DraftingParseInputNode
+├─ DraftingPatentSearchNode
+└─ DraftingGenerateOutlineNode
 
-- 后端维护者：通过 workflow trace / 日志看到 create_agent 内部 agent、model、tool、step 活动。
-- 后续前端：未来可从同一 workflow trace 投影用户可理解的进度。
-- agent node 开发者：新增 create_agent node 时复用统一 middleware trace，不再逐个工具手写 trace wrapper。
+DraftingPatentSearchNode + DraftingGenerateOutlineNode
+→ DraftingClaimsWriterNode
+→ DraftingDescriptionWriterNode
 
-### 1.4 非目标
+DraftingDescriptionWriterNode
+├─ DraftingDiagramGeneratorNode
+└─ DraftingAbstractWriterNode
 
-- 不另起独立于 workflow trace 的 agent trace 事实流。
-- 不把 LangChain 原始 callback payload 直接暴露给前端或写入 `WorkflowState.trace`。
-- 不在本阶段实现 SSE、WebSocket、API 实时推送或 trace 持久化。
-- 不迁移所有普通 node 到新 schema。
-- 不迁移所有 agent node；本阶段仍以 `LangChainInputParserAgent` / `DraftingParseInputNode` 为试点。
-- 不保留手写 wrapper trace 作为同一事件的并行来源；如果官方能力无法覆盖目标事件，本阶段应阻塞并重新确认，而不是偷偷回退为 wrapper 方案。
+DraftingClaimsWriterNode
+DraftingDescriptionWriterNode
+DraftingDiagramGeneratorNode
+DraftingAbstractWriterNode
+→ DraftingMergeDocumentNode
+→ DraftingFinalizeNode
+```
+
+说明：
+
+- `DraftingParseInputNode` 负责把用户输入和附件资料解析为结构化输入 artifact。
+- `DraftingPatentSearchNode` 使用 agent 自主完成检索任务，可调用专利搜索、论文搜索、workspace 等工具，并产出现有技术/参考资料 artifact。
+- `DraftingGenerateOutlineNode` 使用解析结果和检索参考生成专利文书大纲。
+- `DraftingClaimsWriterNode` 根据大纲、检索资料和解析结果撰写权利要求。
+- `DraftingDescriptionWriterNode` 根据权利要求、大纲和素材撰写说明书；内部使用 Part1 / Part2 prompt 分段生成，避免长输出截断。
+- `DraftingDiagramGeneratorNode` 根据说明书和输入资料生成附图/流程图说明，并输出可合并 artifact。
+- `DraftingAbstractWriterNode` 根据权利要求和说明书生成摘要。
+- `DraftingMergeDocumentNode` 汇总权利要求、说明书、附图、摘要，并用 agent 检查终稿结构和附图生成情况。
+- `DraftingFinalizeNode` 只负责最终 API 兼容字段回填，不使用 `create_agent`。
+
+### 1.5 非目标
+
+- 不改 QA workflow，也不处理 QA trace 与当前 drafting trace 的接轨问题。
+- 不改变最终 API 输出字段语义。
+- 不引入独立于 workflow trace 的第二套 agent trace 事实流。
+- 不把所有专利文书逻辑重新塞回一个大 node。
+- 不把 prompt 内联散落到业务逻辑中。
+- 不在本规格阶段开始实现代码。
 
 ---
 
@@ -60,20 +85,20 @@
 所有 Python / pytest / 编译命令必须使用 conda 环境 `autoGLM`：
 
 ```bash
-# create_agent middleware trace 试点测试
-conda run -n autoGLM pytest tests/test_input_parser_agent.py
+# drafting workflow 拓扑与端到端回归
+conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py
 
-# DraftingParseInputNode trace 汇总测试
+# drafting research / parse / search 节点回归
 conda run -n autoGLM pytest tests/test_drafting_research_nodes.py
 
-# WorkflowTraceEvent schema / sink / projection 回归
-conda run -n autoGLM pytest tests/test_workflow_trace_events.py
+# drafting content 节点回归
+conda run -n autoGLM pytest tests/test_drafting_content_nodes.py
 
-# Orchestrator schema trace 保留回归
+# create_agent runner / middleware trace 回归
+conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py
+
+# orchestrator trace 汇总回归
 conda run -n autoGLM pytest tests/test_orchestrator_engine.py
-
-# drafting 端到端回归
-conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py
 
 # 安全合规回归
 conda run -n autoGLM pytest tests/test_security_compliance.py
@@ -88,139 +113,119 @@ conda run -n autoGLM python -m compileall app tests
 约束：
 
 - 默认测试不得触网，不得调用真实外部 LLM。
-- 如果需要依赖 LangChain 已安装能力，必须先基于当前环境 API 验证；不得凭印象假设 API 名称。
-- 如新增依赖，必须同步更新 `requirements.txt`；优先不新增依赖。
+- 如新增依赖，必须先确认，并同步更新 `requirements.txt`。
+- 优先复用当前 LangChain / create_agent / middleware trace 能力，不凭印象假设 API。
 - 不执行 `git push`、`git reset --hard`、强制推送等危险操作，除非用户明确确认。
-- 每完成一个可独立验证阶段，按项目规范单独提交。
+- 每完成一个可独立验证阶段，按项目规范单独 commit；提交前只添加相关文件。
 
 ---
 
 ## 3. Project Structure
 
-优先复用现有 trace 结构，不新增与 workflow trace 并行的事实流。
+目标结构应围绕“workflow node + subagent runner + prompt + trace adapter”组织。
 
 ```text
 pagent/
   app/
-    tracing/
-      workflow_trace.py              # WorkflowTraceEvent schema、事件枚举、脱敏摘要
-      sinks.py                       # WorkflowTraceEmitter、memory/logger/noop sink
-      langchain_trace.py             # LangChain middleware/callback/stream event -> WorkflowTraceEvent adapter
+    nodes/
+      drafting_research.py          # 输入解析、检索相关 workflow nodes
+      drafting_content.py           # 大纲、权利要求、说明书、附图、摘要、合并、finalize nodes
+      drafting_guidance.py          # 如不再需要独立 drawing/style guide node，应清理或保留兼容边界
+    prompts/
+      subagents/
+        input_parser_prompt.py
+        patent_searcher_prompt.py
+        outline_generator_prompt.py
+        claims_writer_prompt.py
+        description_writer_part1_prompt.py
+        description_writer_part2_prompt.py
+        diagram_generator_prompt.py
+        abstract_writer_prompt.py
+        markdown_merger_prompt.py
     tools/
       subagents/
-        input_parser_agent.py        # create_agent 试点 runner，接入 LangChain trace adapter
-    nodes/
-      drafting_research.py           # DraftingParseInputNode 汇总 NodeResult.trace_events
+        input_parser_agent.py       # 已有 create_agent runner 样板
+        drafting_agent.py           # 可选：通用 drafting create_agent runner/helper
+    tracing/
+      workflow_trace.py             # 统一 trace schema 与脱敏摘要
+      sinks.py                      # WorkflowTraceEmitter
+      langchain_trace.py            # LangChain 官方事件 -> WorkflowTraceEvent adapter
+    orchestrator/
+      workflow_defs.py              # patent_drafting workflow 拓扑定义
   tests/
-    test_workflow_trace_events.py
-    test_input_parser_agent.py
+    test_patent_drafting_workflow.py
     test_drafting_research_nodes.py
-    test_orchestrator_engine.py
+    test_drafting_content_nodes.py
+    test_input_parser_agent.py
+    test_workflow_trace_events.py
 ```
 
-如实现时发现 LangChain 当前版本的官方入口更适合放在其他模块，允许调整文件名，但职责必须保持：
+### 3.1 Node 与 Prompt 对应关系
 
-- `workflow_trace.py`：项目统一 schema 和脱敏摘要。
-- `sinks.py`：项目内部事件发送/收集/日志 sink。
-- `langchain_trace.py`：LangChain 官方事件到 `WorkflowTraceEvent` 的 adapter。
-- `input_parser_agent.py`：只装配 create_agent、工具、安全业务逻辑和 trace adapter，不再在每个 tool 里手写 trace 事件。
+| Node | Prompt | create_agent | 主要输出 artifact |
+| --- | --- | --- | --- |
+| `DraftingParseInputNode` | `INPUT_PARSER_PROMPT` | 是 | `01_input/parsed_info.json` |
+| `DraftingPatentSearchNode` | `PATENT_SEARCHER_PROMPT` | 是 | `02_research/patent_search_results.json` / 现有技术分析 artifact |
+| `DraftingGenerateOutlineNode` | `OUTLINE_GENERATOR_PROMPT` | 是 | `03_outline/patent_outline.md` |
+| `DraftingClaimsWriterNode` | `CLAIMS_WRITER_PROMPT` | 是 | `04_content/claims.md` |
+| `DraftingDescriptionWriterNode` | `DESCRIPTION_WRITER_PART1_PROMPT` + `DESCRIPTION_WRITER_PART2_PROMPT` | 是 | `04_content/description.md` |
+| `DraftingDiagramGeneratorNode` | `DIAGRAM_GENERATOR_PROMPT` | 是 | `04_content/figures.md` |
+| `DraftingAbstractWriterNode` | `ABSTRACT_WRITER_PROMPT` | 是 | `04_content/abstract.md` |
+| `DraftingMergeDocumentNode` | `MARKDOWN_MERGER_PROMPT` | 是 | `05_final/complete_patent.md`，可附带 review/report artifact |
+| `DraftingFinalizeNode` | 无 | 否 | API 兼容字段回填 |
 
-### 3.1 LangChain Trace Adapter
+### 3.2 说明书节点策略
 
-新增 LangChain trace adapter，负责把官方 middleware / callback / stream events 转换成项目 schema。
-
-建议职责：
+说明书在 workflow 层使用一个 `DraftingDescriptionWriterNode`，避免 workflow 拓扑过碎；节点内部使用两个阶段：
 
 ```text
-LangChain official event
-  -> normalize event type
-  -> sanitize input/output/error payload
-  -> map to WorkflowTraceEvent
-  -> safe_emit_workflow_trace(emitter, event)
+DraftingDescriptionWriterNode
+  -> create_agent / part1 prompt：技术领域、背景技术、发明内容、附图说明等
+  -> create_agent / part2 prompt：具体实施方式等长文本续写
+  -> 合并为 04_content/description.md
 ```
 
-adapter 必须输出项目统一 `WorkflowTraceEvent`，不得把 LangChain 原始 payload 直接塞进 `metadata`。
+要求：
 
-### 3.2 事件覆盖
+- Part1 / Part2 的中间产物可写入临时 artifact，但最终对下游暴露 `04_content/description.md`。
+- 节点内部必须记录每个 agent 阶段的 middleware trace。
+- Part2 必须能读取 Part1 输出、权利要求和大纲，降低上下文断裂。
+- 不用一个超长 prompt 强行一次生成完整说明书。
 
-本阶段至少覆盖以下事件族：
+### 3.3 Trace 汇总链路
 
-| WorkflowTraceEvent.event | 来源 | 要求 |
-| --- | --- | --- |
-| `agent_started` | create_agent invoke 开始或等价官方事件 | 包含 node_name、stage、agent_name |
-| `agent_completed` | create_agent 正常结束或等价官方事件 | 包含 duration / output_summary |
-| `agent_failed` | create_agent 异常或等价官方事件 | 包含 error_type / error_message 摘要 |
-| `model_call_started` | LLM/model 调用开始 | 不记录完整 prompt/messages |
-| `model_call_completed` | LLM/model 调用成功 | 可记录 token/模型名/耗时等短字段，如官方事件提供 |
-| `model_call_failed` | LLM/model 调用失败 | 只记录错误类型和短错误摘要 |
-| `tool_call_started` | 工具调用开始 | 只记录工具名、调用 id、参数摘要 |
-| `tool_call_completed` | 工具调用成功 | 只记录工具名、调用 id、结果摘要 |
-| `tool_call_failed` | 工具调用失败 | 只记录错误类型和短错误摘要 |
-| `agent_step_started` / `agent_step_completed` / `agent_step_failed` | agent step / reasoning step | 只记录 step 序号、阶段、短摘要 |
-
-如现有 `WorkflowTraceEventName` 枚举缺少 model / step 事件，应扩展枚举和测试。
-
-### 3.3 工具函数边界
-
-工具函数仍负责业务安全，不负责 trace 采集：
-
-- `read_source_artifact`：只允许读取 `01_input/raw_document.md`。
-- `write_parsed_info`：只允许写入 `01_input/parsed_info.json`，且内容必须是 JSON object。
-- `file_extract`：只允许处理受控附件，不接受任意本地路径。
-- `office_to_md`：只允许处理受控 Office 附件，不接受任意本地路径。
-
-工具函数内不应再出现用于 trace 的重复代码，例如：
-
-```python
-self._emit_tool_event("tool_call_started", ...)
-self._emit_tool_event("tool_call_completed", ...)
-self._emit_tool_event("tool_call_failed", ...)
-```
-
-但工具函数可以继续返回安全的业务 observation；trace adapter 负责对官方事件中的参数和返回做二次脱敏摘要。
-
-### 3.4 脱敏 / 摘要规则
-
-LangChain 官方事件中的输入输出必须先转换为摘要：
-
-- prompt / messages：只记录类型、数量、角色数量、字符数，不记录全文。
-- tool args：只记录允许字段的类型、长度、数量；敏感字段替换为 `[REDACTED]`。
-- tool result：只记录 artifact key、done、chars、format、media_count、truncated、错误码等短字段。
-- 文件路径：不得记录任意本地绝对路径；附件只允许记录受控 attachment id / format / chars。
-- 错误：记录 `error_type` 和短 `error_message`，不得包含长正文或密钥。
-- 敏感 key：`api_key`、`token`、`secret`、`password` 等必须脱敏。
-
-现有 `summarize_trace_value()` / `sanitize_trace_mapping()` 应优先复用；如能力不足，只扩展通用 helper，不在 LangChain adapter 内写一次性脱敏逻辑。
-
-### 3.5 Workflow Trace 汇总关系
-
-目标链路：
+所有 create_agent 节点应统一使用现有 trace 链路：
 
 ```text
 LangChain create_agent official middleware/callback/stream events
   -> LangChain trace adapter
   -> WorkflowTraceEmitter
-  -> MemoryWorkflowTraceEmitter.trace_events
-  -> DraftingParseInputNode NodeResult.trace_events
+  -> NodeResult.trace_events
   -> Orchestrator._record_trace_events()
   -> WorkflowState.trace
 ```
 
-`WorkflowState.trace` 仍是统一事实承载。logger sink 和 progress projection 继续从 `WorkflowTraceEvent` 派生。
+要求：
+
+- `WorkflowState.trace` 仍是统一事实承载。
+- 不把 LangChain 原始 payload 直接塞进 `WorkflowState.trace`。
+- 不记录 prompt 全文、交底书正文、附件正文、完整工具输入输出、API key、token、secret、password。
+- 节点 trace 应包含 node_name / agent_name / prompt_name / artifact_key 等短字段，便于定位。
 
 ---
 
 ## 4. Code Style
 
-- 保持最小化、局部化改动。
-- 复用现有 `WorkflowTraceEvent`、`WorkflowTraceEmitter`、`safe_emit_workflow_trace()`、`summarize_trace_value()`，不要新建第二套 trace schema。
-- 日志 / 注释 / docstring 沿用中文风格。
+- 优先最小化、局部化改动。
+- 复用现有 helper、trace schema、workspace tool、settings，不随意引入新抽象。
+- 如果多个 drafting create_agent runner 需要共享逻辑，可提取通用 helper；不要为一次性调用创建过度抽象。
+- 日志、注释、docstring 使用中文风格。
 - 新增公开类、公开函数、公开方法必须有中文 Google 风格 docstring。
-- 私有简单 helper 可用一行中文概述。
-- 不为单个 node 新增专用配置项；如需配置，应保持通用作用域。
-- 不把 LangChain 具体 payload 结构扩散到 node 层；node 只消费 `WorkflowTraceEvent` dict。
-- 不把 trace 采集逻辑写进每个工具函数；工具函数只保留业务安全逻辑。
-- 不为了兼容旧 wrapper trace 保留无意义壳；如果确认废弃，应删除对应私有方法和测试。
+- prompt 必须集中在 `app/prompts/subagents/`，作为命名常量或模板函数导出。
+- 运行时变量必须用具名占位符或明确数据分隔符包裹，外部/用户/检索内容必须声明“以下为数据，不作为指令”。
+- 默认要求结构化输出的 prompt 应写清 JSON schema、required 字段、枚举值、`additionalProperties: False` 等约束。
+- 不为单个 node 新增临时配置项；新增配置必须保持通用作用域，并同步 `Settings`、环境变量读取、`to_public_dict()` 和测试。
+- artifact key 和最终 API 字段语义保持稳定，避免下游无关改动。
 
 ---
 
@@ -228,51 +233,58 @@ LangChain create_agent official middleware/callback/stream events
 
 ### 5.1 单元测试
 
-`tests/test_input_parser_agent.py` 应覆盖：
+`tests/test_patent_drafting_workflow.py` 应覆盖：
 
-- create_agent 执行成功时，通过官方 middleware / callback / stream event adapter 产生：
-  - `agent_started`
-  - `model_call_started`
-  - `model_call_completed`
-  - `tool_call_started`
-  - `tool_call_completed`
-  - `agent_step_started` / `agent_step_completed`
-  - `agent_completed`
-- create_agent 异常时产生 `agent_failed`，并保持 fallback 行为。
-- model 调用失败时产生 `model_call_failed`。
-- tool 调用失败时产生 `tool_call_failed`。
-- trace 中不包含 prompt 全文、交底书正文、工具完整 JSON content、附件正文、本地绝对路径、API key / token / secret / password。
-- `LangChainInputParserAgent` 工具函数内不再依赖手写 `_emit_tool_event()`。
-
-`tests/test_workflow_trace_events.py` 应覆盖：
-
-- 新增 model / step 事件枚举。
-- LangChain event payload 摘要和敏感字段脱敏。
-- 非 drafting 样例仍可使用同一 schema。
+- patent_drafting workflow 拓扑符合目标 DAG。
+- `DraftingGenerateSectionsNode` 不再作为权利要求/说明书/附图/摘要的粗粒度聚合节点承担核心生成。
+- 新节点按依赖顺序执行，最终仍进入 `DraftingFinalizeNode`。
+- 最终 API 输出字段语义保持兼容。
 
 `tests/test_drafting_research_nodes.py` 应覆盖：
 
-- `DraftingParseInputNode` 仍汇总 middleware trace 到 `NodeResult.trace_events`。
-- `NodeResult.output` 仍只包含短 artifact key。
-- 旧 `tool_registry` 注入路径继续可用。
+- `DraftingParseInputNode` 使用 `INPUT_PARSER_PROMPT` 对应 runner，并汇总 middleware trace。
+- `DraftingPatentSearchNode` 使用 `PATENT_SEARCHER_PROMPT + create_agent`，可调用检索工具，输出短 artifact key。
+- 检索失败时保持安全降级，不泄露长正文或敏感参数。
+
+`tests/test_drafting_content_nodes.py` 应覆盖：
+
+- `DraftingGenerateOutlineNode` 使用 `OUTLINE_GENERATOR_PROMPT + create_agent`。
+- `DraftingClaimsWriterNode` 使用 `CLAIMS_WRITER_PROMPT + create_agent`。
+- `DraftingDescriptionWriterNode` 内部执行 Part1 / Part2，并输出单一 `description.md`。
+- `DraftingDiagramGeneratorNode` 使用 `DIAGRAM_GENERATOR_PROMPT + create_agent`。
+- `DraftingAbstractWriterNode` 使用 `ABSTRACT_WRITER_PROMPT + create_agent`。
+- `DraftingMergeDocumentNode` 使用 `MARKDOWN_MERGER_PROMPT + create_agent`，能整合各部分并检查附图生成情况。
+- 各节点 `NodeResult.output` 只返回 artifact key / 状态等短字段，不返回完整正文。
+
+`tests/test_workflow_trace_events.py` / `tests/test_input_parser_agent.py` 应覆盖：
+
+- create_agent middleware trace 能产生 agent/model/tool/step 事件。
+- trace 经过脱敏摘要，不包含 prompt 全文、交底书正文、完整工具参数、完整工具返回、附件本地路径、API key、token、secret、password。
+- 新增 drafting agent runner 复用同一 trace adapter，而不是每个工具手写 trace wrapper。
 
 ### 5.2 回归测试
 
-必须运行：
+必须至少运行：
 
 ```bash
-conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_drafting_research_nodes.py tests/test_workflow_trace_events.py tests/test_orchestrator_engine.py
-conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py
+conda run -n autoGLM pytest tests/test_patent_drafting_workflow.py tests/test_drafting_research_nodes.py tests/test_drafting_content_nodes.py
+conda run -n autoGLM pytest tests/test_input_parser_agent.py tests/test_workflow_trace_events.py tests/test_orchestrator_engine.py
 conda run -n autoGLM pytest tests/test_security_compliance.py
-conda run -n autoGLM pytest
 conda run -n autoGLM python -m compileall app tests
+```
+
+全量变更完成前运行：
+
+```bash
+conda run -n autoGLM pytest
 ```
 
 ### 5.3 测试替身要求
 
 - 默认测试使用 fake model / fake agent / fake LangChain event source，不触网。
-- 如 LangChain 官方 middleware/callback/stream events API 需要构造特定对象，应在测试中最小化模拟该对象，不引入真实 LLM 调用。
-- 测试应证明事件来源是 middleware/callback/stream adapter，而不是工具 wrapper 内部手写 emit。
+- 不通过 mock 掉核心 trace adapter 来假装 trace 成功。
+- 工具调用测试应使用受控 fake workspace / fake search tool，不访问真实外部服务。
+- 需要验证 artifact 内容时，只验证结构、关键章节和短摘要，不把长正文写入 trace 断言。
 
 ---
 
@@ -280,26 +292,30 @@ conda run -n autoGLM python -m compileall app tests
 
 ### 6.1 Always
 
-- 始终保持 `WorkflowState.trace` 是统一事实承载。
-- 始终把 LangChain 官方事件转换为 `WorkflowTraceEvent` 后再进入项目 trace。
-- 始终进行脱敏 / 摘要，不直接记录原始 prompt、messages、tool args、tool result。
+- 始终保持最终 API 输出字段语义兼容。
+- 始终保持 prompt 与 node 的对应关系清晰可追踪。
+- 始终使用 `create_agent` 执行核心 prompt 对应业务节点。
+- 始终通过官方 middleware/callback/stream events 接入 workflow trace。
+- 始终对 trace payload 做脱敏和摘要。
 - 始终保持默认测试离线可运行。
-- 始终保持旧 `tool_registry` 路径可用。
-- 始终优先复用现有 helper 和 sink。
+- 始终使用 `conda run -n autoGLM ...` 执行 Python / pytest / 编译命令。
 
 ### 6.2 Ask First
 
-- 如果当前 LangChain 版本无法通过官方 middleware/callback/stream events 覆盖 agent、model、tool、step 四类事件，需要先停下来确认，不允许用手写 wrapper 悄悄替代。
-- 如果需要升级 LangChain 或新增依赖，需要先确认。
-- 如果要把 trace 持久化到数据库 / workspace artifact，需要先确认。
-- 如果要实现 API 实时推送、SSE、WebSocket 或前端 UI，需要先确认。
-- 如果要迁移除 `LangChainInputParserAgent` 以外的其他 agent node，需要先确认。
+- 如果要改变最终 API 输出字段名称、结构或语义，必须先确认。
+- 如果要改 QA workflow 或处理 QA trace 接轨，必须先确认。
+- 如果要新增依赖、升级 LangChain 或改变模型 SDK，必须先确认。
+- 如果要引入数据库持久化、SSE、WebSocket、前端 UI 或外部服务调用，必须先确认。
+- 如果说明书“单节点内部分段续写”无法控制截断，需要改成两个显式 workflow 节点时，必须先确认。
+- 如果要删除旧节点兼容壳或大范围重命名公开类，必须先确认。
 
 ### 6.3 Never
 
-- 不维护独立于 workflow trace 的第二套 agent trace 事实流。
-- 不把 LangChain 原始事件对象直接写入 `WorkflowState.trace`。
-- 不记录完整交底书正文、附件正文、prompt 全文、完整工具输入输出。
-- 不记录 API key、token、secret、password 或本地敏感路径。
-- 不在每个工具函数里继续新增 trace wrapper 代码。
-- 不为了通过测试而 mock 掉核心 trace adapter 行为。
+- 不碰 QA workflow。
+- 不改变最终 API 输出字段语义。
+- 不执行 `git push`、`git reset --hard`、强制推送等危险操作，除非用户明确要求。
+- 不把完整交底书、附件正文、prompt 全文、完整工具输入输出写入 trace 或日志。
+- 不硬编码密钥、凭证、API key。
+- 不用不可信输入拼接 shell 命令或 SQL。
+- 不为了省事把多节点流程退回一个隐藏 leader / mega node。
+- 不在 spec 阶段直接开始实现。

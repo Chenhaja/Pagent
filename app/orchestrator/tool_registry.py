@@ -34,6 +34,7 @@ PATENT_SEARCH_INPUT_SCHEMA: dict[str, Any] = {
         "top_k": {"type": "integer"},
         "country": {"type": "string"},
         "status": {"type": "string"},
+        "sort": {"type": "string", "enum": ["relevance", "new", "old"]},
         "step_index": {"type": "integer"},
     },
     "required": ["query"],
@@ -283,7 +284,7 @@ def build_default_tool_registry(settings: Settings | None = None, retriever: Ret
         ToolSpec(
             name="patent_search",
             runner=PatentSearchTool(current_settings),
-            description="受联网配置和 SerpAPI Key 门控的专利检索工具,支持 query/top_k/country/status 并默认安全降级。",
+            description="受联网配置和 SerpAPI Key 门控的专利检索工具,支持 query/top_k/country/status/sort; sort 可选 relevance/new/old,relevance 或不传表示默认相关度且实际请求不发送 sort。",
             input_schema=PATENT_SEARCH_INPUT_SCHEMA,
             external=True,
             enabled=True,

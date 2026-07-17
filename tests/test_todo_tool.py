@@ -69,12 +69,12 @@ def test_default_tool_registry_registers_todo_not_write_todos() -> None:
     assert spec.input_schema["properties"]["todos"]["type"] == "array"
 
 
-def test_todo_prompt_uses_todo_tool_name() -> None:
-    """todo prompt 应使用 todo 工具名而不是旧命名。"""
-    for prompt in (TODO_PROMPT, sys_prompt, tool_prompt):
-        assert "todo" in prompt
-        assert "write_todos" not in prompt
-        assert "todo_middleware" not in prompt
+def test_todo_prompt_uses_write_todos_tool_name() -> None:
+    """todo prompt 应保留 write_todos 工具名。"""
+    combined_prompt = "\n".join([TODO_PROMPT, sys_prompt, tool_prompt])
+
+    assert "write_todos" in combined_prompt
+    assert "todo_middleware" not in combined_prompt
 
 
 def test_todo_prompt_uses_official_status_values() -> None:

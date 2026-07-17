@@ -15,14 +15,15 @@ logger = logging.getLogger(__name__)
 class SerpApiPatentProvider(Protocol):
     """SerpAPI 专利检索 provider 协议。"""
 
-    def search(self, *, query: str, top_k: int, country: str, status: str, api_key: str) -> dict[str, Any]:
+    def search(self, *, query: str, num: int, country: str, status: str, sort: str, api_key: str) -> dict[str, Any]:
         """执行 SerpAPI 专利检索。
 
         Args:
             query: 检索关键词。
-            top_k: 最大返回数量。
+            num: SerpAPI 请求数量。
             country: 专利国家过滤条件。
             status: 专利状态过滤条件。
+            sort: SerpAPI 排序参数,空字符串表示默认相关度。
             api_key: SerpAPI Key。
 
         Returns:
@@ -34,14 +35,15 @@ class SerpApiPatentProvider(Protocol):
 class DefaultSerpApiPatentProvider:
     """基于 SerpAPI Google Patents 引擎的默认检索 provider。"""
 
-    def search(self, *, query: str, top_k: int, country: str, status: str, api_key: str) -> dict[str, Any]:
+    def search(self, *, query: str, num: int, country: str, status: str, sort: str, api_key: str) -> dict[str, Any]:
         """调用 SerpAPI Google Patents 搜索接口。
 
         Args:
             query: 检索关键词。
-            top_k: 最大返回数量。
+            num: SerpAPI 请求数量。
             country: 专利国家过滤条件。
             status: 专利状态过滤条件。
+            sort: SerpAPI 排序参数,空字符串表示默认相关度。
             api_key: SerpAPI Key。
 
         Returns:
@@ -50,13 +52,15 @@ class DefaultSerpApiPatentProvider:
         params = {
             "engine": "google_patents",
             "q": query,
-            "num": top_k,
+            "num": num,
             "api_key": api_key,
         }
         if country:
             params["country"] = country
         if status:
             params["status"] = status
+        if sort:
+            params["sort"] = sort
         url = f"https://serpapi.com/search.json?{urlencode(params)}"
         with urlopen(url, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -82,7 +86,7 @@ class PatentSearchTool:
         """执行受门控的 SerpAPI 专利检索。
 
         Args:
-            tool_input: 包含 query、top_k、country、status 的输入。
+            tool_input: 包含 query、top_k、country、status、sort 的输入。
 
         Returns:
             规范化后的专利 evidence;未授权或异常时安全降级。
@@ -91,7 +95,8 @@ class PatentSearchTool:
         if not query:
             return ToolObservation(tool_name="patent_search", error="invalid_input", external=True)
         top_k = self._parse_top_k(tool_input.get("top_k"))
-        if top_k is None:
+        sort = self._parse_sort(tool_input.get("sort"))
+        if top_k is None or sort is None:
             return ToolObservation(tool_name="patent_search", error="invalid_input", external=True)
         if not self.settings.allow_network:
             return ToolObservation(tool_name="patent_search", error="network_disabled", external=True)
@@ -100,8 +105,9 @@ class PatentSearchTool:
             return ToolObservation(tool_name="patent_search", error="serpapi_key_missing", external=True)
         country = str(tool_input.get("country") or "CN").strip().upper()
         status = str(tool_input.get("status") or "GRANT").strip().upper()
+        num = min(max(top_k, 10), 100)
         try:
-            payload = self.provider.search(query=query, top_k=top_k, country=country, status=status, api_key=api_key)
+            payload = self.provider.search(query=query, num=num, country=country, status=status, sort=sort, api_key=api_key)
         except HTTPError as exc:
             logger.exception(
                 "专利检索调用失败",
@@ -110,8 +116,10 @@ class PatentSearchTool:
                     "fields": {
                         "query_length": len(query),
                         "top_k": top_k,
+                        "num": num,
                         "country": country,
                         "status": status,
+                        "sort": sort,
                         "http_status": exc.code,
                         "response_excerpt": self._http_error_excerpt(exc),
                     },
@@ -126,8 +134,10 @@ class PatentSearchTool:
                     "fields": {
                         "query_length": len(query),
                         "top_k": top_k,
+                        "num": num,
                         "country": country,
                         "status": status,
+                        "sort": sort,
                     },
                 },
             )
@@ -142,6 +152,19 @@ class PatentSearchTool:
         except (TypeError, ValueError):
             return None
         return top_k if top_k > 0 else None
+
+    def _parse_sort(self, value: object) -> str | None:
+        """解析并归一化排序参数。"""
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            return None
+        sort = value.strip()
+        if not sort or sort == "relevance":
+            return ""
+        if sort in {"new", "old"}:
+            return sort
+        return None
 
     def _extract_results(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """从 SerpAPI 响应中提取专利结果列表。"""

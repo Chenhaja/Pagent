@@ -63,8 +63,8 @@ class DraftingParseInputNode(Node):
                 system_prompt=self._input_parser_system_prompt(),
                 allowed_tools=["read_file", "write_file", "mkdir", "list_directory"],
                 file_policy=FileToolPolicy(
-                    readRoots=[DRAFTING_SOURCE_ARTIFACT_KEY],
-                    writeRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
+                    readRoots=["01_input", DRAFTING_SOURCE_ARTIFACT_KEY],
+                    writeRoots=["01_input", DRAFTING_PARSED_INFO_ARTIFACT_KEY],
                 ),
                 output_artifact_keys=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
                 fallback_builder=self._build_input_parser_fallback_content,
@@ -225,8 +225,9 @@ class DraftingPatentSearchNode(Node):
                 system_prompt=PATENT_SEARCHER_PROMPT,
                 allowed_tools=["read_file", "write_file", "mkdir", "list_directory", "patent_search"],
                 file_policy=FileToolPolicy(
-                    readRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
+                    readRoots=["01_input", DRAFTING_PARSED_INFO_ARTIFACT_KEY],
                     writeRoots=[
+                        "02_research",
                         DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
                         DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY,
                         DRAFTING_ABSTRACT_STYLE_ARTIFACT_KEY,

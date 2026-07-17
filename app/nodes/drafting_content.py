@@ -32,11 +32,6 @@ DRAFTING_SECTION_KEYS = [
 ]
 
 
-def _artifact_policy(read_keys: list[str], write_key: str) -> FileToolPolicy:
-    """按 artifact 白名单构造文件工具访问策略。"""
-    return FileToolPolicy(readRoots=read_keys, writeRoots=[write_key])
-
-
 class DraftingContentNodeBase(Node):
     """文书生成内容节点基类。
 
@@ -124,7 +119,10 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
             prompt_name="OUTLINE_GENERATOR_PROMPT",
             system_prompt=OUTLINE_GENERATOR_PROMPT,
             allowed_tools=["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
-            file_policy=_artifact_policy(outline_reads, DRAFTING_OUTLINE_ARTIFACT_KEY),
+            file_policy=FileToolPolicy(
+                readRoots=["01_input", "02_research"] + outline_reads,
+                writeRoots=["03_outline", DRAFTING_OUTLINE_ARTIFACT_KEY],
+            ),
             output_artifact_keys=[DRAFTING_OUTLINE_ARTIFACT_KEY],
             fallback_builder=self._build_outline_fallback,
             settings=self.settings,
@@ -187,7 +185,10 @@ class _SingleArtifactWriterNode(DraftingContentNodeBase):
             prompt_name=prompt_name,
             system_prompt=system_prompt,
             allowed_tools=["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
-            file_policy=_artifact_policy(allowed_read_artifact_keys, output_artifact_key),
+            file_policy=FileToolPolicy(
+                readRoots=["01_input", "02_research", "03_outline", "04_content"] + allowed_read_artifact_keys,
+                writeRoots=["04_content", output_artifact_key],
+            ),
             output_artifact_keys=[output_artifact_key],
             fallback_builder=fallback_builder,
             settings=self.settings,
@@ -236,7 +237,10 @@ class DraftingDescriptionWriterNode(DraftingContentNodeBase):
             prompt_name="DESCRIPTION_WRITER_PART1_PROMPT",
             system_prompt=DESCRIPTION_WRITER_PART1_PROMPT,
             allowed_tools=["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
-            file_policy=_artifact_policy(common_reads, "04_content/description_part1.md"),
+            file_policy=FileToolPolicy(
+                readRoots=["01_input", "02_research", "03_outline", "04_content"] + common_reads,
+                writeRoots=["04_content", "04_content/description_part1.md"],
+            ),
             output_artifact_keys=["04_content/description_part1.md"],
             fallback_builder=self._build_part1_fallback,
             settings=self.settings,
@@ -250,7 +254,10 @@ class DraftingDescriptionWriterNode(DraftingContentNodeBase):
             prompt_name="DESCRIPTION_WRITER_PART2_PROMPT",
             system_prompt=DESCRIPTION_WRITER_PART2_PROMPT,
             allowed_tools=["read_file", "write_file", "mkdir", "list_directory", "list_skills", "load_skill"],
-            file_policy=_artifact_policy([*common_reads, "04_content/description_part1.md"], "04_content/description_part2.md"),
+            file_policy=FileToolPolicy(
+                readRoots=["01_input", "02_research", "03_outline", "04_content"] + common_reads,
+                writeRoots=["04_content", "04_content/description_part2.md"],
+            ),
             output_artifact_keys=["04_content/description_part2.md"],
             fallback_builder=self._build_part2_fallback,
             settings=self.settings,

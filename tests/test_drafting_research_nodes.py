@@ -222,6 +222,7 @@ def test_drafting_patent_search_default_runner_allows_patent_search(monkeypatch,
 
     assert captured["allowed_tools"] == ["read_file", "write_file", "mkdir", "list_directory", "patent_search"]
     assert captured["file_policy"].writeRoots == [
+        "02_research",
         "02_research/patent_search_results.json",
         "02_research/prior_art_analysis.md",
         "02_research/abstract_writing_style.md",

@@ -132,19 +132,23 @@ def test_patent_search_provider_error_degrades_safely() -> None:
     assert observation.evidence == []
 
 
-def test_patent_search_http_error_degrades_safely() -> None:
-    """SerpAPI HTTPError 时 patent_search 应安全降级。"""
+def test_patent_search_http_error_degrades_safely(caplog) -> None:
+    """SerpAPI HTTPError 时 patent_search 应记录响应摘要并安全降级。"""
     error = HTTPError("https://serpapi.example/search", 400, "Bad Request", {}, FakeErrorBody(b'{"error":"bad request"}'))
     tool = PatentSearchTool(
         Settings(allow_network=True, serpapi_api_key="secret"),
         provider=FakeSerpApiProvider(error=error),
     )
 
-    observation = tool.run({"query": "夹爪"})
+    with caplog.at_level("ERROR"):
+        observation = tool.run({"query": "夹爪"})
 
     assert observation.error == "patent_search_unavailable"
     assert observation.external is True
     assert observation.evidence == []
+    record = next(item for item in caplog.records if item.event == "patent_search_failed")
+    assert record.fields["http_status"] == 400
+    assert record.fields["response_excerpt"] == '{"error":"bad request"}'
 
 
 def test_default_tool_registry_describes_serpapi_patent_search() -> None:

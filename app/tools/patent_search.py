@@ -107,12 +107,14 @@ class PatentSearchTool:
                 "专利检索调用失败",
                 extra={
                     "event": "patent_search_failed",
-                    "query_length": len(query),
-                    "top_k": top_k,
-                    "country": country,
-                    "status": status,
-                    "http_status": exc.code,
-                    "response_excerpt": self._http_error_excerpt(exc),
+                    "fields": {
+                        "query_length": len(query),
+                        "top_k": top_k,
+                        "country": country,
+                        "status": status,
+                        "http_status": exc.code,
+                        "response_excerpt": self._http_error_excerpt(exc),
+                    },
                 },
             )
             return ToolObservation(tool_name="patent_search", error="patent_search_unavailable", external=True)
@@ -121,10 +123,12 @@ class PatentSearchTool:
                 "专利检索调用失败",
                 extra={
                     "event": "patent_search_failed",
-                    "query_length": len(query),
-                    "top_k": top_k,
-                    "country": country,
-                    "status": status,
+                    "fields": {
+                        "query_length": len(query),
+                        "top_k": top_k,
+                        "country": country,
+                        "status": status,
+                    },
                 },
             )
             return ToolObservation(tool_name="patent_search", error="patent_search_unavailable", external=True)

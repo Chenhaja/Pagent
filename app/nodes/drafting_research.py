@@ -16,8 +16,7 @@ from app.tracing.sinks import MemoryWorkflowTraceEmitter, WorkflowTraceEmitter
 DRAFTING_SOURCE_ARTIFACT_KEY = "01_input/raw_document.md"
 DRAFTING_PARSED_INFO_ARTIFACT_KEY = "01_input/parsed_info.json"
 DRAFTING_PATENT_SEARCH_ARTIFACT_KEY = "02_research/patent_search_results.json"
-DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY = "02_research/prior_art_analysis.json"
-DRAFTING_PRIOR_ART_ANALYSIS_MD_ARTIFACT_KEY = "02_research/prior_art_analysis.md"
+DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY = "02_research/prior_art_analysis.md"
 DRAFTING_ABSTRACT_STYLE_ARTIFACT_KEY = "02_research/abstract_writing_style.md"
 DRAFTING_CLAIMS_STYLE_ARTIFACT_KEY = "02_research/claims_writing_style.md"
 DRAFTING_DESCRIPTION_STYLE_ARTIFACT_KEY = "02_research/description_writing_style.md"
@@ -67,7 +66,7 @@ class DraftingParseInputNode(Node):
                     readRoots=[DRAFTING_SOURCE_ARTIFACT_KEY],
                     writeRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
                 ),
-                output_artifact_key=DRAFTING_PARSED_INFO_ARTIFACT_KEY,
+                output_artifact_keys=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
                 fallback_builder=self._build_input_parser_fallback_content,
                 settings=self.settings,
                 workspace=self.workspace,
@@ -229,13 +228,17 @@ class DraftingPatentSearchNode(Node):
                     readRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
                     writeRoots=[
                         DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
-                        DRAFTING_PRIOR_ART_ANALYSIS_MD_ARTIFACT_KEY,
+                        DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY,
                         DRAFTING_ABSTRACT_STYLE_ARTIFACT_KEY,
                         DRAFTING_CLAIMS_STYLE_ARTIFACT_KEY,
                         DRAFTING_DESCRIPTION_STYLE_ARTIFACT_KEY,
                     ],
                 ),
-                output_artifact_key=DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
+                output_artifact_keys=[DRAFTING_PATENT_SEARCH_ARTIFACT_KEY,
+                                      DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY,
+                                      DRAFTING_ABSTRACT_STYLE_ARTIFACT_KEY,
+                                      DRAFTING_CLAIMS_STYLE_ARTIFACT_KEY,
+                                      DRAFTING_DESCRIPTION_STYLE_ARTIFACT_KEY],
                 fallback_builder=self._build_search_fallback_content,
                 settings=self.settings,
                 workspace=self.workspace,

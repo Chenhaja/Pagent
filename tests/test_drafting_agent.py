@@ -25,7 +25,7 @@ def _runner(settings: Settings, workspace: DraftWorkspaceTool, emitter: MemoryWo
         system_prompt="系统 prompt",
         allowed_tools=["read_file", "write_file"],
         file_policy=FileToolPolicy(readRoots=["03_outline/patent_outline.md"], writeRoots=[OUTPUT_KEY]),
-        output_artifact_key=OUTPUT_KEY,
+        output_artifact_keys=[OUTPUT_KEY],
         fallback_builder=_fallback_content,
         settings=settings,
         workspace=workspace,

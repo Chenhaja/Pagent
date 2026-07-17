@@ -29,7 +29,7 @@ class LangChainAgentRunner:
         system_prompt: create_agent 使用的系统 prompt。
         allowed_tools: 允许传给 create_agent 的工具名白名单。
         file_policy: 当前 agent 的文件访问策略。
-        output_artifact_key: 期望写入的目标 artifact key。
+        output_artifact_keys: 期望 agent 写入的全部必需 artifact key,第一个用于 fallback 主输出。
         fallback_builder: 离线或 agent 失败时生成 fallback 内容的函数。
         settings: 应用配置,未传入时读取全局配置。
         workspace: 草稿 artifact 工作区。
@@ -48,7 +48,7 @@ class LangChainAgentRunner:
         system_prompt: str,
         allowed_tools: list[str],
         file_policy: FileToolPolicy,
-        output_artifact_key: str,
+        output_artifact_keys: list[str],
         fallback_builder: Callable[[str, DraftWorkspaceTool], str],
         settings: Settings | None = None,
         workspace: DraftWorkspaceTool | None = None,
@@ -62,7 +62,9 @@ class LangChainAgentRunner:
         self.system_prompt = system_prompt
         self.allowed_tools = list(allowed_tools)
         self.file_policy = file_policy
-        self.output_artifact_key = output_artifact_key
+        self.output_artifact_keys = list(output_artifact_keys)
+        if not self.output_artifact_keys:
+            raise ValueError("output_artifact_keys required")
         self.fallback_builder = fallback_builder
         self.settings = settings or get_settings()
         self.workspace = workspace or DraftWorkspaceTool(self.settings)
@@ -192,9 +194,13 @@ class LangChainAgentRunner:
         task = str(tool_input.get("task") or f"请执行 `{self.prompt_name}` 对应任务。").strip()
         return (
             f"请执行 `{self.prompt_name}` 对应任务: {task}\n"
-            f"只能使用 allowed tools 中提供的工具,必须将结果写入 `{self.output_artifact_key}`。\n"
+            f"只能使用 allowed tools 中提供的工具,必须将结果写入 {self._output_artifact_prompt()}。\n"
             f"{self._file_policy_prompt()}"
         )
+
+    def _output_artifact_prompt(self) -> str:
+        """渲染必需输出 artifact 列表。"""
+        return "、".join(f"`{key}`" for key in self.output_artifact_keys)
 
     def _file_policy_prompt(self) -> str:
         """渲染当前 runner 的文件访问策略提示。"""
@@ -214,18 +220,22 @@ class LangChainAgentRunner:
         )
 
     def _output_artifact_exists(self) -> bool:
-        """确认目标 artifact 已写入。"""
-        observation = self.workspace.run({"action": "read", "artifact_key": self.output_artifact_key})
-        return observation.error is None and bool(observation.evidence)
+        """确认全部必需输出 artifact 已写入。"""
+        for artifact_key in self.output_artifact_keys:
+            observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
+            if observation.error is not None or not observation.evidence:
+                return False
+        return True
 
     def _write_fallback(self, reason: str) -> ToolObservation:
         """写入 fallback artifact,确保离线环境可运行。"""
         content = self.fallback_builder(reason, self.workspace)
-        written = self.workspace.run({"action": "write", "artifact_key": self.output_artifact_key, "content": content})
+        written = self.workspace.run({"action": "write", "artifact_key": self.output_artifact_keys[0], "content": content})
         if written.error:
             return ToolObservation(tool_name=self.agent_name, error=written.error)
         return self._short_result()
 
     def _short_result(self) -> ToolObservation:
         """构造不含正文的短 observation。"""
-        return ToolObservation(tool_name=self.agent_name, evidence=[{"artifact_key": self.output_artifact_key, "done": True}], sufficient=True)
+        evidence = [{"artifact_key": artifact_key, "done": True} for artifact_key in self.output_artifact_keys]
+        return ToolObservation(tool_name=self.agent_name, evidence=evidence, sufficient=True)

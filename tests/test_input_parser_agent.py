@@ -26,7 +26,7 @@ def _runner(settings: Settings, workspace: DraftWorkspaceTool, emitter: MemoryWo
         system_prompt="系统 prompt",
         allowed_tools=["read_file", "write_file"],
         file_policy=FileToolPolicy(readRoots=[DRAFTING_SOURCE_ARTIFACT_KEY], writeRoots=[DRAFTING_PARSED_INFO_ARTIFACT_KEY]),
-        output_artifact_key=DRAFTING_PARSED_INFO_ARTIFACT_KEY,
+        output_artifact_keys=[DRAFTING_PARSED_INFO_ARTIFACT_KEY],
         fallback_builder=_fallback_content,
         settings=settings,
         workspace=workspace,

@@ -180,7 +180,7 @@ def _runner_for_allowed_tools(tmp_path, allowed_tools: list[str]) -> LangChainAg
         system_prompt="系统 prompt",
         allowed_tools=allowed_tools,
         file_policy=FileToolPolicy(readRoots=["input/"], writeRoots=["output/"]),
-        output_artifact_key="output/result.md",
+        output_artifact_keys=["output/result.md"],
         fallback_builder=_fallback_content,
         settings=settings,
         workspace=DraftWorkspaceTool(settings),
@@ -204,7 +204,7 @@ def test_agent_runner_fallback_writes_output_when_llm_unavailable(tmp_path) -> N
         system_prompt="系统 prompt",
         allowed_tools=["read_file", "write_file"],
         file_policy=FileToolPolicy(readRoots=["input/"], writeRoots=["output/"]),
-        output_artifact_key="output/result.md",
+        output_artifact_keys=["output/result.md"],
         fallback_builder=_fallback_content,
         settings=settings,
         workspace=workspace,
@@ -216,6 +216,56 @@ def test_agent_runner_fallback_writes_output_when_llm_unavailable(tmp_path) -> N
     assert result.error is None
     assert result.evidence == [{"artifact_key": "output/result.md", "done": True}]
     assert stored.evidence[0]["content"] == "fallback:llm_unavailable"
+
+
+def test_agent_runner_requires_multiple_outputs(monkeypatch, tmp_path) -> None:
+    """真实 agent 路径应校验全部必需输出 artifact。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    workspace = DraftWorkspaceTool(settings)
+    runner = LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["write_file"],
+        file_policy=FileToolPolicy(writeRoots=["output/"]),
+        output_artifact_keys=["output/result.md", "output/report.md"],
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=workspace,
+    )
+    captured = {}
+
+    class FakeAgent:
+        """测试用 LangChain agent。"""
+
+        def invoke(self, payload: dict) -> dict:
+            """模拟 agent 写入两个目标 artifact。"""
+            captured["payload"] = payload
+            tool = captured["tools"][0]
+            tool.invoke({"path": "output/result.md", "content": "ok"})
+            tool.invoke({"path": "output/report.md", "content": "report"})
+            return {}
+
+    def fake_create_agent(**kwargs):
+        """捕获 create_agent 参数。"""
+        captured.update(kwargs)
+        return FakeAgent()
+
+    monkeypatch.setattr(runner, "_import_langchain", lambda: (fake_create_agent, lambda **kwargs: object()))
+    monkeypatch.setattr(runner, "_todo_middleware", lambda: None)
+
+    result = runner.run({"task": "写入多个结果"})
+    user_content = captured["payload"]["messages"][0]["content"]
+
+    assert result.error is None
+    assert result.evidence == [
+        {"artifact_key": "output/result.md", "done": True},
+        {"artifact_key": "output/report.md", "done": True},
+    ]
+    assert "output/result.md" in user_content
+    assert "output/report.md" in user_content
 
 
 def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkeypatch, tmp_path) -> None:
@@ -231,7 +281,7 @@ def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkey
         system_prompt="系统 prompt",
         allowed_tools=["write_file"],
         file_policy=FileToolPolicy(writeRoots=["output/"]),
-        output_artifact_key="output/result.md",
+        output_artifact_keys=["output/result.md"],
         fallback_builder=_fallback_content,
         settings=settings,
         workspace=workspace,
@@ -302,7 +352,7 @@ def test_agent_runner_injects_file_policy_into_user_prompt(tmp_path) -> None:
         system_prompt="系统 prompt",
         allowed_tools=["read_file", "write_file", "mkdir", "list_directory"],
         file_policy=FileToolPolicy(readRoots=["input/"], writeRoots=["output/"], allowGlobs=["input/*.json"]),
-        output_artifact_key="output/result.md",
+        output_artifact_keys=["output/result.md"],
         fallback_builder=_fallback_content,
         settings=settings,
         workspace=DraftWorkspaceTool(settings),
@@ -338,7 +388,7 @@ def test_agent_runner_policy_blocks_wrapped_tool_before_workspace(monkeypatch, t
         system_prompt="系统 prompt",
         allowed_tools=["write_file"],
         file_policy=FileToolPolicy(writeRoots=["output/"]),
-        output_artifact_key="output/result.md",
+        output_artifact_keys=["output/result.md"],
         fallback_builder=_fallback_content,
         settings=settings,
         workspace=workspace,

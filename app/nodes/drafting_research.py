@@ -272,15 +272,8 @@ class DraftingPatentSearchNode(Node):
             written = self._write_json(DRAFTING_PATENT_SEARCH_ARTIFACT_KEY, search_results)
             if written.error:
                 return NodeResult.failed(errors=[written.error])
-        prior_art = self._read_json(DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY)
-        if prior_art is None:
-            prior_art = self._build_prior_art_analysis(parsed, search_results)
-            written = self._write_json(DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY, prior_art)
-            if written.error:
-                return NodeResult.failed(errors=[written.error])
-        markdown_written = self._ensure_markdown_artifacts(parsed, prior_art)
-        if markdown_written:
-            return NodeResult.failed(errors=[markdown_written])
+        if not self._artifact_exists(DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY):
+            return NodeResult.failed(errors=["prior_art_analysis_missing"])
         state.drafting_context["patent_search_key"] = DRAFTING_PATENT_SEARCH_ARTIFACT_KEY
         state.drafting_context["prior_art_analysis_key"] = DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY
         results = list(search_results.get("results") or [])
@@ -324,90 +317,9 @@ class DraftingPatentSearchNode(Node):
             ensure_ascii=False,
         )
 
-    def _build_prior_art_analysis(self, parsed: dict[str, Any], search_results: dict[str, Any]) -> dict[str, Any]:
-        """根据检索结果构造兼容现有技术分析 artifact。"""
-        return DraftingPriorArtAnalysisNode(settings=self.settings, workspace=self.workspace)._build_analysis(parsed, search_results)
-
     def _write_json(self, artifact_key: str, payload: dict[str, Any]) -> Any:
         """写入 JSON artifact。"""
         return self.workspace.run({"action": "write", "artifact_key": artifact_key, "content": json.dumps(payload, ensure_ascii=False)})
-
-    def _ensure_markdown_artifacts(self, parsed: dict[str, Any], prior_art: dict[str, Any]) -> str | None:
-        """确保 patent_searcher 约定的 markdown 研究产物已写入。"""
-        for artifact_key, content in self._markdown_artifacts(parsed, prior_art).items():
-            if self._artifact_exists(artifact_key):
-                continue
-            written = self.workspace.run({"action": "write", "artifact_key": artifact_key, "content": content})
-            if written.error:
-                return str(written.error)
-        return None
-
-    def _markdown_artifacts(self, parsed: dict[str, Any], prior_art: dict[str, Any]) -> dict[str, str]:
-        """生成现有技术分析和三类写作风格 markdown 内容。"""
-        topic = str(prior_art.get("technical_topic") or parsed.get("technical_topic") or parsed.get("title") or "技术方案")
-        uncertain_points = [str(item) for item in prior_art.get("uncertain_points") or []]
-        closest_items = [item for item in prior_art.get("closest_prior_art") or [] if isinstance(item, dict)]
-        return {
-            DRAFTING_PRIOR_ART_ANALYSIS_MD_ARTIFACT_KEY: self._prior_art_markdown(topic, closest_items, prior_art, uncertain_points),
-            DRAFTING_ABSTRACT_STYLE_ARTIFACT_KEY: self._style_markdown("摘要", topic, closest_items, uncertain_points),
-            DRAFTING_CLAIMS_STYLE_ARTIFACT_KEY: self._style_markdown("权利要求书", topic, closest_items, uncertain_points),
-            DRAFTING_DESCRIPTION_STYLE_ARTIFACT_KEY: self._style_markdown("说明书", topic, closest_items, uncertain_points),
-        }
-
-    def _prior_art_markdown(self, topic: str, closest_items: list[dict[str, Any]], prior_art: dict[str, Any], uncertain_points: list[str]) -> str:
-        """把结构化现有技术分析转换为可读 markdown。"""
-        lines = [f"# 现有技术分析", "", f"## 技术主题", topic or "未明确", "", "## 相近现有技术"]
-        if closest_items:
-            for item in closest_items:
-                title = str(item.get("title") or "未命名现有技术")
-                number = str(item.get("publication_number") or "未提供公开号")
-                abstract = str(item.get("abstract") or "未提供摘要")
-                lines.extend([f"- {title}（{number}）：{abstract}"])
-        else:
-            lines.append("- 未获得足够检索结果，不编造专利号或引用。")
-        sections = [
-            ("区别特征", prior_art.get("distinguishing_features") or []),
-            ("技术效果", prior_art.get("technical_effects") or []),
-            ("新颖性风险", prior_art.get("novelty_risks") or []),
-            ("创造性风险", prior_art.get("inventiveness_risks") or []),
-            ("权利要求撰写重点", prior_art.get("recommended_claim_focus") or []),
-            ("不确定事项", uncertain_points),
-        ]
-        for title, items in sections:
-            lines.extend(["", f"## {title}"])
-            values = [str(item) for item in items]
-            lines.extend([f"- {item}" for item in values] or ["- 暂无明确结论。"])
-        lines.extend(["", f"## 置信度", str(prior_art.get("confidence") or "low")])
-        return "\n".join(lines)
-
-    def _style_markdown(self, doc_type: str, topic: str, closest_items: list[dict[str, Any]], uncertain_points: list[str]) -> str:
-        """生成不复制现有技术内容的写作风格指南 markdown。"""
-        source_note = "、".join(str(item.get("publication_number") or item.get("title") or "未命名来源") for item in closest_items[:3])
-        if not source_note:
-            source_note = "检索结果不足，仅给出通用安全写作约束"
-        lines = [
-            f"# {doc_type}写作风格指南",
-            "",
-            f"## 适用主题",
-            topic or "未明确",
-            "",
-            "## 参考来源",
-            f"- {source_note}",
-            "",
-            "## 写作原则",
-            "- 使用规范专利术语，保持技术特征、功能和效果对应一致。",
-            "- 仅学习章节组织、表述粒度和术语风格，严禁复制检索文献原文。",
-            "- 无来源的专利号、法条、技术效果或实验结论不得臆造。",
-        ]
-        if doc_type == "摘要":
-            lines.extend(["- 控制篇幅，概括技术问题、核心方案和有益效果。"])
-        elif doc_type == "权利要求书":
-            lines.extend(["- 独立权利要求突出必要技术特征，从属权利要求按层级限定改进点。"])
-        else:
-            lines.extend(["- 按技术领域、背景技术、发明内容、附图说明、具体实施方式组织内容。"])
-        lines.extend(["", "## 不确定事项"])
-        lines.extend([f"- {item}" for item in uncertain_points] or ["- 未发现额外不确定事项。"])
-        return "\n".join(lines)
 
     def _artifact_exists(self, artifact_key: str) -> bool:
         """检查 artifact 是否已经存在。"""
@@ -428,110 +340,3 @@ class DraftingPatentSearchNode(Node):
     def _query_from_parsed(self, parsed: dict[str, Any]) -> str:
         """从 parsed info 中提取检索 query。"""
         return str(parsed.get("technical_topic") or parsed.get("title") or "").strip()
-
-
-class DraftingPriorArtAnalysisNode(Node):
-    """文书生成现有技术分析节点。
-
-    Args:
-        settings: 应用配置,未传入时读取全局配置。
-        workspace: 可注入的草稿 artifact 工作区工具。
-
-    Returns:
-        写入结构化现有技术分析 artifact 的顶层 workflow 节点。
-    """
-
-    name = "drafting_prior_art_analysis"
-
-    def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None) -> None:
-        """初始化现有技术分析节点。"""
-        super().__init__(name=self.name)
-        self.settings = settings or get_settings()
-        self.workspace = workspace or DraftWorkspaceTool(self.settings)
-
-    def run(self, state: WorkflowState) -> NodeResult:
-        """读取检索结果并写入结构化现有技术分析 artifact。
-
-        Args:
-            state: 当前 workflow 状态,需包含 parsed info 与 patent search artifact key。
-
-        Returns:
-            成功时返回现有技术分析 artifact key;检索不足时显式标注不确定点。
-        """
-        parsed_key = str(state.drafting_context.get("parsed_info_key") or DRAFTING_PARSED_INFO_ARTIFACT_KEY)
-        search_key = str(state.drafting_context.get("patent_search_key") or DRAFTING_PATENT_SEARCH_ARTIFACT_KEY)
-        parsed = self._read_json(parsed_key)
-        search_results = self._read_json(search_key)
-        if parsed is None:
-            return NodeResult.failed(errors=["parsed_info_missing"])
-        if search_results is None:
-            return NodeResult.failed(errors=["patent_search_results_missing"])
-        payload = self._build_analysis(parsed, search_results)
-        written = self.workspace.run(
-            {
-                "action": "write",
-                "artifact_key": DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY,
-                "content": json.dumps(payload, ensure_ascii=False),
-            }
-        )
-        if written.error:
-            return NodeResult.failed(errors=[written.error])
-        state.drafting_context["prior_art_analysis_key"] = DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY
-        return NodeResult.success(
-            output={"prior_art_analysis_key": DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY},
-            trace_events=[
-                {
-                    "event": "drafting_prior_art_analysis_completed",
-                    "data": {"artifact_key": DRAFTING_PRIOR_ART_ANALYSIS_ARTIFACT_KEY, "confidence": payload["confidence"]},
-                }
-            ],
-        )
-
-    def _read_json(self, artifact_key: str) -> dict[str, Any] | None:
-        """读取 JSON artifact,失败时返回 None。"""
-        observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
-        if observation.error or not getattr(observation, "evidence", None):
-            return None
-        return json.loads(str(observation.evidence[0].get("content") or "{}"))
-
-    def _build_analysis(self, parsed: dict[str, Any], search_results: dict[str, Any]) -> dict[str, Any]:
-        """根据检索结果构造不臆造来源的现有技术分析。"""
-        results = list(search_results.get("results") or [])
-        sufficient = bool(search_results.get("sufficient")) and bool(results)
-        if not sufficient:
-            reason = str(search_results.get("reason") or "结果不足")
-            return {
-                "technical_topic": str(parsed.get("technical_topic") or ""),
-                "closest_prior_art": [],
-                "distinguishing_features": [],
-                "technical_effects": [],
-                "novelty_risks": [],
-                "inventiveness_risks": [],
-                "recommended_claim_focus": [],
-                "uncertain_points": [f"专利检索未获得足够结果: {reason}"],
-                "confidence": "low",
-            }
-        closest = [self._prior_art_item(item) for item in results]
-        return {
-            "technical_topic": str(parsed.get("technical_topic") or ""),
-            "closest_prior_art": closest,
-            "distinguishing_features": ["需结合交底书技术特征与检索结果逐项比对确认区别特征"],
-            "technical_effects": ["需基于区别特征补充对应技术效果"],
-            "novelty_risks": ["检索结果中存在相近主题,需重点核对独立权利要求的新颖性"],
-            "inventiveness_risks": ["需避免将现有技术已有特征作为创造性贡献"],
-            "recommended_claim_focus": ["围绕检索结果未直接公开的结构关系、控制步骤或协同效果撰写"],
-            "uncertain_points": [],
-            "confidence": "medium",
-        }
-
-    def _prior_art_item(self, item: dict[str, Any]) -> dict[str, Any]:
-        """提取检索结果中已有的现有技术字段。"""
-        return {
-            "title": str(item.get("title") or ""),
-            "publication_number": str(item.get("publication_number") or ""),
-            "abstract": str(item.get("abstract") or ""),
-            "url": str(item.get("url") or ""),
-            "country": str(item.get("country") or ""),
-            "status": str(item.get("status") or ""),
-            "provenance": item.get("provenance") or {},
-        }

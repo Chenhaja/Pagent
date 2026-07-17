@@ -92,7 +92,6 @@ class DraftingLeaderGatePriorArtNode(DraftingLeaderGateBase):
             name=self.name,
             allowed_targets={
                 "drafting_patent_search",
-                "drafting_prior_art_analysis",
                 "drafting_leader_gate_prior_art",
                 "drafting_drawing_analysis",
             },

@@ -116,7 +116,7 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
         """初始化大纲生成节点。"""
         super().__init__(name=self.name, settings=settings, workspace=workspace)
         self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
-        outline_reads = ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json"]
+        outline_reads = ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.md"]
         self.outline_runner = outline_runner or LangChainAgentRunner(
             node_name=self.name,
             stage="drafting.outline",
@@ -142,7 +142,8 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
             成功时返回 outline artifact key。
         """
         parsed = self._read_json(str(state.drafting_context.get("parsed_info_key") or "01_input/parsed_info.json"))
-        prior_art = self._read_json(str(state.drafting_context.get("prior_art_analysis_key") or "02_research/prior_art_analysis.json"))
+        prior_art_key = str(state.drafting_context.get("prior_art_analysis_key") or "02_research/prior_art_analysis.md")
+        prior_art = self._read_text(prior_art_key)
         if parsed is None:
             return NodeResult.failed(errors=["parsed_info_missing"])
         if prior_art is None:
@@ -166,9 +167,8 @@ class DraftingGenerateOutlineNode(DraftingContentNodeBase):
     def _build_outline_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
         """生成大纲 fallback 正文。"""
         parsed = self._read_json("01_input/parsed_info.json") or {}
-        prior_art = self._read_json("02_research/prior_art_analysis.json") or {}
         topic = str(parsed.get("technical_topic") or "技术方案")
-        return self._outline_content(topic, list(prior_art.get("distinguishing_features") or []), [])
+        return self._outline_content(topic, [], [])
 
 
 class _SingleArtifactWriterNode(DraftingContentNodeBase):
@@ -211,7 +211,7 @@ class DraftingClaimsWriterNode(_SingleArtifactWriterNode):
 
     def __init__(self, settings: Settings | None = None, workspace: DraftWorkspaceTool | None = None, claims_runner: Any | None = None, workflow_trace_emitter: WorkflowTraceEmitter | None = None) -> None:
         """初始化权利要求书生成节点。"""
-        super().__init__(self.name, "drafting.claims", "claims_writer_agent", "CLAIMS_WRITER_PROMPT", CLAIMS_WRITER_PROMPT, ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json", DRAFTING_OUTLINE_ARTIFACT_KEY], DRAFTING_CLAIMS_ARTIFACT_KEY, self._build_fallback, "claims_key", settings, workspace, claims_runner, workflow_trace_emitter)
+        super().__init__(self.name, "drafting.claims", "claims_writer_agent", "CLAIMS_WRITER_PROMPT", CLAIMS_WRITER_PROMPT, ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.md", DRAFTING_OUTLINE_ARTIFACT_KEY], DRAFTING_CLAIMS_ARTIFACT_KEY, self._build_fallback, "claims_key", settings, workspace, claims_runner, workflow_trace_emitter)
 
     def _build_fallback(self, reason: str, workspace: DraftWorkspaceTool) -> str:
         """生成权利要求书 fallback 正文。"""
@@ -228,7 +228,7 @@ class DraftingDescriptionWriterNode(DraftingContentNodeBase):
         """初始化说明书生成节点。"""
         super().__init__(name=self.name, settings=settings, workspace=workspace)
         self.workflow_trace_emitter = workflow_trace_emitter or MemoryWorkflowTraceEmitter()
-        common_reads = ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.json", DRAFTING_OUTLINE_ARTIFACT_KEY, DRAFTING_CLAIMS_ARTIFACT_KEY]
+        common_reads = ["01_input/parsed_info.json", "02_research/patent_search_results.json", "02_research/prior_art_analysis.md", DRAFTING_OUTLINE_ARTIFACT_KEY, DRAFTING_CLAIMS_ARTIFACT_KEY]
         self.part1_runner = part1_runner or LangChainAgentRunner(
             node_name=self.name,
             stage="drafting.description.part1",
@@ -450,7 +450,7 @@ class DraftingMergeDocumentNode(DraftingContentNodeBase):
 
 DRAFTING_FINALIZE_FIELDS = {
     "01_input/parsed_info.json": "input_points_md",
-    "02_research/prior_art_analysis.json": "prior_art_md",
+    "02_research/prior_art_analysis.md": "prior_art_md",
     DRAFTING_OUTLINE_ARTIFACT_KEY: "outline_md",
     DRAFTING_ABSTRACT_ARTIFACT_KEY: "abstract_md",
     DRAFTING_CLAIMS_ARTIFACT_KEY: "claims_md",

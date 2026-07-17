@@ -47,8 +47,8 @@ def _workspace_with_prior_art(tmp_path) -> DraftWorkspaceTool:
     workspace.run(
         {
             "action": "write",
-            "artifact_key": "02_research/prior_art_analysis.json",
-            "content": json.dumps({"confidence": "medium", "uncertain_points": []}, ensure_ascii=False),
+            "artifact_key": "02_research/prior_art_analysis.md",
+            "content": "# 现有技术分析\n\n置信度：medium",
         }
     )
     return workspace
@@ -106,7 +106,7 @@ def test_prior_art_gate_continue_goes_to_drawing_analysis(tmp_path) -> None:
     workspace = _workspace_with_prior_art(tmp_path)
     registry = FakeDecisionRegistry(_decision("continue", "drafting_drawing_analysis"))
     node = DraftingLeaderGatePriorArtNode(workspace=workspace, tool_registry=registry)
-    state = WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.json"})
+    state = WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.md"})
 
     result = node.run(state)
 
@@ -114,7 +114,7 @@ def test_prior_art_gate_continue_goes_to_drawing_analysis(tmp_path) -> None:
     assert result.next_node == "drafting_drawing_analysis"
     assert state.drafting_context["leader_gate_prior_art"]["decision"] == "continue"
     assert registry.calls[0]["name"] == "drafting_leader_gate_prior_art"
-    assert registry.calls[0]["input"] == {"prior_art_analysis_key": "02_research/prior_art_analysis.json"}
+    assert registry.calls[0]["input"] == {"prior_art_analysis_key": "02_research/prior_art_analysis.md"}
 
 
 def test_prior_art_gate_retry_goes_to_patent_search(tmp_path) -> None:
@@ -124,23 +124,10 @@ def test_prior_art_gate_retry_goes_to_patent_search(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_patent_search")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.md"}))
 
     assert result.status == "success"
     assert result.next_node == "drafting_patent_search"
-
-
-def test_prior_art_gate_revise_goes_to_prior_art_analysis(tmp_path) -> None:
-    """prior art gate revise 时应回到现有技术分析节点。"""
-    node = DraftingLeaderGatePriorArtNode(
-        workspace=_workspace_with_prior_art(tmp_path),
-        tool_registry=FakeDecisionRegistry(_decision("revise", "drafting_prior_art_analysis")),
-    )
-
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.json"}))
-
-    assert result.status == "success"
-    assert result.next_node == "drafting_prior_art_analysis"
 
 
 def test_prior_art_gate_escalate_requires_user_input(tmp_path) -> None:
@@ -150,7 +137,7 @@ def test_prior_art_gate_escalate_requires_user_input(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("escalate", "drafting_leader_gate_prior_art")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.md"}))
 
     assert result.status == "requires_user_input"
     assert result.errors == ["drafting_gate_escalated"]
@@ -164,7 +151,7 @@ def test_prior_art_gate_rejects_invalid_decision(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("skip", "drafting_drawing_analysis")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.md"}))
 
     assert result.status == "failed"
     assert result.errors == ["invalid_gate_decision"]
@@ -177,7 +164,7 @@ def test_prior_art_gate_rejects_invalid_target_node(tmp_path) -> None:
         tool_registry=FakeDecisionRegistry(_decision("retry", "drafting_merge_document")),
     )
 
-    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.json"}))
+    result = node.run(WorkflowState(raw_input="请生成专利文书", drafting_context={"prior_art_analysis_key": "02_research/prior_art_analysis.md"}))
 
     assert result.status == "failed"
     assert result.errors == ["illegal_gate_target:drafting_merge_document"]
@@ -189,14 +176,13 @@ def test_prior_art_gate_retry_route_obeys_loop_limit() -> None:
     orchestrator = Orchestrator(
         nodes={
             "drafting_patent_search": CountingNode("drafting_patent_search"),
-            "drafting_prior_art_analysis": CountingNode("drafting_prior_art_analysis"),
             "drafting_leader_gate_prior_art": AlwaysRetryGate("drafting_leader_gate_prior_art"),
         }
     )
 
     result = orchestrator.run(
         state,
-        ["drafting_patent_search", "drafting_prior_art_analysis", "drafting_leader_gate_prior_art"],
+        ["drafting_patent_search", "drafting_leader_gate_prior_art"],
         max_loop_count=1,
     )
 

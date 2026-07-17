@@ -103,7 +103,8 @@ class DraftingWritingStyleGuideNode(Node):
             成功时返回 writing style guide artifact key。
         """
         parsed = self._read_json(str(state.drafting_context.get("parsed_info_key") or "01_input/parsed_info.json"))
-        prior_art = self._read_json(str(state.drafting_context.get("prior_art_analysis_key") or "02_research/prior_art_analysis.json"))
+        prior_art_key = str(state.drafting_context.get("prior_art_analysis_key") or "02_research/prior_art_analysis.md")
+        prior_art = self._read_text(prior_art_key)
         drawing = self._read_json(str(state.drafting_context.get("drawing_analysis_key") or DRAFTING_DRAWING_ANALYSIS_ARTIFACT_KEY))
         if parsed is None:
             return NodeResult.failed(errors=["parsed_info_missing"])
@@ -111,7 +112,7 @@ class DraftingWritingStyleGuideNode(Node):
             return NodeResult.failed(errors=["prior_art_analysis_missing"])
         if drawing is None:
             return NodeResult.failed(errors=["drawing_analysis_missing"])
-        payload = self._build_guide(parsed, prior_art, drawing)
+        payload = self._build_guide(parsed, prior_art_key, drawing)
         written = self.workspace.run(
             {"action": "write", "artifact_key": DRAFTING_WRITING_STYLE_GUIDE_ARTIFACT_KEY, "content": json.dumps(payload, ensure_ascii=False)}
         )
@@ -135,10 +136,17 @@ class DraftingWritingStyleGuideNode(Node):
             return None
         return json.loads(str(observation.evidence[0].get("content") or "{}"))
 
-    def _build_guide(self, parsed: dict[str, Any], prior_art: dict[str, Any], drawing: dict[str, Any]) -> dict[str, Any]:
+    def _read_text(self, artifact_key: str) -> str | None:
+        """读取文本 artifact,失败时返回 None。"""
+        observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
+        if observation.error or not getattr(observation, "evidence", None):
+            return None
+        return str(observation.evidence[0].get("content") or "")
+
+    def _build_guide(self, parsed: dict[str, Any], prior_art: str, drawing: dict[str, Any]) -> dict[str, Any]:
         """构造结构化写作指南,用户注意事项仅作为数据保留。"""
         figures = list(drawing.get("figures") or [])
-        uncertain_points = list(prior_art.get("uncertain_points") or []) + list(drawing.get("uncertain_points") or [])
+        uncertain_points = list(drawing.get("uncertain_points") or [])
         return {
             "global_rules": [
                 "仅依据输入 artifact 写作,不得臆造法条、专利号或检索来源",
@@ -149,11 +157,11 @@ class DraftingWritingStyleGuideNode(Node):
                 "preferred_terms": self._as_list(parsed.get("preferred_terms")),
             },
             "claim_style": {
-                "focus_features": list(prior_art.get("distinguishing_features") or []),
-                "avoid_features": ["避免把 closest prior art 已公开内容写成创造性贡献"],
+                "prior_art_analysis_key": prior_art,
+                "avoid_features": ["避免把现有技术分析中已公开内容写成创造性贡献"],
             },
             "description_style": {
-                "technical_effects": list(prior_art.get("technical_effects") or []),
+                "prior_art_analysis_key": prior_art,
                 "figure_reference_policy": "仅引用 drawing_analysis 中明确存在的图号",
             },
             "drawing_rules": {

@@ -21,7 +21,7 @@ def _workspace_with_research(tmp_path) -> DraftWorkspaceTool:
     workspace = DraftWorkspaceTool(Settings(draft_workspace_dir=str(tmp_path), allow_network=False, llm_base_url=None, llm_model="", llm_api_key=None))
     workspace.run({"action": "write", "artifact_key": "01_input/parsed_info.json", "content": '{"technical_topic":"夹爪控制"}'})
     workspace.run({"action": "write", "artifact_key": "02_research/patent_search_results.json", "content": json.dumps({"results": [], "sufficient": False}, ensure_ascii=False)})
-    workspace.run({"action": "write", "artifact_key": "02_research/prior_art_analysis.json", "content": json.dumps({"distinguishing_features": ["柔性夹持"], "confidence": "low"}, ensure_ascii=False)})
+    workspace.run({"action": "write", "artifact_key": "02_research/prior_art_analysis.md", "content": "# 现有技术分析\n\n- 柔性夹持"})
     return workspace
 
 

@@ -23,6 +23,13 @@ def _patch_markdown_merger_runner(monkeypatch) -> None:
     """把 markdown_merger_agent 替换为写入终稿和评审报告的测试 runner。"""
     def fake_run(self, tool_input: dict | None = None) -> ToolObservation:
         """仅拦截 merge runner,其他 runner 沿用原离线行为。"""
+        if self.agent_name == "patent_searcher_agent":
+            self.workspace.run({"action": "write", "artifact_key": "02_research/patent_search_results.json", "content": json.dumps({"queries": [], "results": [], "sufficient": False, "skipped": True}, ensure_ascii=False)})
+            self.workspace.run({"action": "write", "artifact_key": "02_research/prior_art_analysis.md", "content": "# 现有技术分析\n\n检索结果不足。"})
+            self.workspace.run({"action": "write", "artifact_key": "02_research/abstract_writing_style.md", "content": "# 摘要写作风格指南"})
+            self.workspace.run({"action": "write", "artifact_key": "02_research/claims_writing_style.md", "content": "# 权利要求书写作风格指南"})
+            self.workspace.run({"action": "write", "artifact_key": "02_research/description_writing_style.md", "content": "# 说明书写作风格指南"})
+            return ToolObservation(tool_name=self.agent_name, evidence=[{"artifact_key": key, "done": True} for key in self.output_artifact_keys], sufficient=True)
         if self.agent_name != "markdown_merger_agent":
             return _ORIGINAL_RUNNER_RUN(self, tool_input)
         complete = self.fallback_builder("test", self.workspace)
@@ -119,8 +126,8 @@ def _content_workspace(tmp_path) -> DraftWorkspaceTool:
     workspace.run(
         {
             "action": "write",
-            "artifact_key": "02_research/prior_art_analysis.json",
-            "content": json.dumps({"distinguishing_features": ["柔顺夹持"], "technical_effects": ["降低损伤"], "confidence": "medium"}, ensure_ascii=False),
+            "artifact_key": "02_research/prior_art_analysis.md",
+            "content": "# 现有技术分析\n\n## 区别特征\n\n- 柔顺夹持\n\n## 技术效果\n\n- 降低损伤",
         }
     )
     workspace.run(
@@ -148,7 +155,7 @@ def test_drafting_generate_outline_writes_outline_artifact(tmp_path) -> None:
         raw_input="请生成专利文书",
         drafting_context={
             "parsed_info_key": "01_input/parsed_info.json",
-            "prior_art_analysis_key": "02_research/prior_art_analysis.json",
+            "prior_art_analysis_key": "02_research/prior_art_analysis.md",
             "drawing_analysis_key": "02_research/drawing_analysis.json",
             "writing_style_guide_key": "02_research/writing_style_guide.json",
         },
@@ -248,7 +255,7 @@ def test_drafting_finalize_backfills_compatible_fields(tmp_path) -> None:
     workspace = _content_workspace(tmp_path)
     artifacts = {
         "01_input/parsed_info.json": "# 输入要点\n\n夹爪控制",
-        "02_research/prior_art_analysis.json": "# 现有技术\n\n检索分析",
+        "02_research/prior_art_analysis.md": "# 现有技术\n\n检索分析",
         "03_outline/patent_outline.md": "# 专利大纲\n\n大纲",
         "04_content/abstract.md": "# 摘要\n\n摘要",
         "04_content/claims.md": "# 权利要求书\n\n权利要求",

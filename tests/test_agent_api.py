@@ -5,9 +5,12 @@ from fastapi.testclient import TestClient
 from app.api import routes
 from app.core.config import Settings
 from app.main import app
+from app.orchestrator.react_loop import ToolObservation
 from app.services.case_service import CaseService
+from app.tools.subagents.agent_runner import LangChainAgentRunner
 
 DISCLAIMER = "辅助初稿，不等同于专利代理师法律意见。"
+_ORIGINAL_RUNNER_RUN = LangChainAgentRunner.run
 
 
 def _create_case_id(tmp_path, monkeypatch) -> str:
@@ -16,6 +19,27 @@ def _create_case_id(tmp_path, monkeypatch) -> str:
     case_id = CaseService(settings=settings).create_case()["case_id"]
     monkeypatch.setattr("app.services.agent_dispatch_service.get_settings", lambda: settings)
     return case_id
+
+
+def _patch_patent_searcher_runner(monkeypatch) -> None:
+    """替换 patent_searcher 测试 runner,显式写入必需 markdown 产物。"""
+    def fake_run(self, tool_input: dict | None = None) -> ToolObservation:
+        """仅拦截 patent_searcher,其他 runner 沿用原行为。"""
+        if self.agent_name == "markdown_merger_agent":
+            complete = self.fallback_builder("test", self.workspace)
+            self.workspace.run({"action": "write", "artifact_key": "05_final/complete_patent.md", "content": complete})
+            self.workspace.run({"action": "write", "artifact_key": "05_final/review_report.md", "content": "# 终稿评审报告\n\nLLM 评审结论"})
+            return ToolObservation(tool_name=self.agent_name, evidence=[{"artifact_key": "05_final/complete_patent.md", "done": True}], sufficient=True)
+        if self.agent_name != "patent_searcher_agent":
+            return _ORIGINAL_RUNNER_RUN(self, tool_input)
+        self.workspace.run({"action": "write", "artifact_key": "02_research/patent_search_results.json", "content": '{"queries":[],"results":[],"sufficient":false,"skipped":true}'})
+        self.workspace.run({"action": "write", "artifact_key": "02_research/prior_art_analysis.md", "content": "# 现有技术分析\n\n检索结果不足。"})
+        self.workspace.run({"action": "write", "artifact_key": "02_research/abstract_writing_style.md", "content": "# 摘要写作风格指南"})
+        self.workspace.run({"action": "write", "artifact_key": "02_research/claims_writing_style.md", "content": "# 权利要求书写作风格指南"})
+        self.workspace.run({"action": "write", "artifact_key": "02_research/description_writing_style.md", "content": "# 说明书写作风格指南"})
+        return ToolObservation(tool_name=self.agent_name, evidence=[{"artifact_key": key, "done": True} for key in self.output_artifact_keys], sufficient=True)
+
+    monkeypatch.setattr(LangChainAgentRunner, "run", fake_run)
 
 
 def test_agent_cases_api_creates_case(monkeypatch, tmp_path) -> None:
@@ -52,6 +76,7 @@ def test_agent_api_routes_patent_drafting(monkeypatch, tmp_path) -> None:
     """统一 Agent API 应返回 drafting Markdown 产物。"""
     client = TestClient(app)
     case_id = _create_case_id(tmp_path, monkeypatch)
+    _patch_patent_searcher_runner(monkeypatch)
 
     response = client.post("/agent", json={"raw_input": "请生成专利文书", "case_id": case_id})
 

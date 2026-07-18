@@ -88,7 +88,7 @@ class LangChainAgentRunner:
                 base_url=self.settings.llm_base_url,
                 api_key=self.settings.llm_api_key,
                 temperature=self.settings.llm_temperature,
-                timeout=self.settings.llm_timeout,
+                timeout=300,
                 max_retries=self.settings.llm_retry_count,
             )
             agent = create_agent(
@@ -98,10 +98,13 @@ class LangChainAgentRunner:
                 middleware=self._middlewares(),
             )
             agent.invoke({"messages": [{"role": "user", "content": self._user_prompt(tool_input or {})}]})
-            if not self._output_artifact_exists():
+            missing_artifacts = self._missing_output_artifacts()
+            if missing_artifacts:
+                self._log_runner_warning("missing_agent_output", "Agent 输出 artifact 缺失", missing_artifacts=missing_artifacts)
                 return self._write_fallback("missing_agent_output")
             return self._short_result()
-        except Exception:
+        except Exception as exc:
+            self._log_runner_exception("agent_unavailable", "Agent 执行异常,写入 fallback", exc)
             return self._write_fallback("agent_unavailable")
 
     def _allowed_langchain_tools(self) -> list[Any]:
@@ -219,21 +222,59 @@ class LangChainAgentRunner:
             "- 不要尝试读取或写入策略范围之外的 artifact。"
         )
 
-    def _output_artifact_exists(self) -> bool:
-        """确认全部必需输出 artifact 已写入。"""
+    def _missing_output_artifacts(self) -> list[str]:
+        """返回尚未写入的必需输出 artifact。"""
+        missing = []
         for artifact_key in self.output_artifact_keys:
             observation = self.workspace.run({"action": "read", "artifact_key": artifact_key})
             if observation.error is not None or not observation.evidence:
-                return False
-        return True
+                missing.append(artifact_key)
+        return missing
 
     def _write_fallback(self, reason: str) -> ToolObservation:
         """写入 fallback artifact,确保离线环境可运行。"""
+        self._log_runner_warning(reason, "Agent runner 写入 fallback", fallback_artifact_key=self.output_artifact_keys[0])
         content = self.fallback_builder(reason, self.workspace)
         written = self.workspace.run({"action": "write", "artifact_key": self.output_artifact_keys[0], "content": content})
         if written.error:
+            self._log_runner_warning(reason, "Agent runner fallback 写入失败", fallback_artifact_key=self.output_artifact_keys[0], write_error=written.error)
             return ToolObservation(tool_name=self.agent_name, error=written.error)
         return self._short_result()
+
+    def _log_runner_warning(self, reason: str, message: str, **fields: Any) -> None:
+        """记录 runner 可恢复异常诊断日志。"""
+        log_event(
+            logger,
+            logging.WARNING,
+            "agent_runner_fallback",
+            message,
+            reason=reason,
+            node_name=self.node_name,
+            stage=self.stage,
+            agent_name=self.agent_name,
+            prompt_name=self.prompt_name,
+            output_artifact_keys=self.output_artifact_keys,
+            **fields,
+        )
+
+    def _log_runner_exception(self, reason: str, message: str, exc: Exception) -> None:
+        """记录 runner 异常诊断日志并保留堆栈。"""
+        logger.exception(
+            message,
+            extra={
+                "event": "agent_runner_failed",
+                "fields": {
+                    "reason": reason,
+                    "error_type": exc.__class__.__name__,
+                    "error_message": str(exc),
+                    "node_name": self.node_name,
+                    "stage": self.stage,
+                    "agent_name": self.agent_name,
+                    "prompt_name": self.prompt_name,
+                    "output_artifact_keys": self.output_artifact_keys,
+                },
+            },
+        )
 
     def _short_result(self) -> ToolObservation:
         """构造不含正文的短 observation。"""

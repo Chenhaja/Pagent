@@ -268,6 +268,86 @@ def test_agent_runner_requires_multiple_outputs(monkeypatch, tmp_path) -> None:
     assert "output/report.md" in user_content
 
 
+def test_agent_runner_logs_missing_outputs_before_fallback(monkeypatch, tmp_path, caplog) -> None:
+    """必需 artifact 缺失时 runner 应记录缺失列表。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    workspace = DraftWorkspaceTool(settings)
+    runner = LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["write_file"],
+        file_policy=FileToolPolicy(writeRoots=["output/"]),
+        output_artifact_keys=["output/result.md", "output/report.md"],
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=workspace,
+    )
+
+    class FakeAgent:
+        """只写入部分 artifact 的测试 agent。"""
+
+        def invoke(self, payload: dict) -> dict:
+            """模拟遗漏第二个必需产物。"""
+            payload["messages"]
+            runner._allowed_langchain_tools()[0].invoke({"path": "output/result.md", "content": "ok"})
+            return {}
+
+    monkeypatch.setattr(runner, "_import_langchain", lambda: (lambda **kwargs: FakeAgent(), lambda **kwargs: object()))
+    monkeypatch.setattr(runner, "_todo_middleware", lambda: None)
+
+    with caplog.at_level("WARNING"):
+        result = runner.run({"task": "写入结果"})
+
+    assert result.error is None
+    record = next(item for item in caplog.records if item.event == "agent_runner_fallback" and item.fields["reason"] == "missing_agent_output")
+    assert record.fields["missing_artifacts"] == ["output/report.md"]
+    assert record.fields["node_name"] == "node"
+    assert workspace.run({"action": "read", "artifact_key": "output/result.md"}).evidence[0]["content"] == "fallback:missing_agent_output"
+
+
+def test_agent_runner_logs_exception_before_fallback(monkeypatch, tmp_path, caplog) -> None:
+    """agent invoke 异常时 runner 应记录错误类型和原因。"""
+    settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")
+    workspace = DraftWorkspaceTool(settings)
+    runner = LangChainAgentRunner(
+        node_name="node",
+        stage="stage",
+        agent_name="agent",
+        prompt_name="PROMPT",
+        system_prompt="系统 prompt",
+        allowed_tools=["write_file"],
+        file_policy=FileToolPolicy(writeRoots=["output/"]),
+        output_artifact_keys=["output/result.md"],
+        fallback_builder=_fallback_content,
+        settings=settings,
+        workspace=workspace,
+    )
+
+    class FakeAgent:
+        """会抛异常的测试 agent。"""
+
+        def invoke(self, payload: dict) -> dict:
+            """模拟 create_agent 运行时失败。"""
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(runner, "_import_langchain", lambda: (lambda **kwargs: FakeAgent(), lambda **kwargs: object()))
+    monkeypatch.setattr(runner, "_todo_middleware", lambda: None)
+
+    with caplog.at_level("ERROR"):
+        result = runner.run({"task": "写入结果"})
+
+    assert result.error is None
+    record = next(item for item in caplog.records if item.event == "agent_runner_failed")
+    assert record.fields["reason"] == "agent_unavailable"
+    assert record.fields["error_type"] == "RuntimeError"
+    assert record.fields["error_message"] == "boom"
+    assert record.exc_info is not None
+    assert workspace.run({"action": "read", "artifact_key": "output/result.md"}).evidence[0]["content"] == "fallback:agent_unavailable"
+
+
 def test_agent_runner_passes_allowed_tools_and_middleware_to_create_agent(monkeypatch, tmp_path) -> None:
     """真实 agent 路径应传入白名单工具、trace 和 todo middleware。"""
     settings = Settings(draft_workspace_dir=str(tmp_path), allow_network=True, llm_base_url="https://example.test/v1", llm_model="fake", llm_api_key="fake")

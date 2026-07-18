@@ -11,3 +11,6 @@ pagent_memory.db
 .pagent_attachments/
 .pagent_drafts/
 .draft_workspace/
+SPEC.md
+tasks/
+PRD/
